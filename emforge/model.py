@@ -4,6 +4,7 @@
 JSON 鍵一律等於欄位名（跨邊界不改名）。陣列用 numpy：pattern `bool[H,W]`、response `float32[n_labels, n_points]`。
 """
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,9 +22,20 @@ ARM_BLIND = "blind"
 
 
 # ── 小工具 ──────────────────────────────────────────────────────────────────
+def _json_default(o):
+    """canonical_json 的後備轉換：Mapping（含 MappingProxyType 凍結 targets）→ dict、numpy → python。"""
+    if isinstance(o, Mapping):
+        return dict(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, np.generic):
+        return o.item()
+    raise TypeError(f"canonical_json 不會序列化 {type(o).__name__}")
+
+
 def canonical_json(obj) -> str:
     """鍵序無關、緊湊、不轉義中文——hash 用。"""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=_json_default)
 
 
 def pack_bits(bits) -> np.ndarray:
