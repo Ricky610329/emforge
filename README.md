@@ -19,12 +19,21 @@
 ```
 conda activate ant
 pip install -e .[test]
-python -m pytest
+python -m pytest                       # 274 條；設 EMFORGE_ANTENNA_REPO=<Antenna clone> 會多跑 adapter parity
+emforge init --root <root> --profile dual_p01_db075
+#   <root>/registry.py 寫：from emforge.adapters.antenna.profiles import register_all; register_all()
+emforge run --root <root> --profile dual_p01_db075      # 開發機：runtime 實例
+emforge worker --root <root>                            # 正式機：見 docs/deploy.md
+emforge report --root <root> --profile dual_p01_db075
 ```
+
+假儀器試跑（不需 HFSS）：registry.py 改成 `from emforge.testing import register_fakes; register_fakes()`，profile 用 `fake_f1`。
 
 ## 文件
 
-- `docs/naming.md` — 命名規範（識別字、磁碟佈局、測試、commit）
 - `docs/architecture.md` — 為什麼這樣設計（四框主圖、一個候選的一生、D1–D10）
-- `docs/implementation.md` — 模組地圖、tick 演算法、CLI／yaml／事件參考（實作完成後依程式碼撰寫）
+- `docs/implementation.md` — 現在怎麼做的：模組地圖、磁碟格式、tick／worker 演算法、策略作者指南、CLI／事件／exit code、事故→防線→測試、已知失效模式、與架構的偏差
+- `docs/deploy.md` — 三台正式機安裝與逐台切換（含回滾）
+- `docs/naming.md` — 命名規範（識別字、磁碟佈局、測試、commit）
+- `docs/incidents.md` — 事故史（回歸測試的 `I-N`）
 - `CLAUDE.md` — 工作規範（TDD、可維護性上限、邊界）

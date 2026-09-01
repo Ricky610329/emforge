@@ -477,3 +477,10 @@ def propose(ctx):
 - **`arm="blind"` 是自我宣告，契約無法驗證。** 策略可以說謊。設計只保證說謊的地方會留紀錄（`C-12` 修正版：「繞過會留下紀錄，而非不可能」）。
 - **所有具體數字都來自單一問題域**（毫米波像素化天線／濾波器）。配額比例、門檻、樣本數、噪音地板——跨域全部要重調。本文件刻意不寫任何數值當預設。
 - **「重訓的作用是讓模型跟上分布、不是讓它更準」`❓`** 是從 C-07（域外崩潰）與 C-08（相關性改善不轉化）推出的解釋，不是實驗結果。它影響 SM 策略內部的重訓設計（近期資料加權 vs 全量），但不影響平台契約。
+
+
+---
+
+## 與實作的偏差（2026-09-01 實作完成後回寫）
+
+實作完整清單見 `implementation.md` §13：Record 檔用 `.npz`（核心零 torch）、`Context` 多 `params`、`Record` 多 `extra`、批結果改逐筆檔 `batches/<store>/results/<id>.json`、`profile_hash` 納入 measure 名、Simulator 協定收成 `open/simulate/kill/close`、state/status 分檔、resume 走 `control.json`、保留字不含 `blind`、single geom_ver 單邊、`deliver` 未實作。
