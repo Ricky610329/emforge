@@ -4,6 +4,8 @@
 這是整個 runtime 唯一把 `kind=repeat` 交給 dispatch 的地方（D7）。
 門檻＝max(榜首分數, 待審中最好的保守值, 公證中的候選)：沒破就不重測（冷啟動會頻繁公證——數值是佔位，待實測）。
 """
+from datetime import datetime
+
 from .. import fs, paths
 from ..model import KIND_REPEAT, KIND_SAMPLE, STATUS_DONE, Proposal
 from .dispatch import dispatch
@@ -57,6 +59,23 @@ def _open_candidates(rt, nz: dict, cfg, new_records: list) -> None:
         rt.event("record_candidate", id=rec.id, score=rec.score, prev_best=threshold)
         rt.event("notarize_dispatched", id=rec.id, stores=stores)
         threshold = rec.score
+
+
+def smoke_dispatch(rt, rec_id: str, *, n: int = 1, machine: str | None = None, by: str = "cli") -> list:
+    """`emforge smoke`：對一個已量 id 派 n 個重測批（kind=repeat、strategy=cli:smoke、可釘機）。
+    切換新機／換版本後驗「同一儀器」用（同機噪音地板 ≈ 0）。結果照常被 runtime collect 入庫，不進候選、不比較。"""
+    ms = rt.db.measurements(rt.profile_name, rec_id)
+    if not ms:
+        raise ValueError(f"{rec_id} 不在 db/{rt.profile_name}/")
+    rec = ms[0]
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    stores = []
+    for k in range(1, n + 1):
+        store = paths.smoke_store_name(rt.profile_name, rec_id, k, stamp)
+        stores.append(dispatch(rt, "cli:smoke", [Proposal(pattern=rec.bits, parent=rec_id, arm=rec.arm)],
+                               tick=rt.state["tick"], seed=0, prio=rt.config.runtime.notarize_prio, kind=KIND_REPEAT,
+                               store=store, origin="cli:smoke", machine=machine))
+    return stores
 
 
 def _threshold(rt, nz: dict):

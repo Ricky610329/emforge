@@ -42,6 +42,7 @@ def test_layout_snapshot_for_fixed_root():
         "events_jsonl": "runtime_state/p/events.jsonl",
         "pending_jsonl": "runtime_state/p/pending.jsonl",
         "runtime_stop": "runtime_state/p/STOP",
+        "control_json": "runtime_state/p/control.json",
         "inflight_file": "runtime_state/p/inflight/s.json",
         "strategy_workdir": "runtime_state/p/strategies/k",
     }
@@ -68,6 +69,7 @@ def test_root_with_apostrophe_and_cjk_works(root):
 def test_store_name_format_and_notarize_variant():
     assert paths.store_name("dual_p01_db075", "top_k_flip", 7) == "dual_p01_db075-top_k_flip-t00007"
     assert paths.notarize_store_name("dual_p01_db075", 7, "0123456789abcdef", 2) == "dual_p01_db075-notarize-t00007-01234567-r2"
+    assert paths.smoke_store_name("p", "0123456789abcdef", 1, "20260901120000") == "p-smoke-01234567-20260901120000-r1"
     #! store 名的 `-` 是欄位分隔：三個欄位拆回去要對得上
     assert paths.store_name("p", "s", 12345).split("-") == ["p", "s", "t12345"]
 

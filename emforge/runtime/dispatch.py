@@ -13,8 +13,9 @@ from ..model import KIND_REPEAT, KIND_SAMPLE, KINDS, Job, record_id
 
 
 def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, prio: int,
-             kind: str = KIND_SAMPLE, store: str | None = None) -> str | None:
-    """回 store 名；全部重複 → None（什麼都不寫）。"""
+             kind: str = KIND_SAMPLE, store: str | None = None, origin: str = "runtime",
+             machine: str | None = None) -> str | None:
+    """回 store 名；全部重複 → None（什麼都不寫）。`origin`／`machine` 只有 CLI smoke 會給（釘機重測）。"""
     if kind not in KINDS:
         raise ValueError(f"kind 必須是 {KINDS}，得到 {kind!r}")
     if (kind == KIND_REPEAT) != (store is not None):
@@ -35,7 +36,7 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
                 "items": [{"id": rid, **items[rid]} for rid in ids]}
     Batch(rt.root, store).write(manifest, np.stack([p.pattern for p in keep]), ids)
     rt.queue.add(Job(store=store, sim_profile=profile.name, profile_hash=profile.profile_hash, prio=prio,
-                     n=len(ids), origin="runtime", by="runtime"))
+                     n=len(ids), machine=machine, origin=origin, by=origin))
     rt.event("batch_dispatched", store=store, strategy=strategy_name, n=len(ids), prio=prio, tick=tick, seed=seed,
              kind=kind)
     if kind == KIND_SAMPLE:

@@ -156,6 +156,11 @@ def runtime_stop(root, profile: str) -> Path:
     return runtime_dir(root, profile) / "STOP"
 
 
+def control_json(root, profile: str) -> Path:
+    """CLI → runtime 的單向控制檔（resume 等）；runtime 每 tick 開頭消費並刪除。"""
+    return runtime_dir(root, profile) / "control.json"
+
+
 def inflight_dir(root, profile: str) -> Path:
     return runtime_dir(root, profile) / "inflight"
 
@@ -178,6 +183,11 @@ def store_name(profile: str, strategy: str, tick: int) -> str:
 def notarize_store_name(profile: str, tick: int, rec_id: str, n: int) -> str:
     """公證重測：`<profile>-notarize-t<tick:05d>-<id[:8]>-r<n>`。"""
     return f"{profile}-notarize-t{tick:05d}-{rec_id[:8]}-r{n}"
+
+
+def smoke_store_name(profile: str, rec_id: str, n: int, stamp: str) -> str:
+    """人下的 smoke 重測：`<profile>-smoke-<id[:8]>-<YYYYmmddHHMMSS>-r<n>`（沒有 tick，用時間戳）。"""
+    return f"{profile}-smoke-{rec_id[:8]}-{stamp}-r{n}"
 
 
 # ── 整體 ────────────────────────────────────────────────────────────────────
@@ -220,6 +230,7 @@ def snapshot(root, *, profile: str, store: str, rec_id: str, spec: str, tag: str
         "events_jsonl": events_jsonl(root, profile),
         "pending_jsonl": pending_jsonl(root, profile),
         "runtime_stop": runtime_stop(root, profile),
+        "control_json": control_json(root, profile),
         "inflight_file": inflight_file(root, profile, store),
         "strategy_workdir": strategy_workdir(root, profile, strategy),
     }

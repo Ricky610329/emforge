@@ -167,6 +167,35 @@ class Queue:
         for f in (cp, paths.done_file(self.root, store), paths.fail_file(self.root, store)):
             fs.release(f)
 
+    # ── watch（blocking，給任何 harness 掛的收檔偵測） ────────────────────
+    def watch(self, stores: list, *, poll_s: float = 30.0, fail_grace_s: float = 1200.0, timeout_s: float | None = None,
+              sleep=time.sleep, out=print) -> int:
+        """全 done → 0；任一 fail（過寬限仍無人接管）或不在佇列 → 1；超過 timeout_s → 2。"""
+        t0 = time.time()
+        terminal: dict = {}
+        while True:
+            for s in stores:
+                if s in terminal:
+                    continue
+                st = self.state(s)
+                if st == "done":
+                    out(f"{s} DONE {fs.read_json(paths.done_file(self.root, s), default={})}")
+                    terminal[s] = 0
+                elif st == "missing":
+                    out(f"{s} MISSING（不在佇列）")
+                    terminal[s] = 1
+                elif st == "fail":
+                    age = time.time() - (fs.mtime(paths.fail_file(self.root, s)) or 0.0)
+                    if age >= fail_grace_s:
+                        out(f"{s} FAIL（{age / 60:.0f} 分無人接管）：{fs.read_json(paths.fail_file(self.root, s), default={})}")
+                        terminal[s] = 1
+            if len(terminal) == len(stores):
+                return max(terminal.values(), default=0)
+            if timeout_s is not None and time.time() - t0 >= timeout_s:
+                out(f"watch 逾時 {timeout_s:.0f}s：{sorted(set(stores) - set(terminal))} 尚未終態")
+                return 2
+            sleep(poll_s)
+
     # ── STOP ────────────────────────────────────────────────────────────
     def stop_requested(self, machine_tag: str | None = None) -> bool:
         if paths.queue_stop(self.root).exists():

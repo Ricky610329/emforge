@@ -114,10 +114,27 @@ class Runtime:
             newest = max(newest, m, r)
         return (time.time() - newest) > self.config.runtime.quiet_s
 
+    def apply_control(self) -> None:
+        """消費 CLI 寫的 control.json（resume 策略／profile）並刪除；runtime 每 tick 開頭呼叫。"""
+        p = paths.control_json(self.root, self.profile_name)
+        ctl = fs.read_json(p, default=None)
+        if not ctl:
+            return
+        fs.release(p)
+        by = ctl.get("by", "cli")
+        for name in ctl.get("resume_strategies", []):
+            st = self.strategy_state(name)
+            st["paused"], st["errors_consecutive"] = False, 0
+            self.event("strategy_resumed", name=name, by=by)
+        if ctl.get("resume_profile"):
+            self.state["paused_profile"] = None
+            self.event("profile_resumed", by=by)
+
     # ── tick ────────────────────────────────────────────────────────────
     def tick(self) -> None:
         self.state["tick"] += 1
         self.heartbeat()
+        self.apply_control()
         self.reload_config()
         new = _collect.collect(self)
         _notarize.notarize_step(self, new)
