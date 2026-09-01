@@ -1,5 +1,6 @@
-"""emforge/cli/setup.py — 準備與體檢：version／init／check-strategy／doctor。"""
+"""emforge/cli/setup.py — 準備與體檢：version／init／check-strategy／doctor／import-legacy。"""
 import json
+import os
 
 from .. import __version__, doctor, paths, profiles, strategy
 from .._version import describe
@@ -94,4 +95,32 @@ def _add_doctor(sub) -> None:
     s.set_defaults(fn=cmd_doctor)
 
 
-COMMANDS = {"version": _add_version, "init": _add_init, "check-strategy": _add_check_strategy, "doctor": _add_doctor}
+def cmd_import_legacy(args) -> int:
+    from ..legacy.antenna_import import import_legacy
+    out_root = args.out or os.environ.get("EMFORGE_ROOT")
+    if not out_root:
+        raise ValueError("需要 --out 或環境變數 EMFORGE_ROOT")
+    overrides = dict(kv.split("=", 1) for kv in (args.map or []))
+    _, rc = import_legacy(args.root, out_root, stores=[s for s in args.stores.split(",") if s], profile=args.profile,
+                          overrides=overrides, include_errors=args.include_errors, verify=args.verify,
+                          dry_run=args.dry_run, force=args.force, no_rad=args.no_rad)
+    return rc
+
+
+def _add_import_legacy(sub) -> None:
+    s = sub.add_parser("import-legacy", help="舊 NAS（DATASET_PATH）資料匯入 db/<profile>/（只讀舊樹；--verify 對回舊尺）")
+    s.add_argument("--root", required=True, help="舊 DATASET_PATH 或本機鏡像")
+    s.add_argument("--out", help="emforge 根目錄（預設 EMFORGE_ROOT）")
+    s.add_argument("--stores", required=True, help="逗號分隔 glob，如 dedust_*,handoff_*,harvest_*")
+    s.add_argument("--profile", default="auto", help="auto 或只匯入映射到這個 profile 的 store")
+    s.add_argument("--map", action="append", help="store=profile 強制映射（可重複）")
+    s.add_argument("--include-errors", action="store_true")
+    s.add_argument("--verify", action="store_true")
+    s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--force", action="store_true")
+    s.add_argument("--no-rad", action="store_true")
+    s.set_defaults(fn=cmd_import_legacy)
+
+
+COMMANDS = {"version": _add_version, "init": _add_init, "check-strategy": _add_check_strategy, "doctor": _add_doctor,
+            "import-legacy": _add_import_legacy}
