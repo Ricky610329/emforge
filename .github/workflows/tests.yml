@@ -1,0 +1,27 @@
+# CI：push / PR 自動跑 pytest。全部測試用 FakeSimulator，不需要 HFSS / NAS / torch。
+# runner 用 windows-latest：正式機是 Windows，檔案鎖（O_EXCL、os.replace）語義要在同一種 OS 上驗。
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .[test]
+      # pyflakes 守門：只擋 undefined name（這類錯 runtime 才會炸）。unused import 不擋。
+      - name: Pyflakes (undefined names)
+        run: |
+          python -c "import subprocess, sys; out = subprocess.run([sys.executable, '-m', 'pyflakes', 'emforge', 'tests'], capture_output=True, text=True).stdout; bad = [l for l in out.splitlines() if 'undefined name' in l]; print(chr(10).join(bad) if bad else 'clean'); sys.exit(1 if bad else 0)"
+      - name: Run tests
+        run: python -m pytest
+        env:
+          PYTHONIOENCODING: utf-8

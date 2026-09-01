@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emforge"
+dynamic = ["version"]
+description = "昂貴模擬下的設計搜尋平台：策略庫 × 模擬庫 × 共享資料庫；迴圈裡沒有 LLM"
+readme = "README.md"
+requires-python = ">=3.11"
+# 核心只有這兩個相依。torch/scipy 只在 adapters/ 與 legacy/ 內 lazy import（tests/test_smoke.py 釘住）。
+dependencies = ["numpy>=1.26", "pyyaml>=6"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pyflakes>=3"]
+antenna = ["torch", "scipy"]
+
+[project.scripts]
+emforge = "emforge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["emforge*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "emforge.__version__" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

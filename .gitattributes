@@ -1,0 +1,3 @@
+# 全部文字檔一律 LF（三台正式機與開發機都是 Windows，但不讓 autocrlf 製造假 diff）
+* text=auto eol=lf
+*.cmd text eol=crlf

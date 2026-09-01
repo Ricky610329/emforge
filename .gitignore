@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# 本機暫存（worker 工作目錄預設在 %LOCALAPPDATA%，但若指到 repo 內也不進 git）
+tmp/
+work/
+keep/
+
+# 假 root（開發機端到端試跑用）
+fake_root/
+
+# Windows 檔案總管雜物
+Thumbs.db
+desktop.ini
