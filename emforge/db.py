@@ -44,7 +44,7 @@ def _load_npz(path: Path) -> Record:
 
 
 def _index_line(stem: str, meta: dict) -> dict:
-    line = {"stem": stem, "store": meta["run"]["store"]}
+    line = {"stem": stem, "store": meta["run"]["store"], "worker_ver": meta["run"].get("worker_ver")}
     line.update({k: meta[k] for k in INDEX_FIELDS})
     return line
 
