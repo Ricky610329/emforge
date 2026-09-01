@@ -73,7 +73,8 @@ def _single():
 def test_importing_adapter_does_not_import_antenna_or_torch():
     code = ("import sys, emforge.adapters.antenna.sim, emforge.adapters.antenna.measure, emforge.adapters.antenna.profiles;"
             "print('torch' in sys.modules, 'antenna' in sys.modules)")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    out = subprocess.run([sys.executable, "-X", "utf8", "-c", code], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=120)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "False False"
 
