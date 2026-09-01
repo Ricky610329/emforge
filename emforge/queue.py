@@ -75,6 +75,10 @@ class Queue:
         c = fs.read_claim(paths.claim_file(self.root, store))
         return c.get("machine") if c else None
 
+    def release(self, store: str) -> None:
+        """放掉 claim（讓位用）；job 回到 queued，進度都在結果檔，任一機可續。"""
+        fs.release(paths.claim_file(self.root, store))
+
     def has_unclaimed_foreground(self, background_prio: int) -> bool:
         return any(j.prio < background_prio and self.state(j.store) == "queued" for j in self._read())
 

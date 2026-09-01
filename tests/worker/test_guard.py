@@ -1,0 +1,67 @@
+# -*- coding: utf-8 -*-
+"""tests/worker/test_guard.py — `emforge/worker/guard.py`：看門狗、處決線、開模擬器重試。
+
+防什麼：COM 呼叫可以「無例外地永遠不回來」（2026-07-10）；開啟／重開卡死（218，2026-07-11）。
+"""
+import threading
+import time
+
+import pytest
+
+from emforge.worker import guard
+
+
+def test_watchdog_calls_kill_after_timeout_not_before():
+    kills = []
+    with guard.Watchdog(0.5, lambda: kills.append(1)) as wd:
+        time.sleep(0.05)
+    assert not wd.fired and kills == []
+    with guard.Watchdog(0.1, lambda: kills.append(1)) as wd:
+        time.sleep(0.4)
+    assert wd.fired and kills == [1]
+
+
+def test_guarded_call_returns_value_or_raises_watchdog_timeout():
+    assert guard.guarded_call(lambda: 42, 1.0, lambda: None) == 42
+    stop = threading.Event()
+
+    def hang():
+        stop.wait()
+        raise RuntimeError("killed")
+
+    t0 = time.time()
+    with pytest.raises(guard.WatchdogTimeout, match="killed"):
+        guard.guarded_call(hang, 0.2, stop.set)
+    assert time.time() - t0 < 5
+
+
+def test_guarded_call_reraises_plain_errors_when_not_fired():
+    def boom():
+        raise ValueError("plain")
+
+    with pytest.raises(ValueError, match="plain"):
+        guard.guarded_call(boom, 1.0, lambda: None)
+
+
+class _Sim:
+    def __init__(self, fail_first=0):
+        self.fail_first, self.opens, self.kills = fail_first, 0, 0
+
+    def open(self):
+        self.opens += 1
+        if self.opens <= self.fail_first:
+            raise RuntimeError(f"open failed #{self.opens}")
+
+    def kill(self):
+        self.kills += 1
+
+
+def test_open_with_retries_gives_up_after_3_and_kills_between():
+    slept = []
+    sim = _Sim(fail_first=99)
+    with pytest.raises(guard.SimulatorOpenFailed):
+        guard.open_with_retries(sim, attempts=3, timeout_s=5, sleep=slept.append, retry_wait_s=15)
+    assert sim.opens == 3 and sim.kills == 3 and slept == [15, 15]
+    ok = _Sim(fail_first=1)
+    guard.open_with_retries(ok, attempts=3, timeout_s=5, sleep=slept.append, retry_wait_s=1)
+    assert ok.opens == 2 and ok.kills == 1
