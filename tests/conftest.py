@@ -19,6 +19,17 @@ def _no_nas_env():
         os.environ["EMFORGE_ROOT"] = saved
 
 
+@pytest.fixture(autouse=True)
+def _fresh_registries():
+    """measure／spec／profile 註冊表是行程級全域：每個測試前清空，避免測試互相污染。"""
+    from emforge import profiles, specs
+    specs.clear_registry()
+    profiles.clear_registry()
+    yield
+    specs.clear_registry()
+    profiles.clear_registry()
+
+
 @pytest.fixture
 def root(tmp_path) -> Path:
     """共用根目錄。故意含中文與撇號——NAS 真實路徑就長這樣（T:\\碩二_鄒穎麒's\\…），

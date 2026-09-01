@@ -156,6 +156,41 @@ class Context:
     params: dict = field(default_factory=dict)   # strategies.yaml 的 params:
 
 
+# ── Simulator 協定（模擬庫成員要長的樣子） ───────────────────────────────────
+@dataclass(frozen=True)
+class SimResult:
+    response: np.ndarray            # float32[n_labels, n_points]
+    time_s: float
+    extra: dict = field(default_factory=dict)   # 儀器側通道；核心不解讀，原樣進 Record.extra
+
+
+class Simulator:
+    """核心只認這五樣：`geom_ver`／`labels` 類別屬性 + open／simulate／kill／close。
+    建構子簽名固定 `(*, workdir: str, profile: Profile)`；`geom_ver=None` 表示單邊宣告（不與 profile 比對）。
+    這個基底類別只是文件：adapter 可以繼承，也可以純 duck typing。"""
+    geom_ver: str | None = None
+    labels: tuple = ()
+
+    def __init__(self, *, workdir: str, profile: Profile):
+        self.workdir, self.profile = workdir, profile
+
+    def open(self) -> None:
+        """一次昂貴連線（HFSS COM）。"""
+        raise NotImplementedError
+
+    def simulate(self, bits: np.ndarray) -> SimResult:
+        """一筆進、一筆出；可被 kill() 中斷（看門狗）。"""
+        raise NotImplementedError
+
+    def kill(self) -> None:
+        """OS 級強殺，可重入；看門狗逾時呼叫。"""
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """優雅關閉；失敗不拋。"""
+        raise NotImplementedError
+
+
 # ── Record（資料庫的一筆） ───────────────────────────────────────────────────
 @dataclass(eq=False)
 class Record:
