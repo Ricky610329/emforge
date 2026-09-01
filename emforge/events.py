@@ -63,18 +63,19 @@ class EventFieldsMissing(ValueError):
     pass
 
 
-def make(name: str, **fields) -> dict:
-    """驗名字與必填欄位，補 `at`／`event`。多給的欄位保留（診斷用）。"""
-    if name not in EVENTS:
-        raise UnknownEvent(f"事件 {name!r} 不在白名單（emforge/events.py）")
-    missing = [f for f in EVENTS[name] if f not in fields]
+def make(event: str, /, **fields) -> dict:
+    """驗名字與必填欄位，補 `at`／`event`。多給的欄位保留（診斷用）。
+    事件名是 positional-only：欄位裡可以有 `name`（策略事件都有），不會撞。"""
+    if event not in EVENTS:
+        raise UnknownEvent(f"事件 {event!r} 不在白名單（emforge/events.py）")
+    missing = [f for f in EVENTS[event] if f not in fields]
     if missing:
-        raise EventFieldsMissing(f"事件 {name} 缺必填欄位 {missing}")
-    return {"at": fs.now_iso(), "event": name, **fields}
+        raise EventFieldsMissing(f"事件 {event} 缺必填欄位 {missing}")
+    return {"at": fs.now_iso(), "event": event, **fields}
 
 
-def emit(path, name: str, **fields) -> dict:
+def emit(path, event: str, /, **fields) -> dict:
     """append 一行到 jsonl（單寫者檔）並回傳寫入的 dict。"""
-    e = make(name, **fields)
+    e = make(event, **fields)
     fs.append_jsonl(path, e)
     return e

@@ -86,6 +86,19 @@ def register_fakes() -> None:
     profiles.register_profile(FAKE_PROFILE)
 
 
+def run_all_jobs(root, machine_tag: str = "216", sim_factory=None, max_jobs: int = 50, **loop_kw) -> int:
+    """行程內假 worker：把佇列裡所有可認領的 job 跑完（worker_loop once 迴圈）。回跑掉的 job 數。"""
+    from .queue import Queue
+    from .worker.loop import worker_loop
+    q = Queue(root)
+    loop_kw.setdefault("sleep", lambda s: None)
+    n = 0
+    while n < max_jobs and any(q.state(j.store) == "queued" for j in q.list()):
+        worker_loop(root, machine_tag, once=True, work_root=Path(root) / "_work", sim_factory=sim_factory, **loop_kw)
+        n += 1
+    return n
+
+
 def make_fake_root(root) -> Path:
     """建一個可用的假根目錄：佈局目錄＋`registry.py`（子行程與 worker 會執行它）＋本行程也註冊。"""
     root = Path(root)

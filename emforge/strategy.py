@@ -181,8 +181,10 @@ def make_context(root, profile: Profile, strategy_name: str, *, budget: int, see
                    workdir=workdir, tick=int(tick), params=dict(params or {}))
 
 
-def propose_in_process(root, profile: Profile, name: str, *, budget: int, seed: int, tick: int, params: dict | None) -> list:
-    """載入 → 相容 → 建 ctx → propose → 驗證。子行程與 `check-strategy` 用；runtime 不直接用。"""
+def propose_in_process(root, profile: Profile, name: str, *, budget: int, seed: int, tick: int, params: dict | None,
+                       timeout_s: float | None = None) -> list:
+    """載入 → 相容 → 建 ctx → propose → 驗證。子行程與 `check-strategy` 用；runtime 預設用子行程版。
+    `timeout_s` 只為與 propose_in_subprocess 同簽名（可互換注入），這裡不生效。"""
     mod = load_strategy(resolve_strategy_path(root, name))
     check_compatible(mod, profile.name)
     ctx = make_context(root, profile, name, budget=budget, seed=seed, tick=tick, params=params)

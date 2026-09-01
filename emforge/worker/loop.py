@@ -41,8 +41,8 @@ def worker_loop(root, machine_tag: str, *, poll_s: float = 30.0, once: bool = Fa
     work = WorkDir(work_root or default_work_root())
     log_path = paths.worker_log(root, machine_tag)
 
-    def log(name, **fields):
-        events.emit(log_path, name, **fields)
+    def log(event, /, **fields):
+        events.emit(log_path, event, **fields)
 
     profiles.load_user_registry(root)
     ver = worker_version()

@@ -18,7 +18,7 @@ from .workdir import WorkDir
 MAX_ATTEMPTS = 3   #? 毒樣本規則：三次都錯就不再重試，留給人判
 
 
-def _noop(name, **fields):
+def _noop(event, /, **fields):
     return None
 
 
