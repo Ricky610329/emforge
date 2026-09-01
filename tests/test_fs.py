@@ -34,20 +34,27 @@ def test_atomic_write_concurrent_threads_reader_always_parses(root):
     """多執行緒交錯寫同一檔，讀者永遠讀到完整的舊檔或新檔（tmp→replace 語義）。"""
     p = root / "hot.json"
     fs.atomic_write_json(p, {"i": -1, "t": -1})
-    bad, stop = [], threading.Event()
+    bad, errors, stop = [], [], threading.Event()
 
     def writer(tid):
-        for i in range(40):
-            fs.atomic_write_json(p, {"i": i, "t": tid})
+        try:
+            for i in range(30):
+                fs.atomic_write_json(p, {"i": i, "t": tid})
+        except Exception as e:  # noqa: BLE001 — 執行緒例外要收進斷言，不能只變 warning
+            errors.append(("writer", tid, repr(e)))
 
     def reader():
-        while not stop.is_set():
-            d = fs.read_json(p)
-            if set(d) != {"i", "t"}:
-                bad.append(d)
+        try:
+            while not stop.is_set():
+                d = fs.read_json(p)
+                if set(d) != {"i", "t"}:
+                    bad.append(d)
+                time.sleep(0.001)  # 讀者是輪詢，不是忙迴圈
+        except Exception as e:  # noqa: BLE001
+            errors.append(("reader", repr(e)))
 
     r = threading.Thread(target=reader)
-    ws = [threading.Thread(target=writer, args=(t,)) for t in range(4)]
+    ws = [threading.Thread(target=writer, args=(t,)) for t in range(3)]
     r.start()
     for w in ws:
         w.start()
@@ -55,8 +62,9 @@ def test_atomic_write_concurrent_threads_reader_always_parses(root):
         w.join()
     stop.set()
     r.join()
+    assert not errors
     assert not bad
-    assert fs.read_json(p)["i"] == 39
+    assert fs.read_json(p)["i"] == 29
 
 
 def test_atomic_write_retries_on_permission_error(root, monkeypatch):

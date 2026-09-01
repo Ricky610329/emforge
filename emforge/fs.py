@@ -32,7 +32,9 @@ class FsCorrupt(Exception):
 
 _MISSING = object()
 #? Windows/SMB：目標被別人開著讀時 os.replace 拋 PermissionError（sharing violation）；退避重試而不是立刻失敗。
-_REPLACE_BACKOFF_S = (0.02, 0.05, 0.1, 0.2, 0.4, 0.8)
+#  CPython 的 open() 在 Windows 不帶 FILE_SHARE_DELETE，讀者只要開著檔、替換就會被擋——所以總退避要夠長（~5 s），
+#  單一讀者的一次 open→read→close 只有毫秒級，正式環境同一檔的讀寫競爭也稀疏（一 store 一寫者）。
+_REPLACE_BACKOFF_S = (0.02, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6, 1.6)
 
 
 # ── 原子寫入 ────────────────────────────────────────────────────────────────
@@ -65,8 +67,8 @@ def atomic_write_json(path, obj) -> None:
     atomic_write_bytes(path, data)
 
 
-def read_json(path, default=_MISSING, *, retries: int = 3):
-    """讀 JSON；缺檔回 default（沒給就拋 FileNotFoundError）；半截／被佔用短暫重試，用盡拋 FsCorrupt。"""
+def read_json(path, default=_MISSING, *, retries: int = 6):
+    """讀 JSON；缺檔回 default（沒給就拋 FileNotFoundError）；半截／被佔用（替換瞬間）短暫重試，用盡拋 FsCorrupt。"""
     path = Path(path)
     last = None
     for i in range(max(1, retries)):
@@ -80,7 +82,7 @@ def read_json(path, default=_MISSING, *, retries: int = 3):
         except (json.JSONDecodeError, PermissionError) as e:
             last = e
             if i < retries - 1:
-                time.sleep(0.05 * (i + 1))
+                time.sleep(0.02 * (i + 1))
     raise FsCorrupt(f"{path}: {last}")
 
 
@@ -117,6 +119,10 @@ def try_claim(path, payload: dict) -> bool:
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
+        return False
+    except PermissionError:
+        #! Windows：別人剛 unlink 同名檔、刪除尚未落定（delete pending）時，O_EXCL 建檔回 ACCESS_DENIED 而非 EEXIST。
+        #  語義上就是「檔還在」→ 這次沒搶到；呼叫端重試。真正的權限問題會在 Lock 逾時／doctor --probe-fs 現形。
         return False
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, sort_keys=True)
