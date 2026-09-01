@@ -20,8 +20,10 @@ from pathlib import Path
 
 # ── 名字規則 ────────────────────────────────────────────────────────────────
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-#? 保留字：`blind` 是對照臂的保留 arm、`repeat` 是公證的保留 kind、其餘是 runtime／CLI 自己產出的 store 用的策略欄位值。
-RESERVED_STRATEGY_NAMES = frozenset({"blind", "repeat", "notarize", "runtime", "cli"})
+#? 保留字（不准當使用者策略名）：`repeat` 是公證的保留 kind、`notarize`／`runtime`／`cli` 是 runtime／CLI 自己產出的
+#  store 會填的策略欄位值。`blind` **不在此列**——它是內建策略名兼保留 arm（零演算法對照臂）。
+RESERVED_STRATEGY_NAMES = frozenset({"repeat", "notarize", "runtime", "cli"})
+COMPATIBLE_ANY = "*"
 
 
 def is_valid_name(name: str) -> bool:

@@ -31,8 +31,9 @@
 | profile | `<domain>_<geom>_<variant>` | `dual_p01_db075`, `single_db100`, `fake_f1` |
 | spec | `<domain>_v<N>` | `dual_v2`, `single_v1` |
 | 策略 | ＝檔案 stem；使用者 `<root>/strategies/<name>.py` 蓋過內建 | `top_k_flip` |
-| **保留字**（不准當策略名） | `blind`（arm）、`repeat`（kind）、`notarize`、`runtime`、`cli` | — |
-| arm | 自由字串，但 `blind` 是保留語義＝零演算法對照臂 | `"blind"`, `"L"`, `"d"` |
+| **保留字**（不准當使用者策略名） | `repeat`（kind）、`notarize`、`runtime`、`cli`（runtime／CLI 產出的紀錄會填的策略欄位值） | — |
+| arm | 自由字串，但 `blind` 是保留語義＝零演算法對照臂；內建策略 `blind` 就叫這個名字、也標這個 arm | `"blind"`, `"L"`, `"d"` |
+| `COMPATIBLE` | 策略模組級宣告：profile 名集合，或 `{"*"}`＝領域無關（內建策略用） | `COMPATIBLE = {"dual_p01_db075"}` |
 | kind | `sample` \| `repeat`；`repeat` 只有 runtime 公證與 `cli smoke` 能設 | |
 | status | `queued` \| `running` \| `done` \| `error` | |
 | 機器 tag | IP 末段字串；釘選＝完全相等 | `"216"` |

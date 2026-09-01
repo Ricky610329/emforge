@@ -5,10 +5,11 @@
 """
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 
-from . import profiles, specs
+from . import paths, profiles, specs
 from .model import Profile, SimResult, Simulator, Spec, record_id
 
 GEOM_VER = "fake1"
@@ -83,3 +84,13 @@ def register_fakes() -> None:
     specs.register_measure("fake_m", fake_measure, labels=FAKE_PROFILE.labels, targets=FAKE_TARGETS)
     specs.register_spec(FAKE_SPEC)
     profiles.register_profile(FAKE_PROFILE)
+
+
+def make_fake_root(root) -> Path:
+    """建一個可用的假根目錄：佈局目錄＋`registry.py`（子行程與 worker 會執行它）＋本行程也註冊。"""
+    root = Path(root)
+    for d in paths.layout_dirs(root):
+        d.mkdir(parents=True, exist_ok=True)
+    paths.registry_py(root).write_text("from emforge.testing import register_fakes\nregister_fakes()\n", encoding="utf-8")
+    register_fakes()
+    return root

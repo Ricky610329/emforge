@@ -94,7 +94,7 @@ def test_cli_version_returns_zero(capsys):
 def test_naming_doc_mentions_reserved_names():
     """docs/naming.md 是命名規範的人讀版；保留字在程式（paths.RESERVED_STRATEGY_NAMES）與文件要一致。"""
     doc = (DOCS / "naming.md").read_text(encoding="utf-8")
-    for name in paths.RESERVED_STRATEGY_NAMES:
+    for name in sorted(paths.RESERVED_STRATEGY_NAMES) + ["blind"]:
         assert f"`{name}`" in doc, f"docs/naming.md 沒提到保留字 {name}"
     for word in ("snake_case", "CapWords", "EMFORGE_", "#!", "#?"):
         assert word in doc

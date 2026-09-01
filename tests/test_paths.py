@@ -86,4 +86,5 @@ def test_reserved_strategy_names_are_valid_names_but_reserved():
     """保留字本身符合命名規則（否則檢查根本不會撞到），只是不准當策略名。"""
     for n in paths.RESERVED_STRATEGY_NAMES:
         assert paths.is_valid_name(n)
-    assert {"blind", "repeat", "notarize", "runtime", "cli"} <= paths.RESERVED_STRATEGY_NAMES
+    assert {"repeat", "notarize", "runtime", "cli"} <= paths.RESERVED_STRATEGY_NAMES
+    assert "blind" not in paths.RESERVED_STRATEGY_NAMES, "blind 是內建策略名（兼保留 arm），可以當策略名"
