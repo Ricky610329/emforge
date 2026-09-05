@@ -104,13 +104,17 @@ measure fn: fn(response, labels, targets) -> dict[str, number]；targets 由註�
 ### 5.1 一個 tick（`runtime/core.py::Runtime.tick`）
 
 ```
-state.tick += 1 → heartbeat（touch lock）→ apply_control（control.json：resume）→ reload_config（yaml mtime）
+state.tick += 1 → save_state     #! tick 號一加就落地：中途死掉重啟不重播同號（review-3）
+→ heartbeat（touch lock）→ apply_control（control.json：resume）→ reload_config（yaml mtime）
 → new = collect()                # 增量收結果、量測、評分、入庫、收尾 inflight、錯誤率
-→ notarize_step(new)             # 完成中的公證 → pending；新破榜候選 → 重測 ×repeat_n
+→ notarize_step(new) → save_state   # 完成中的公證 → pending；新破榜候選 → 重測 ×repeat_n；登記後立刻落地
 → fleet_quiet()? 事件 fleet_quiet：schedule()   # 有 inflight 且 quiet_s 內整個機隊沒產出 → 只等
 → save_state → write_status
 ```
-`run(once)`：acquire_lock → runtime_start → `reconcile()` 不一致 → 事件 reconcile_mismatch、**return 2**（I-14）→ 迴圈：STOP 檔 → runtime_stop；tick；sleep(tick_s)。
+`run(once)`：acquire_lock → 背景心跳執行緒（每 `heartbeat_s`=30 s touch 鎖；一個 tick 超過 stale 門檻也不會被第二個實例破鎖，review-7）
+→ runtime_start → `db.refresh`（索引 append 前死掉的檔補回去，事件 index_repaired）→ `reconcile()` 不一致 → 事件 reconcile_mismatch、**return 2**（I-14）
+→ 迴圈：STOP 檔 → runtime_stop；tick；sleep(tick_s)。
+`Runtime(readonly=True)`（CLI smoke／abandon 用）：不拿鎖、`save_state` 拋——別用舊快照覆寫跑著的 runtime（review-4）。
 
 ### 5.2 reconcile（`reconcile.py`）
 inflight 無 job → `inflight_without_job`；inflight 的批缺 manifest 或 patterns → `inflight_without_batch`；本 profile、origin=runtime、非終態的 job 無 inflight → `job_without_inflight`。別的 profile／`cli:*` 不管。
@@ -125,18 +129,29 @@ for sc in strategies 依 prio 升冪:
     seed = yaml seed 或 strategy_seed(seed_base, profile, name, tick)
     props = propose（子行程；逾時 → strategy_timeout＋strategy_error；任何例外 → strategy_error；連 strategy_error_limit 次 → paused）
     成功 → errors_consecutive=0；空 → strategy_empty；否則 dispatch
+    dispatch 例外（StoreExists／鎖逾時／NAS）→ 事件 dispatch_failed，不計策略連敗、runtime 繼續（review-3）
 ```
 ### 5.4 dispatch（`dispatch.py`）
 `kind=sample`：去重＝`db.ids(profile)`（只算 done）∪ 所有 inflight 的 ids ∪ 批內重複；全重複 → None。
 `kind=repeat`：不去重、store 必須指定（只有 notarize／smoke 這樣叫）。
+寫任何東西之前先查 inflight 檔或批是否已存在 → `StoreExists`（tick 重播的保險，review-3）。
 順序：**先寫 inflight** → Batch.write（patterns 先、manifest 最後）→ Queue.add → 事件。簽名沒有 skip／bypass／keep_* 參數（測試釘死）。
 
 ### 5.5 collect（`collect.py`）
-每個 inflight：`Batch.results(known_ids=collected)` 只讀新檔 → `profile_hash` ≠ 註冊表 → `profile_tamper`、不入庫（記為已收）→ done：`specs.measure(profile.measure, response, labels)`、`specs.score(profile.spec, m)`；error：response None、note.error → `db.add` → 事件 record_added。批到終態且能收的都收了 → 移除 inflight、事件 batch_done／batch_failed；kind=sample 且 error 率 > max_error_rate → `paused_profile`、事件 profile_paused。
+每個 inflight：`Batch.results(known_ids=collected)` 只讀新檔 → `profile_hash` ≠ 註冊表 → `profile_tamper`、不入庫（記為已收）→
+done：`specs.measure(profile.measure, response, labels)`、`specs.score(profile.spec, m)` → `db.add` → 事件 record_added → **每筆後立刻**落地 inflight.collected（review-8）；
+add 回 False 但這筆沒記到 collected（上次死在 add 與落地之間）→ 仍算新收、交給 notarize。
+**error 結果在批未 done 前不入庫、不記 collected**——worker 補測輪會覆寫同一個結果檔，記了就永遠讀不到翻案（review-1）；批 done 才把殘留 error 收進 db。
+終態只有 `done`：能收的都收了 → 移除 inflight、事件 batch_done；kind=sample 且 error 率 > max_error_rate → `paused_profile`、事件 profile_paused。
+**`fail` 不是終態**（名單外的機器會接管重跑，review-2）：只發一次 batch_failed（inflight 記 `fail_reported`）、inflight 留著繼續收；
+沒人接由人 `emforge abandon`：殘留結果（含 error）入庫、inflight 移除、佇列標 done（別台不再接）、事件 batch_abandoned；有新鮮 claim 拒。
 
 ### 5.6 notarize（`notarize.py`）
-完成中：重測批都收尾了 → scores=[原始]+重測；spread ≤ noise_floor → append pending（`{id, tick, scores, conservative=min, spread, stores, at, status}`）、事件 notarize_pass；否則 notarize_reject。一個重測 store 死了就以其餘的判。
-新候選：門檻＝max(榜首 score, pending 最好的 conservative, 公證中的 score)；new_records 中 done、kind=sample、score > 門檻的（依分數降冪）→ 派 repeat_n 個 store（`<profile>-notarize-t<tick>-<id8>-r<n>`，prio=notarize_prio），門檻更新為該分數。**永不寫榜。**
+完成中：重測批都不再 inflight（queue 狀態 fail 的不算、不擋）→ scores=[原始]+重測；spread ≤ noise_floor → append pending
+（`{id, tick, scores, conservative=min, spread, stores, at, status}`）、事件 notarize_pass；否則 notarize_reject。一個重測 store 死了就以其餘的判。
+新候選：門檻＝max(榜首 score（經 `Ledger.best()` 走 checksum；被手改 → 事件 ledger_tamper、當沒有榜）, pending 最好的 conservative, 公證中的 score)；
+new_records 中 done、kind=sample、score > 門檻的（依分數降冪）→ 派 repeat_n 個 store（`<profile>-notarize-t<tick>-<id8>-r<n>`，prio=notarize_prio），
+派不出去 → dispatch_failed、不登記候選；門檻更新為該分數。**永不寫榜。**
 `smoke_dispatch(rt, id, n, machine, by)`：CLI smoke 用，strategy="cli:smoke"、origin="cli:smoke"、可釘機。
 
 ### 5.7 strategies.yaml
@@ -153,10 +168,13 @@ strategies:
 ## 6. worker
 
 `worker_loop`：載入 registry.py → 印 worker_ver → 清 `<EMFORGE_WORK>/`（I-1）→ worker_start → 迴圈：STOP（job 之間）→ `Queue.pick(tag)` → `gate` → `run_batch` → mark_done／mark_fail。守門不過＝那批 `.fail`、worker 繼續；`once=True` 跑完第一個真正執行的 job 就回。
+**故障邊界**（review-6）：gate 之後的任何例外（FsBusy／PermissionError／FileNotFoundError…）→ 那批 `.fail` 記 `worker_exception:…`、claim 釋放、工作目錄清掉、**worker 繼續**下一個 job；`fs.release` 對 sharing violation 退避重試；接管 `.fail` 時檔已被別台搶走＝輸了競賽、跳過。
 
 `gate`（順序固定、不建構不 open）：profile 註冊且未退役 → job.profile_hash == 註冊表 → 載入類別、geom_ver（模擬器宣告 None＝單邊跳過）→ labels。
 
-`run_batch`：建工作目錄 → 建模擬器 → `open_with_retries`（3 試，各 300 s 看門狗，失敗間 kill＋等 15 s）→ 第 0 輪跑「未 done」（續跑）→ 補測輪跑「error 且 attempts<3」（每輪前殺透重開）→ 每筆：`guarded_call(simulate, timeout_s, kill)` → 逐筆結果檔（含 machine／worker_ver／profile_hash／attempts）→ error：看門狗逾時 → 重開；第 0 輪走保險絲（連 max_fail 敗 → 冷卻 cooldown_s＋重開；第 max_blowout 次 → 回 "fail"）；補測輪連 3 敗放棄本輪 → 每筆後：claim 被別台接走 → "yield"（不動 claim）；背景 job 遇前景 queued → 釋放 claim、"yield" → 結束一律 close＋刪工作目錄。
+`run_batch`：建工作目錄 → 建模擬器 → `open_with_retries`（3 試，各 300 s 看門狗，失敗間 kill＋等 15 s）→ 第 0 輪跑「未 done **且 attempts<3**」（續跑；毒樣本三振後不再跑，review-10）→ 補測輪跑「error 且 attempts<3」（每輪前殺透重開）→ 每筆：`guarded_call(simulate, timeout_s, kill)` → 逐筆結果檔（含 machine／worker_ver／profile_hash／attempts）→ `touch_claim`（claim 心跳）→ error：看門狗逾時 → 重開；第 0 輪走保險絲（連 max_fail 敗 → 冷卻 cooldown_s＋重開；第 max_blowout 次 → 回 "fail"）；補測輪連 3 敗放棄本輪 → 每筆後：claim 被別台接走 → "yield"（不動 claim）；背景 job 遇前景 queued → 釋放 claim、"yield" → 結束一律 close＋刪工作目錄。
+`requeue` 的「有人正在跑」＝claim 新鮮**或**批有進度（`Queue.is_live`）；`watch` 在 `.fail` 被接管刪掉的瞬間不誤判 FAIL。
+天線 adapter：看門狗 `kill()` 過的模擬器在 except 路徑**不**呼叫舊 `end()`（舊 end 內部會自己 reopen、無守門會卡，review-9）；交給 `_restart`。
 worker **不**量測、不評分、不寫 db。
 
 `Queue.pick`：prio 升冪；done 跳過；`.fail` 名單含我 → 跳過，否則接管（刪 fail、清殘留 claim、prior_fail 帶進新 claim）；釘機 tag 完全相等；claim 存在：無主（空／半截）且 >60 s → 清；自己的 → 續跑；別人的且（批有進度 <stale_s 或 claim 新鮮）→ 跳過，否則接管；`try_claim`。
@@ -185,10 +203,11 @@ def propose(ctx):
 | `status／events [--last N --event E]／pending／jobs [--all]` | 讀狀態 | 0 |
 | `watch --root R --stores a,b [--poll-s --fail-grace-min --timeout-min]` | blocking 等終態 | 0 全 done／1 fail／2 逾時 |
 | `report --root R --profile P [--profile Q --cross-profile] [--k-min]` | 每策略報表 | 0；跨 profile 無旗標 2 |
-| `promote <id> --root R --profile P --by WHO [--spec --note --force]` | 換王（唯一寫榜路徑） | 0；不在 pending 3；榜被手改 5 |
+| `promote <id> --root R --profile P --by WHO [--spec --note --force]` | 換王（唯一寫榜路徑）；分數用該榜的 spec 對 db 量測重算取 min | 0；不在 pending 3；榜被手改 5 |
 | `retire --root R --profile P --by WHO` | 凍結 profile | 0 |
 | `rescore --root R --profile P --spec S --by WHO [--force]` | 換評估器建新榜 | 0；榜已存在 6 |
-| `requeue <store> --root R --by WHO` | 原子清 claim+done+fail | 0；新鮮 claim 7 |
+| `requeue <store> --root R --by WHO` | 原子清 claim+done+fail | 0；有人正在跑（claim 新鮮或批有進度）7 |
+| `abandon <store> --root R --profile P --by WHO` | 放棄 fail 沒人接的批：殘留入庫、inflight 移除、佇列標 done | 0；不在 inflight／有人正在跑 1 |
 | `resume --root R --profile P [--strategy S] --by WHO` | 寫 control.json | 0 |
 | `stop --root R (--profile P | --worker [--machine-tag T]) [--clear]` | STOP 檔 | 0 |
 | `smoke <id> --root R --profile P --by WHO [--machine T --n N]` | 對已量 id 派重測（切機驗同一儀器） | 0 |
@@ -198,11 +217,11 @@ def propose(ctx):
 
 ## 9. 事件（`events.py`，封閉集合）
 
-runtime：`runtime_start runtime_stop reconcile_mismatch config_reloaded config_invalid fleet_quiet profile_paused profile_resumed`
+runtime：`runtime_start runtime_stop reconcile_mismatch config_reloaded config_invalid fleet_quiet profile_paused profile_resumed index_repaired`
 策略：`strategy_loaded strategy_rejected strategy_error strategy_timeout strategy_paused strategy_resumed strategy_empty proposals_validated(n_in,n_dup,n_out)`
-派收：`batch_dispatched record_added batch_done batch_failed batch_requeued profile_tamper`
+派收：`batch_dispatched dispatch_failed record_added batch_done batch_failed batch_abandoned batch_requeued profile_tamper`
 公證：`record_candidate notarize_dispatched notarize_pass notarize_reject`
-榜：`promoted retired rescored`
+榜：`promoted retired rescored ledger_tamper`
 worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample_error job_done job_failed job_yield gate_rejected sim_restart worker_stop`
 
 ## 10. AI 加值層怎麼接
@@ -234,6 +253,22 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | I-15 多機覆寫 | 一筆一檔永不覆寫；逐筆結果檔 | test_db::same_id_same_store_keeps_first；test_batches::per_id_merge_semantics |
 | I-16 自己的錯只有稽核抓到 | §12 清單供稽核 brief；blind 不足只印數字 | test_report::numbers_only_when_blind_below_k_min（**紀律**） |
 
+## 11b. 2026-09-05 獨立審查 → 修正 → 釘住的測試
+
+| review | 修了什麼 | 測試 |
+|---|---|---|
+| 1 error 記 collected 擋掉補測翻案 | error 等批 done 才收 | runtime/test_collect::error_waits_for_retry_until_batch_done |
+| 2 fail 當終態、接管機結果沒人收 | fail 非終態、abandon 命令 | runtime/test_collect::fail_is_not_terminal…、abandon_*；test_cli::abandon_cli |
+| 3 tick 尾才存、重播撞 BatchExists、dispatch 例外殺 runtime | tick 號先存、StoreExists 先擋、dispatch_failed | runtime/test_core::tick_number_is_saved_before_dispatch…、test_dispatch::refuses_existing_store…、test_schedule／test_notarize::survives_dispatch_failure |
+| 4 smoke 覆寫 state.json | readonly Runtime | test_cli::smoke_cli_does_not_touch_state_json；runtime/test_core::readonly_runtime_refuses… |
+| 5 Lock 破鎖分支忙迴圈 | 每圈走逾時檢查＋sleep | test_fs::lock_times_out_when_claim_keeps_failing…（紅測試真的卡住 300 s 重現） |
+| 6 worker 無故障邊界 | _handle try/except、fs.release 重試、接管競賽 | worker/test_loop::survives_filesystem_error…；test_fs::release_retries…；test_queue::take_over_fail_lost_race… |
+| 7 心跳只在 tick 頭 | 背景心跳執行緒 | runtime/test_core::heartbeat_thread_keeps_lock_fresh… |
+| 8 collected 整批後才落地、索引缺檔 | 每筆落地、add False 仍算新收、啟動 refresh | runtime/test_collect::persists_collected_per_record…、run_refreshes_index_at_start |
+| 9 被殺後叫舊 end 觸發 reopen | `_killed` 旗標 | adapters::simulate_after_kill_does_not_call_legacy_end |
+| 10 第 0 輪不看 attempts | attempts<3 | worker/test_batch::pass0_skips_poison_samples… |
+| 砍掉的 | promote 依本榜 spec 重算；_threshold 走 checksum；requeue 看進度＋claim 心跳；watch 接管瞬間；匯入器預設鍵；例外改名 | test_ledger::promote_with_other_spec…；runtime/test_notarize::threshold_on_tampered_ledger…；test_queue::requeue_refuses_when_batch_has_recent_progress…、touch_claim…、watch_treats_vanishing_fail…；legacy::map_profile_ignores_solver_keys… |
+
 ## 12. 已知失效模式（給獨立稽核的 brief 用）
 
 1. stale-claim 接管與 fleet_quiet 都靠 **mtime**：各機時鐘不同步會誤判（doctor 只報不修）。
@@ -242,13 +277,17 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 4. single 的 geom_ver 是**單邊**宣告（舊 single_port.py 無 GEOM_VER，Ricky 決定不動舊 repo）：single 幾何若換代不會被抓。
 5. `arm="blind"` 是策略自我宣告；說謊會留紀錄但不會被擋。
 6. 背景策略的「佇列空」看**全機共用佇列**：另一個 profile 的實例有 job 排隊時，這個實例的背景策略也不派（設計如此，但可能讓人以為「卡住」）。
-7. CLI 的 promoted／retired／rescored／batch_requeued append 到 runtime 的 events.jsonl，違反單寫者契約的低頻例外（SMB 上理論上可能交錯）。
-8. `_index.jsonl` 若兩個寫者同時 add 同一 profile（設計禁止：一實例一 profile；匯入器與 runtime 不同時跑）會有重複行——`refresh` 以 dict 合併可容忍，但檔會變胖。
+7. CLI 的 promoted／retired／rescored／batch_requeued／batch_abandoned append 到 runtime 的 events.jsonl，違反單寫者契約的低頻例外（SMB 上理論上可能交錯）。
+8. `_index.jsonl` 若兩個寫者同時 add 同一 profile（設計禁止：一實例一 profile；匯入器與 runtime 不同時跑）會有重複行——`refresh` 以 dict 合併可容忍，但檔會變胖；runtime 只在啟動時 refresh，跑著的時候匯入器加的檔要到下次啟動才進去重集合。
 9. legacy 匯入的親代解析只做「legacy id 全域唯一才解」，不重建血統鏈；同 pattern 多 y 靠舊 wm 欄 2 位小數對回，理論上可能對錯。
 10. `propose_in_subprocess` 每 tick 每策略多 1–2 s 子行程啟動；策略多時 tick 變慢（可接受，換 I-4 隔離）。
 11. `worker_ver` 目前只含 emforge sha；adapter（antenna repo）的 sha 由 `_bind.antenna_sha()` 提供但**尚未**拼進 worker_ver。
 12. `Simulator.kill()` 對 HFSS 是殺**全部** ansysedt.exe：同機第二個 HFSS 使用者會被誤殺（doctor 拒起）。
 13. 策略層（N 個策略並行）沒有實測資料：所有「多樣性從策略池湧現」都是推論（architecture.md §12）。
+14. `fail` 非終態的代價：一批被所有機器判死後會**永遠 inflight**（策略被 max_inflight 卡住、notarize 除外），直到人 `abandon`——status.json 的 `queue_state=fail` 是唯一提示，沒有自動逾時。
+15. `abandon` 與跑著的 runtime 的 collect 有一個很小的競賽窗（runtime 記憶體裡的 inflight 在 abandon 刪檔後不會再寫回，但同一 tick 內兩邊可能各 add 同一筆——db.add 冪等，只是事件可能各發一次）。
+16. 心跳執行緒與主迴圈共用 `fs.touch`；NAS 短暫斷線時心跳靜默失敗（吞例外），鎖可能在斷線超過 stale 門檻時被第二個實例破掉——與 review-7 前相比只是視窗變小、不是消失。
+17. `promote --spec` 的分數重算用 `Record.measure`（量測凍結）；spec 若換了 measure 名（＝換儀器）`rescore` 會拒，但 promote 不會——它只認 spec 名有沒有註冊。
 
 ## 13. 與 architecture.md 的偏差
 
@@ -265,6 +304,8 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | 保留字含 `blind` | `repeat/notarize/runtime/cli`；blind 是內建策略名兼保留 arm | 內建策略就叫 blind |
 | single GEOM_VER 雙邊 | 單邊 `s00` | Ricky 2026-09-01：不動舊 repo |
 | `deliver`／keep_project | 未實作；Job 保留 `origin`／未知欄位 | Ricky：之後實作方要模擬檔時再整理 |
+| §4「store 終態 → 移出 inflight」 | 只有 `done` 是終態；`fail` 留 inflight 等接管，人 `abandon` 才收尾 | 2026-09-05 審查 review-2：名單外的機器會接管 |
+| §4 心跳＝tick 時 touch | 背景執行緒每 30 s | review-7：一個 tick 可能超過 stale 門檻 |
 
 ## 14. 未驗證與待決
 
