@@ -161,7 +161,7 @@ class Runtime:
             "pid": os.getpid(), "machine": self.machine_tag, "tick": self.state["tick"], "last_tick_at": fs.now_iso(),
             "paused_profile": self.state.get("paused_profile"), "strategies": strategies,
             "inflight": [{"store": i["store"], "strategy": i["strategy"], "kind": i["kind"], "n": len(i["ids"]),
-                          "n_collected": len(i["collected"]),
+                          "n_collected": len(i["collected"]), "queue_state": self.queue.state(i["store"]),
                           "age_s": round(now - (fs.mtime(paths.inflight_file(self.root, self.profile_name, i["store"])) or now))}
                          for i in infl],
             "notarize_in_progress": sorted(self.state.get("notarize", {})),
@@ -177,6 +177,9 @@ class Runtime:
         try:
             self.event("runtime_start", runtime_ver=_version.describe(), profile_hash=self.profile.profile_hash,
                        pid=os.getpid(), machine=self.machine_tag)
+            repaired = self.db.refresh(self.profile_name)     # 索引 append 前死掉的檔補回去（review-8）
+            if repaired:
+                self.event("index_repaired", n=repaired)
             problems = _reconcile.reconcile(self)
             if problems:
                 self.event("reconcile_mismatch", detail="; ".join(problems))

@@ -4,6 +4,7 @@
 回歸 I-10（只拉不重啟＝舊程式量的）：profile_hash 不符 → profile_tamper、不入庫。
 """
 import numpy as np
+import pytest
 
 from emforge import batches, fs, model, paths, queue, testing
 from emforge.runtime import collect as col
@@ -63,15 +64,19 @@ def test_collect_stores_error_records_none_response(rt):
     store, b, ids = _dispatched(rt, n=2)
     b.write_result(ids[0], {"id": ids[0], "status": "error", "error": "FakeFailure: x", "attempts": 3, "machine": "216",
                             "worker_ver": "v", "profile_hash": P.profile_hash, "at": "t"})
-    new = col.collect(rt)
-    r = new[0]
+    b.write_result(ids[1], _fake_result(ids[1]))
+    q = queue.Queue(rt.root)
+    q.pick("216")
+    q.mark_done(store, "216", n_done=1, n_error=1, error_ids=[ids[0]])   # error 要等批 done 才收（review-1）
+    new = {r.id: r for r in col.collect(rt)}
+    r = new[ids[0]]
     assert r.status == "error" and r.response is None and r.score is None and r.measure == {}
     assert r.note["error"] == "FakeFailure: x" and r.run["time_s"] is None
-    assert rt.db.ids("fake_f1") == set(), "error 不算已量（可再提案）"
+    assert rt.db.ids("fake_f1") == {ids[1]}, "error 不算已量（可再提案）"
     assert rt.db.ids("fake_f1", status=("error",)) == {ids[0]}
 
 
-def test_collect_finalizes_failed_batch_with_batch_failed_event(rt):
+def test_collect_reports_failed_batch_but_keeps_inflight(rt):
     store, b, ids = _dispatched(rt, n=2)
     q = queue.Queue(rt.root)
     q.pick("216")
@@ -79,9 +84,9 @@ def test_collect_finalizes_failed_batch_with_batch_failed_event(rt):
     q.mark_fail(store, "216", "熔斷")
     new = col.collect(rt)
     assert [r.id for r in new] == [ids[0]]
-    assert not paths.inflight_file(rt.root, "fake_f1", store).exists()
+    assert paths.inflight_file(rt.root, "fake_f1", store).exists(), "fail 不是終態（review-2）"
     ev = [e for e in fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1")) if e["event"] == "batch_failed"]
-    assert ev and ev[0]["store"] == store and "1" in ev[0]["reason"]
+    assert ev and ev[0]["store"] == store and "1/2" in ev[0]["reason"]
 
 
 def test_collect_pauses_profile_on_error_rate(rt):
@@ -105,6 +110,126 @@ def test_collect_uses_conservative_min_for_repeat_records_too(rt):
     new = col.collect(rt)
     assert len(new) == 1 and new[0].kind == "repeat" and new[0].strategy == "notarize" and new[0].run["store"] == s
     assert len(rt.db.measurements("fake_f1", rid)) == 2
+
+
+def _events(rt, name):
+    return [e for e in fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1")) if e["event"] == name]
+
+
+def test_collect_error_waits_for_retry_until_batch_done(rt):
+    """回歸 review-1：error 結果在批未 done 前不入庫、不記 collected——補測輪量成功的結果才收得到，
+    不會被「已收的 error」擋掉而白燒 100–200 s HFSS。"""
+    store, b, ids = _dispatched(rt, n=2)
+    q = queue.Queue(rt.root)
+    q.pick("216")
+    b.write_result(ids[0], _error_result(ids[0], attempts=1))
+    assert col.collect(rt) == []
+    assert fs.read_json(paths.inflight_file(rt.root, "fake_f1", store))["collected"] == []
+    assert rt.db.ids("fake_f1", status=("error",)) == set(), "批還在跑：error 不入庫"
+    b.write_result(ids[0], {**_fake_result(ids[0]), "attempts": 2})        # 補測輪翻案
+    new = col.collect(rt)
+    assert [r.id for r in new] == [ids[0]] and new[0].status == "done" and new[0].run["store"] == store
+    b.write_result(ids[1], _error_result(ids[1], attempts=3))
+    q.mark_done(store, "216", n_done=1, n_error=1, error_ids=[ids[1]])
+    new2 = col.collect(rt)
+    assert [r.status for r in new2] == ["error"], "批 done 了才把殘留 error 收進 db"
+    assert rt.db.ids("fake_f1") == {ids[0]} and rt.db.ids("fake_f1", status=("error",)) == {ids[1]}
+    assert not paths.inflight_file(rt.root, "fake_f1", store).exists()
+
+
+def test_collect_fail_is_not_terminal_keeps_inflight_reports_once_then_takeover_completes(rt):
+    """回歸 review-2：`.fail` 名單外的機器會接管重跑，所以 fail 不是終態——inflight 留著繼續收、batch_failed 只發一次；
+    接管機跑完 done 才收尾。"""
+    store, b, ids = _dispatched(rt, n=2)
+    q = queue.Queue(rt.root)
+    q.pick("216")
+    b.write_result(ids[0], _fake_result(ids[0]))
+    q.mark_fail(store, "216", "熔斷")
+    assert [r.id for r in col.collect(rt)] == [ids[0]]
+    inf = fs.read_json(paths.inflight_file(rt.root, "fake_f1", store))
+    assert inf["fail_reported"] is True and inf["collected"] == [ids[0]]
+    assert len(_events(rt, "batch_failed")) == 1
+    col.collect(rt)
+    assert len(_events(rt, "batch_failed")) == 1, "只報一次"
+    assert q.pick("218").store == store, "名單外的機器接管"
+    b.write_result(ids[1], _fake_result(ids[1]))
+    q.mark_done(store, "218", n_done=2, n_error=0, error_ids=[])
+    assert [r.id for r in col.collect(rt)] == [ids[1]]
+    assert not paths.inflight_file(rt.root, "fake_f1", store).exists()
+    assert _events(rt, "batch_done")[-1]["store"] == store
+
+
+def test_abandon_collects_errors_removes_inflight_marks_done_and_emits(rt):
+    """review-2 的人為出口：沒人接管的 fail 批由人宣告放棄——殘留 error 入庫、inflight 移除、佇列標 done（別台不再接）。"""
+    store, b, ids = _dispatched(rt, n=2)
+    q = queue.Queue(rt.root)
+    q.pick("216")
+    b.write_result(ids[0], _error_result(ids[0], attempts=3))
+    q.mark_fail(store, "216", "dead")
+    col.collect(rt)
+    assert rt.db.ids("fake_f1", status=("error",)) == set()
+    out = col.abandon(rt, store, by="ricky")
+    assert out == {"store": store, "n_collected": 1, "n_missing": 1}
+    assert not paths.inflight_file(rt.root, "fake_f1", store).exists()
+    assert rt.db.ids("fake_f1", status=("error",)) == {ids[0]}
+    assert q.state(store) == "done" and q.pick("218") is None, "放棄後別台不再接管"
+    ev = _events(rt, "batch_abandoned")
+    assert ev and ev[0]["by"] == "ricky" and ev[0]["store"] == store
+    with pytest.raises(ValueError, match="inflight"):
+        col.abandon(rt, store, by="ricky")
+
+
+def test_abandon_refuses_when_someone_is_running_it(rt):
+    store, b, ids = _dispatched(rt, n=2)
+    queue.Queue(rt.root).pick("216")
+    with pytest.raises(ValueError, match="正在跑"):
+        col.abandon(rt, store, by="ricky")
+    assert paths.inflight_file(rt.root, "fake_f1", store).exists()
+
+
+def test_collect_persists_collected_per_record_and_recovers_record_added_before_crash(rt, monkeypatch):
+    """回歸 review-8：每筆入庫後立刻落地 collected；上次死在「add 成功、collected 沒落地」之間的那筆，
+    重啟時仍要交給 notarize（add 回 False 也算新收，不能靜默漏掉破榜設計）。"""
+    store, b, ids = _dispatched(rt, n=2)
+    for i in ids:
+        b.write_result(i, _fake_result(i))
+    first, second = sorted(ids)
+    real_add, calls = rt.db.add, {"n": 0}
+
+    def crash_on_second(rec):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("死在第二筆")
+        return real_add(rec)
+
+    monkeypatch.setattr(rt.db, "add", crash_on_second)
+    with pytest.raises(RuntimeError):
+        col.collect(rt)
+    assert fs.read_json(paths.inflight_file(rt.root, "fake_f1", store))["collected"] == [first], "第一筆已落地"
+    monkeypatch.setattr(rt.db, "add", real_add)
+    # 模擬「add 成功但 collected 沒落地」：第二筆先直接進 db，再讓 collect 讀到它
+    rec2 = col._to_record(rt, fs.read_json(paths.inflight_file(rt.root, "fake_f1", store)), second,
+                          b.results()[second], b.patterns())
+    assert real_add(rec2) is True
+    new = col.collect(rt)
+    assert [r.id for r in new] == [second], "已在庫但沒記到 collected → 仍回給 notarize"
+    assert len(_events(rt, "record_added")) == 1, "沒有重複 record_added"
+
+
+def test_run_refreshes_index_at_start(rt_root, rt):
+    """review-8b：索引 append 前死掉的檔只有 npz、沒索引行——runtime 啟動 refresh 補回去，去重才看得到它。"""
+    from emforge import db as dbm
+    rec = _done_record(_props(1, seed=77)[0], score=-1.0)
+    dbm._save_npz(paths.record_file(rt_root, "fake_f1", rec.id, "old"), rec)
+    assert rec.id not in rt.db.ids("fake_f1")
+    assert rt.run(once=True) == 0
+    assert rec.id in rt.db.ids("fake_f1")
+    assert _events(rt, "index_repaired")[0]["n"] == 1
+
+
+def _error_result(rid, attempts=1, profile_hash=P.profile_hash):
+    return {"id": rid, "status": "error", "error": "FakeFailure: x", "attempts": attempts, "machine": "216",
+            "worker_ver": "v", "profile_hash": profile_hash, "at": "t"}
 
 
 def _fake_result(rid, profile_hash=P.profile_hash):

@@ -243,6 +243,22 @@ def test_smoke_dispatches_repeat_for_known_id(fake, capsys):
     assert _main("smoke", "f" * 16, "--root", fake, "--profile", "fake_f1", "--machine", "216", "--by", "ricky") == 1
 
 
+def test_abandon_cli(fake, capsys):
+    """review-2：`emforge abandon <store>`——人宣告放棄沒人接管的 fail 批。"""
+    rt = make_rt(fake)
+    rt.acquire_lock()
+    rt.tick()
+    rt.release_lock()
+    store = rt.inflight()[0]["store"]
+    q = queue.Queue(fake)
+    q.pick("216")
+    q.mark_fail(store, "216", "dead")
+    assert _main("abandon", store, "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 0
+    assert "abandoned" in capsys.readouterr().out
+    assert not paths.inflight_file(fake, "fake_f1", store).exists() and q.state(store) == "done"
+    assert _main("abandon", store, "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 1
+
+
 # ── doctor ──────────────────────────────────────────────────────────────────
 def test_doctor_reports_versions_and_refuses_when_ansysedt_running(fake, capsys, monkeypatch):
     monkeypatch.setattr(doctor, "ansysedt_running", lambda: False)

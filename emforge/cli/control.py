@@ -102,4 +102,22 @@ def _add_smoke(sub) -> None:
     s.set_defaults(fn=cmd_smoke)
 
 
-COMMANDS = {"requeue": _add_requeue, "resume": _add_resume, "stop": _add_stop, "smoke": _add_smoke}
+def cmd_abandon(args) -> int:
+    from ..runtime.collect import abandon
+    rt = Runtime(root_of(args), args.profile)
+    out = abandon(rt, args.store, by=args.by)
+    print(f"abandoned {args.store}：收了 {out['n_collected']} 筆（含 error）、{out['n_missing']} 筆從沒跑；inflight 移除、佇列標 done")
+    return EXIT_OK
+
+
+def _add_abandon(sub) -> None:
+    s = sub.add_parser("abandon", help="放棄一批（fail 沒人接／不想再等）：殘留結果入庫、inflight 移除、佇列標 done")
+    s.add_argument("store")
+    add_root(s)
+    s.add_argument("--profile", required=True)
+    s.add_argument("--by", required=True)
+    s.set_defaults(fn=cmd_abandon)
+
+
+COMMANDS = {"requeue": _add_requeue, "resume": _add_resume, "stop": _add_stop, "smoke": _add_smoke,
+            "abandon": _add_abandon}

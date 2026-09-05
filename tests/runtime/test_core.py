@@ -48,6 +48,15 @@ def test_run_once_executes_single_tick_writes_status_and_events(rt):
     assert not paths.runtime_lock(rt.root, "fake_f1").exists(), "結束釋放鎖"
 
 
+def test_status_inflight_entries_carry_queue_state(rt):
+    """review-2 配套：status.json 的 inflight 條目要能看出佇列狀態（queued／claimed／fail…），人才知道要不要 abandon。"""
+    rt.acquire_lock()
+    rt.tick()
+    rt.release_lock()
+    st = fs.read_json(paths.status_json(rt.root, "fake_f1"))
+    assert st["inflight"] and st["inflight"][0]["queue_state"] == "queued"
+
+
 def test_stop_file_exits_after_tick(rt):
     fs.touch(paths.runtime_stop(rt.root, "fake_f1"))
     rc = rt.run(once=False)

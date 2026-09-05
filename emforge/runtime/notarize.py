@@ -20,9 +20,10 @@ def notarize_step(rt, new_records: list) -> None:
 
 def _complete_ongoing(rt, nz: dict, cfg) -> None:
     """重測批全部到終態（inflight 都收尾了）→ 用手上的分數判一致性；有 store 死了就以其餘的判，不等到天荒地老。"""
-    inflight_stores = {i["store"] for i in rt.inflight()}
+    #? fail 的重測 store 不擋判定（review-2 後 fail 不是終態、inflight 會留著）：以其餘的判；若之後被接管完成，紀錄照常入庫。
+    still_running = {i["store"] for i in rt.inflight() if rt.queue.state(i["store"]) != "fail"}
     for rid, info in list(nz.items()):
-        if any(s in inflight_stores for s in info["stores"]):
+        if any(s in still_running for s in info["stores"]):
             continue
         repeats = [r for r in rt.db.measurements(rt.profile_name, rid)
                    if r.kind == KIND_REPEAT and r.run["store"] in info["stores"] and r.score is not None]

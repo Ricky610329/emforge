@@ -52,6 +52,22 @@ def test_reconcile_ignores_terminal_jobs(rt):
     assert isinstance(rt, core.Runtime)
 
 
+def test_reconcile_fail_with_inflight_and_abandoned_done_are_both_consistent(rt):
+    """review-2：fail 不是終態——fail＋inflight＝正常（等接管）；abandon 後＝done＋無 inflight＝正常。"""
+    make_batch(rt.root, "f1")
+    q = queue.Queue(rt.root)
+    q.add(make_job("f1"))
+    fs.atomic_write_json(paths.inflight_file(rt.root, "fake_f1", "f1"),
+                         {"store": "f1", "strategy": "blind", "tick": 1, "seed": 0, "kind": "sample", "prio": 9,
+                          "ids": [], "items": {}, "collected": [], "at": "x"})
+    q.pick("216")
+    q.mark_fail("f1", "216", "dead")
+    assert reconcile.reconcile(rt) == []
+    fs.release(paths.inflight_file(rt.root, "fake_f1", "f1"))
+    q.mark_done("f1", "abandon:ricky", n_done=0, n_error=0, error_ids=[])
+    assert reconcile.reconcile(rt) == []
+
+
 @pytest.mark.parametrize("missing", ["manifest", "patterns"])
 def test_reconcile_flags_inflight_without_complete_batch(rt, missing):
     make_batch(rt.root, "half")

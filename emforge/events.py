@@ -31,7 +31,9 @@ EVENTS = {
     "batch_done": ("store", "n_done", "n_error"),
     "batch_failed": ("store", "reason"),
     "batch_requeued": ("store", "by"),
+    "batch_abandoned": ("store", "by"),
     "profile_tamper": ("store", "expected", "got"),
+    "index_repaired": ("n",),
     # ── notarize ──
     "record_candidate": ("id", "score", "prev_best"),
     "notarize_dispatched": ("id", "stores"),
