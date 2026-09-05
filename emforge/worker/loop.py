@@ -82,14 +82,32 @@ def _handle(q, root, job, work, log, ver, machine_tag, sim_factory, sleep, opts:
         factory = lambda wd: sim_factory(wd, profile)          # noqa: E731
     else:
         factory = lambda wd: profiles.make_simulator(profile, wd)   # noqa: E731
-    outcome = run_batch(q, Batch(root, job.store), job, profile, factory, machine_tag, ver, work=work,
-                        fuse=Fuse(opts.max_fail, opts.cooldown_s, opts.max_blowout), retry_passes=opts.retry_passes,
-                        background_prio=opts.background_prio, sleep=sleep, log=log)
-    if outcome == "done":
-        res = Batch(root, job.store).results()
-        errs = sorted(i for i, r in res.items() if r.get("status") != "done")
-        q.mark_done(job.store, machine_tag, n_done=len(res) - len(errs), n_error=len(errs), error_ids=errs)
-        log("job_done", store=job.store, n_done=len(res) - len(errs), n_error=len(errs))
-    elif outcome == "fail":
-        q.mark_fail(job.store, machine_tag, "run_batch failed（見 worker log 的 job_failed）")
+    try:
+        outcome = run_batch(q, Batch(root, job.store), job, profile, factory, machine_tag, ver, work=work,
+                            fuse=Fuse(opts.max_fail, opts.cooldown_s, opts.max_blowout), retry_passes=opts.retry_passes,
+                            background_prio=opts.background_prio, sleep=sleep, log=log)
+        if outcome == "done":
+            res = Batch(root, job.store).results()
+            errs = sorted(i for i, r in res.items() if r.get("status") != "done")
+            q.mark_done(job.store, machine_tag, n_done=len(res) - len(errs), n_error=len(errs), error_ids=errs)
+            log("job_done", store=job.store, n_done=len(res) - len(errs), n_error=len(errs))
+        elif outcome == "fail":
+            q.mark_fail(job.store, machine_tag, "run_batch failed（見 worker log 的 job_failed）")
+    except Exception as e:  # noqa: BLE001
+        #! 回歸 review-6：NAS 的 FsBusy／PermissionError／FileNotFoundError 以前直接殺掉整個 worker、claim 留著 45 分沒人接。
+        #  這批判死（.fail 記原因）、worker 繼續；判死本身也失敗就只能靠 stale 接管。
+        reason = f"worker_exception: {type(e).__name__}: {e}"
+        _log_quiet(log, "job_failed", store=job.store, reason=reason)
+        try:
+            q.mark_fail(job.store, machine_tag, reason)
+        except Exception:  # noqa: BLE001
+            pass
+        work.remove(job.store)
     return True
+
+
+def _log_quiet(log, event, /, **fields) -> None:
+    try:
+        log(event, **fields)
+    except Exception:  # noqa: BLE001 — 連 log 檔都寫不進去也不能讓 worker 死
+        pass

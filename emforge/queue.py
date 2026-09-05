@@ -79,6 +79,22 @@ class Queue:
         """放掉 claim（讓位用）；job 回到 queued，進度都在結果檔，任一機可續。"""
         fs.release(paths.claim_file(self.root, store))
 
+    def touch_claim(self, store: str) -> None:
+        """worker 每筆後心跳：claim mtime 才是真的活著（requeue／接管都看得到）；沒 claim 就不動。"""
+        cp = paths.claim_file(self.root, store)
+        if cp.exists():
+            fs.touch(cp)
+
+    def is_live(self, store: str, *, stale_s: float = DEFAULT_STALE_S, now: float | None = None) -> bool:
+        """有人正在跑＝有主 claim 且（claim 新鮮 或 批有進度）。"""
+        cp = paths.claim_file(self.root, store)
+        if not cp.exists() or fs.read_claim(cp) is None:
+            return False
+        now = time.time() if now is None else now
+        newest = Batch(self.root, store).newest_result_mtime()
+        progressed = newest is not None and (now - newest) < stale_s
+        return progressed or not fs.is_stale(cp, stale_s, now)
+
     def has_unclaimed_foreground(self, background_prio: int) -> bool:
         return any(j.prio < background_prio and self.state(j.store) == "queued" for j in self._read())
 
@@ -116,10 +132,12 @@ class Queue:
         if not fp.exists():
             return []
         try:
-            fail = fs.read_json(fp)
+            fail = fs.read_json(fp, default=None)      # exists() 之後被別台 unlink（review-6）→ None＝輸了競賽
         except fs.FsCorrupt:
             return None
-        machines = list((fail or {}).get("machines", []))
+        if fail is None:
+            return None
+        machines = list(fail.get("machines", []))
         if me in machines:
             return None
         try:
@@ -162,8 +180,8 @@ class Queue:
         if not any(j.store == store for j in self._read()):
             raise MissingJob(f"{store} 不在佇列")
         cp = paths.claim_file(self.root, store)
-        if cp.exists() and fs.read_claim(cp) is not None and not fs.is_stale(cp, stale_s):
-            raise LiveClaim(f"{store} 有新鮮 claim（{self.claim_owner(store)}）——先 stop 那台")
+        if self.is_live(store, stale_s=stale_s):           # claim 新鮮或批有進度都算活（review：claim 以前不心跳）
+            raise LiveClaim(f"{store} 有人正在跑（{self.claim_owner(store)}）——先 stop 那台")
         for f in (cp, paths.done_file(self.root, store), paths.fail_file(self.root, store)):
             fs.release(f)
 
@@ -185,7 +203,10 @@ class Queue:
                     out(f"{s} MISSING（不在佇列）")
                     terminal[s] = 1
                 elif st == "fail":
-                    age = time.time() - (fs.mtime(paths.fail_file(self.root, s)) or 0.0)
+                    m = fs.mtime(paths.fail_file(self.root, s))
+                    if m is None:
+                        continue                          # state() 之後被接管刪掉了：下一輪再看（review）
+                    age = time.time() - m
                     if age >= fail_grace_s:
                         out(f"{s} FAIL（{age / 60:.0f} 分無人接管）：{fs.read_json(paths.fail_file(self.root, s), default={})}")
                         terminal[s] = 1

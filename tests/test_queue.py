@@ -173,6 +173,74 @@ def test_requeue_clears_claim_done_fail_and_restores_job_atomically(root):
         q.requeue("nope")
 
 
+def test_take_over_fail_lost_race_returns_none_not_crash(root, monkeypatch):
+    """回歸 review-6：兩台同時接管 .fail——A 過了 exists()、B 先 unlink，A 的 read_json 撞 FileNotFoundError。
+    A 要當「輸了競賽」跳過，不是整個 worker 炸掉。"""
+    q = _q(root, ("s", 5))
+    q.pick("216")
+    q.mark_fail("s", "216", "dead")
+    real = fs.read_json
+
+    def vanish_then_read(path, *a, **k):
+        if str(path).endswith("s.fail"):
+            paths.fail_file(root, "s").unlink(missing_ok=True)      # B 先接走了
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(queue.fs, "read_json", vanish_then_read)
+    assert q.pick("218") is None, "輸了競賽：這輪跳過、不炸"
+    monkeypatch.setattr(queue.fs, "read_json", real)
+    assert q.pick("218").store == "s", "下一輪照常（.fail 已不在）"
+
+
+def test_requeue_refuses_when_batch_has_recent_progress_even_if_claim_old(root):
+    """回歸 review（砍掉的 queue.py:165）：requeue 只看 claim mtime、claim 又不心跳 → 45 分後活著的批被清掉。
+    live＝claim 新鮮 **或** 批有進度。"""
+    q = _q(root, ("s", 5))
+    q.pick("216")
+    _age(paths.claim_file(root, "s"), 3 * 3600)
+    batches.Batch(root, "s").write_result("x", {"id": "x"})
+    with pytest.raises(queue.LiveClaim):
+        q.requeue("s")
+    _age(paths.batch_result(root, "s", "x"), 3 * 3600)
+    q.requeue("s")
+    assert q.state("s") == "queued"
+
+
+def test_touch_claim_updates_mtime_only_if_exists(root):
+    q = _q(root, ("s", 5))
+    q.touch_claim("s")                                   # 沒 claim：no-op、不建檔
+    assert not paths.claim_file(root, "s").exists()
+    q.pick("216")
+    _age(paths.claim_file(root, "s"), 3600)
+    q.touch_claim("s")
+    assert time.time() - fs.mtime(paths.claim_file(root, "s")) < 5
+    assert fs.read_claim(paths.claim_file(root, "s"))["machine"] == "216", "只 touch，內容不動"
+
+
+def test_watch_treats_vanishing_fail_as_not_terminal(root, monkeypatch):
+    """回歸 review（砍掉的 queue.py:188）：state() 說 fail、下一瞬間 .fail 被接管刪掉 → mtime None → 不能誤判 FAIL。"""
+    q = _q(root, ("s", 5))
+    q.pick("216")
+    q.mark_fail("s", "216", "dead")
+    real_mtime = fs.mtime
+    seen = {"n": 0}
+
+    def flaky(path):
+        if str(path).endswith("s.fail"):
+            seen["n"] += 1
+            if seen["n"] == 1:
+                return None                              # 被接管的瞬間
+        return real_mtime(path)
+
+    monkeypatch.setattr(queue.fs, "mtime", flaky)
+
+    def sleep(s):                                        # 第一輪之後：接管機跑完
+        q.pick("218")
+        q.mark_done("s", "218", n_done=2, n_error=0, error_ids=[])
+
+    assert q.watch(["s"], poll_s=0, fail_grace_s=0, sleep=sleep) == 0
+
+
 def test_has_unclaimed_foreground_ignores_background_prio(root):
     q = _q(root, ("bg", 9))
     assert q.has_unclaimed_foreground(background_prio=9) is False

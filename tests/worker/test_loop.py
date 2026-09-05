@@ -89,6 +89,35 @@ def test_loop_polls_when_queue_empty_until_stop(root):
     assert rc == 0 and polls == [30, 30, 30]
 
 
+def test_loop_survives_filesystem_error_marks_fail_and_continues(root, monkeypatch):
+    """回歸 review-6：結果檔寫不進去（FsBusy／PermissionError／NAS 斷）以前會殺掉整個 worker 行程、claim 留著 45 分沒人接。
+    現在那批判死（.fail 記 worker_exception）、worker 繼續跑下一個 job。"""
+    testing.make_fake_root(root)
+    make_batch(root, "s1")
+    make_batch(root, "s2", seed=2)
+    q = queue.Queue(root)
+    q.add(make_job("s1", prio=1))
+    q.add(make_job("s2", prio=5))
+    from emforge import batches as bmod
+    real = bmod.Batch.write_result
+
+    def flaky(self, rec_id, result):
+        if self.store == "s1":
+            raise fs.FsBusy("結果檔被別人開著")
+        return real(self, rec_id, result)
+
+    monkeypatch.setattr(bmod.Batch, "write_result", flaky)
+    rc = loop.worker_loop(root, "216", once=False, work_root=root / "work",
+                          sleep=lambda s: q.request_stop("216"))
+    assert rc == 0
+    assert q.state("s1") == "fail" and "worker_exception" in fs.read_json(paths.fail_file(root, "s1"))["last"]
+    assert not paths.claim_file(root, "s1").exists(), "claim 不留著"
+    assert q.state("s2") == "done", "worker 活著，下一個照跑"
+    ev = _events(root)
+    assert "job_failed" in ev and ev[-1] == "worker_stop"
+    assert not (root / "work" / "s1").exists(), "工作目錄還是清掉"
+
+
 def test_loop_run_batch_fail_marks_fail(root):
     testing.make_fake_root(root)
     ids = make_batch(root, "s1")

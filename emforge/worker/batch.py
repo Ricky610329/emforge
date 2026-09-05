@@ -70,10 +70,12 @@ def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_
 
 
 def _todo(batch, rpass: int) -> list:
-    """第 0 輪：還沒 done 的（含之前的 error，續跑）；補測輪：error 且 attempts < MAX_ATTEMPTS。回 [(id, 之前 attempts)]。"""
+    """第 0 輪：還沒 done 且 attempts < MAX_ATTEMPTS 的（續跑）；補測輪：error 且 attempts < MAX_ATTEMPTS。回 [(id, 之前 attempts)]。
+    #! 回歸 review-10：第 0 輪以前不看 attempts——批被讓位／接管／requeue 重進時毒樣本第 4、5、6 次再跑，每台都吃一次逾時＋重開。"""
     res = batch.results()
     if rpass == 0:
-        return [(i, res.get(i, {}).get("attempts", 0)) for i in batch.ids() if res.get(i, {}).get("status") != "done"]
+        return [(i, res.get(i, {}).get("attempts", 0)) for i in batch.ids()
+                if res.get(i, {}).get("status") != "done" and res.get(i, {}).get("attempts", 0) < MAX_ATTEMPTS]
     return [(i, res[i]["attempts"]) for i in batch.ids()
             if res.get(i, {}).get("status") == "error" and res[i].get("attempts", 1) < MAX_ATTEMPTS]
 
@@ -83,6 +85,7 @@ def _run_pass(run: _Run, patterns: dict, todo: list, rpass: int) -> str:
     for rid, prev in todo:
         res = _simulate_one(run, rid, patterns[rid], prev + 1)
         run.batch.write_result(rid, res)
+        run.queue.touch_claim(run.job.store)            # claim 心跳：requeue／接管都看得到「還活著」
         if res["status"] == "error":
             run.log("sample_error", store=run.job.store, id=rid, error=res["error"], attempts=res["attempts"])
             consecutive += 1

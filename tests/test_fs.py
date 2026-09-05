@@ -238,6 +238,41 @@ def test_lock_timeout_raises_locktimeout_not_systemexit(root):
     assert lk.exists(), "別人的新鮮鎖不能被動"
 
 
+def test_lock_times_out_when_claim_keeps_failing_and_file_missing(root, monkeypatch):
+    """回歸 review-5：NAS 拒建檔時 try_claim 回 False 且檔不存在 → 舊碼在破鎖分支 continue 跳過逾時檢查與 sleep＝100% CPU 無限迴圈。
+    現在每圈都走到逾時檢查：在 timeout_s 內拋 LockTimeout、而且有 sleep。"""
+    monkeypatch.setattr(fs, "try_claim", lambda path, payload: False)
+    slept = []
+    t0 = time.time()
+    with pytest.raises(fs.LockTimeout):
+        with fs.Lock(root / "never.lock", timeout_s=0.3, sleep=slept.append):
+            pass
+    assert time.time() - t0 < 5 and slept, "有逾時、有 sleep（不是忙迴圈）"
+
+
+def test_release_retries_on_permission_error(root, monkeypatch):
+    """回歸 review-6：Windows 上別的行程開著檔時 unlink 會 PermissionError（sharing violation）——退避重試，用盡才拋。"""
+    f = root / "c.claim"
+    fs.try_claim(f, {})
+    calls = {"n": 0}
+    real = os.unlink
+
+    def flaky(path, *a, **k):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError("sharing violation")
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(fs.os, "unlink", flaky)
+    monkeypatch.setattr(fs.time, "sleep", lambda s: None)
+    fs.release(f)
+    assert not f.exists() and calls["n"] == 3
+    fs.try_claim(f, {})
+    monkeypatch.setattr(fs.os, "unlink", lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
+    with pytest.raises(fs.FsBusy):
+        fs.release(f)
+
+
 # ── jsonl ───────────────────────────────────────────────────────────────────
 def test_append_jsonl_read_jsonl_order_and_blank_lines(root):
     p = root / "ev" / "events.jsonl"

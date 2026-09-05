@@ -145,8 +145,19 @@ def read_claim(path) -> dict | None:
 
 
 def release(path) -> None:
-    """刪認領檔；不存在不算錯（重複釋放、被接管後釋放都會發生）。"""
-    Path(path).unlink(missing_ok=True)
+    """刪認領檔；不存在不算錯（重複釋放、被接管後釋放都會發生）。
+    #! 回歸 review-6：Windows 上別的行程正開著這個檔（jobs／claim_owner 讀取中）unlink 會 PermissionError——退避重試，用盡才拋 FsBusy。"""
+    path = Path(path)
+    for i, backoff in enumerate(_REPLACE_BACKOFF_S):
+        try:
+            os.unlink(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if i == len(_REPLACE_BACKOFF_S) - 1:
+                raise FsBusy(f"unlink 重試 {len(_REPLACE_BACKOFF_S)} 次仍被佔用：{path}")
+            time.sleep(backoff)
 
 
 # ── mtime 心跳 ──────────────────────────────────────────────────────────────
@@ -208,9 +219,10 @@ class Lock:
                     os.replace(self.path, broken)
                 except (FileNotFoundError, PermissionError):
                     pass  # 別人先破了／正在寫——重來就好
-                continue
+            #! 回歸 review-5：破鎖分支以前 `continue` 跳過下面兩行——NAS 拒建檔（try_claim 回 False、檔又不存在）
+            #  就變成 100% CPU 的無限忙迴圈。每一圈都要走到逾時檢查與 sleep。
             if self._now() - t0 > self.timeout_s:
-                raise LockTimeout(f"{self.path} 佔用 >{self.timeout_s:.0f}s——查殭屍鎖")
+                raise LockTimeout(f"{self.path} 佔用 >{self.timeout_s:.0f}s——查殭屍鎖或 NAS 權限")
             self._sleep(0.02 + random.random() * 0.03)
 
     def __exit__(self, *exc):

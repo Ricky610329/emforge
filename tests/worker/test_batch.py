@@ -4,7 +4,9 @@
 防什麼：I-1（工作目錄）、I-10（版本戳）、I-12（可續跑）、看門狗、保險絲、讓位、worker 不碰量測。
 """
 import inspect
+import os
 import shutil
+import time
 from pathlib import Path
 
 import numpy as np
@@ -176,6 +178,34 @@ def test_background_job_yields_when_foreground_appears(root, claimed):
     assert q.claim_owner(job.store) is None, "讓位＝釋放 claim，空窗時任一機續跑"
     assert ("job_yield", {"store": job.store, "reason": "foreground_job_appeared"}) in events
     assert q.pick("216").store == "fg", "前景先跑"
+
+
+def test_pass0_skips_poison_samples_with_attempts_at_max(root, claimed):
+    """回歸 review-10：批被讓位／接管／requeue 重進時，第 0 輪以前不看 attempts，毒樣本第 4、5、6 次再跑、每台都吃一次逾時。
+    現在第 0 輪也套 attempts < 3。"""
+    q, b, job, ids = claimed
+    b.write_result(ids[0], {"id": ids[0], "status": "error", "error": "watchdog_timeout: 毒", "attempts": 3,
+                            "machine": "218", "worker_ver": "v", "profile_hash": P.profile_hash, "at": "t"})
+    sims = []
+
+    def factory(wd):
+        s = testing.FakeSimulator(workdir=str(wd), profile=P)
+        sims.append(s)
+        return s
+
+    out, res, _, _ = _run(root, claimed, factory)
+    assert out == "done"
+    assert res[ids[0]]["attempts"] == 3 and res[ids[0]]["status"] == "error", "毒樣本不再跑"
+    assert sims[0].calls["simulate"] == 2 and all(res[i]["status"] == "done" for i in ids[1:])
+
+
+def test_run_batch_touches_claim_after_each_sample(root, claimed):
+    """review（砍掉的 queue.py:165）配套：worker 每筆後 touch claim，claim mtime 才是真的心跳。"""
+    q, b, job, ids = claimed
+    old = time.time() - 3600
+    os.utime(paths.claim_file(root, job.store), (old, old))
+    _run(root, claimed)
+    assert time.time() - fs.mtime(paths.claim_file(root, job.store)) < 5
 
 
 def test_worker_knows_no_measure_or_score(root, claimed):
