@@ -82,19 +82,32 @@ def test_notarize_reject_when_spread_exceeds_noise_floor(rt):
 
 
 def test_notarize_threshold_uses_ledger_best_and_pending(rt):
+    from emforge import ledger
     new = _first_batch(rt)
     best = max(new, key=lambda r: r.score)
-    paths.ledger_file(rt.root, "fake_f1", "fake_v1").parent.mkdir(parents=True)
-    fs.atomic_write_json(paths.ledger_file(rt.root, "fake_f1", "fake_v1"),
-                         {"profile": "fake_f1", "spec": "fake_v1", "best": {"id": "x", "score": best.score + 100}, "history": []})
+    lg = ledger.Ledger(rt.root, "fake_f1", "fake_v1")        # 經 Ledger 寫（帶 checksum）；手寫的檔會被當 tamper
+    lg._write({"profile": "fake_f1", "spec": "fake_v1", "best": {"id": "x", "score": best.score + 100}, "history": []})
     rt.state["tick"] = 1
     nz.notarize_step(rt, new)
     assert _events(rt, "record_candidate") == [], "沒破榜就不公證"
-    fs.atomic_write_json(paths.ledger_file(rt.root, "fake_f1", "fake_v1"),
-                         {"profile": "fake_f1", "spec": "fake_v1", "best": {"id": "x", "score": best.score - 100}, "history": []})
+    lg._write({"profile": "fake_f1", "spec": "fake_v1", "best": {"id": "x", "score": best.score - 100}, "history": []})
     fs.append_jsonl(paths.pending_jsonl(rt.root, "fake_f1"), {"id": "y", "conservative": best.score + 1})
     nz.notarize_step(rt, new)
     assert _events(rt, "record_candidate") == [], "已有更好的待審 → 不重複公證"
+
+
+def test_threshold_on_tampered_ledger_emits_event_and_still_opens_candidates(rt):
+    """回歸 review（砍掉的 notarize.py:83）：_threshold 以前直接讀榜檔、繞過 checksum。被手改的榜 → ledger_tamper 事件、
+    門檻當沒有榜，runtime 繼續（不炸、不用假分數當門檻）。"""
+    new = _first_batch(rt)
+    p = paths.ledger_file(rt.root, "fake_f1", "fake_v1")
+    p.parent.mkdir(parents=True)
+    fs.atomic_write_json(p, {"profile": "fake_f1", "spec": "fake_v1", "best": {"id": "x", "score": 999.0}, "history": []})
+    rt.state["tick"] = 1
+    nz.notarize_step(rt, new)
+    tam = _events(rt, "ledger_tamper")
+    assert tam and tam[0]["spec"] == "fake_v1"
+    assert len(_events(rt, "record_candidate")) == 1, "假榜的 999 沒有變成門檻"
 
 
 def test_notarize_completes_with_partial_when_repeat_store_fails(rt):

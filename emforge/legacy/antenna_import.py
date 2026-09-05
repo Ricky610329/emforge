@@ -115,11 +115,15 @@ def map_profile(old_root, store: str, overrides: dict | None = None) -> tuple:
         return "harvest_dual", None
     if store.startswith("harvest_single"):
         return "harvest_single", None
-    setup = {k: v for k, v in _setup(old, store).items() if k not in CONTROL_KEYS}
+    domain = detect_domain(old, store)
+    #? 值等於預設的求解鍵不是變體（舊 dedust_r*ms0 那類把預設明寫出來；review 砍掉的 antenna_import:118）
+    defaults = {**aprof.HFSS_DEFAULTS, "pixel_count": 25, "sweep_type": "Fast" if domain == "dual" else "Interpolating"}
+    setup = {k: v for k, v in _setup(old, store).items()
+             if k not in CONTROL_KEYS and not (k in defaults and v == defaults[k])}
     dbw = setup.pop("diag_bridge_w", None)
     if setup:
         return None, f"unmapped: 幾何／網格變體 hfss_setup 鍵 {sorted(setup)}（舊規則：永不入鍋）"
-    if detect_domain(old, store) == "dual":
+    if domain == "dual":
         geoms = {e.get("geom", "p00") for e in _results(old, store).values() if isinstance(e, dict) and "wm" in e}
         if len(geoms) > 1:
             return None, f"unmapped: store 內 geom 不一致 {sorted(geoms)}"

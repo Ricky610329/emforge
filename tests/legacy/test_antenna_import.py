@@ -139,6 +139,20 @@ def test_auto_mapping_table(old, out):
     assert "dedust_smp001a_input" not in got, "_input 夾不是 store"
 
 
+def test_map_profile_ignores_solver_keys_equal_to_defaults(old, out):
+    """回歸 review（砍掉的 antenna_import.py:118）：舊 store 的 hfss_setup.json 把預設求解值明寫出來（dedust_r*ms0 那類）
+    不是變體；值不等於預設才是。"""
+    same = {"max_delta_s": 0.02, "max_passes": 6, "min_passes": 5, "min_converged": 5, "pixel_count": 25,
+            "sweep_type": "Fast", "diag_bridge_w": 0.075, "timeout": 900}
+    write_store(old, "dedust_r70ms0", [dict(seed=1)], port="dual", setup=same, geom="p01", dbw=0.075)
+    write_store(old, "dedust_r70ms1", [dict(seed=2)], port="dual", setup={**same, "max_passes": 8}, geom="p01", dbw=0.075)
+    write_store(old, "dedust_s_interp", [dict(seed=3)], port="single", setup={"sweep_type": "Interpolating"})
+    assert li.map_profile(old, "dedust_r70ms0") == ("dual_p01_db075", None)
+    prof, reason = li.map_profile(old, "dedust_r70ms1")
+    assert prof is None and "max_passes" in reason
+    assert li.map_profile(old, "dedust_s_interp") == ("single_p00", None)
+
+
 # ── join 與欄位 ─────────────────────────────────────────────────────────────
 def test_join_by_pattern_bytes_and_fields(old, out):
     ids = write_store(old, "dedust_smp002a", [dict(seed=11, arm="L", parent="x_999"), dict(seed=12, arm="d")],

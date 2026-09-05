@@ -22,7 +22,7 @@ from .model import Context, Profile, Proposal, ProposalError
 SHIPPED_DIR = Path(__file__).resolve().parent / "strategies"
 
 
-class StrategyError(Exception):
+class StrategyFailure(Exception):
     """載入／契約／子行程失敗。"""
 
 
@@ -110,16 +110,16 @@ def load_strategies_yaml(path, profile: str | None = None) -> StrategiesFile:
 def resolve_strategy_path(root, name: str) -> Path:
     """使用者 `<root>/strategies/<name>.py` 優先，其次內建 `emforge/strategies/<name>.py`。"""
     if name in paths.RESERVED_STRATEGY_NAMES:
-        raise StrategyError(f"{name!r} 是保留字，不能當策略名")
+        raise StrategyFailure(f"{name!r} 是保留字，不能當策略名")
     if not paths.is_valid_name(name):
-        raise StrategyError(f"策略名 {name!r} 不合規（^[a-z][a-z0-9_]*$）")
+        raise StrategyFailure(f"策略名 {name!r} 不合規（^[a-z][a-z0-9_]*$）")
     user = paths.user_strategies_dir(root) / f"{name}.py"
     if user.exists():
         return user
     shipped = SHIPPED_DIR / f"{name}.py"
     if shipped.exists():
         return shipped
-    raise StrategyError(f"找不到策略 {name!r}：{user} 或內建 {shipped}")
+    raise StrategyFailure(f"找不到策略 {name!r}：{user} 或內建 {shipped}")
 
 
 def load_strategy(path):
@@ -129,15 +129,15 @@ def load_strategy(path):
     mod = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(mod)
-    except Exception as e:  # noqa: BLE001 — 策略碼是外來的，任何錯都包成 StrategyError
-        raise StrategyError(f"{path.name}: 載入失敗：{type(e).__name__}: {e}") from e
+    except Exception as e:  # noqa: BLE001 — 策略碼是外來的，任何錯都包成 StrategyFailure
+        raise StrategyFailure(f"{path.name}: 載入失敗：{type(e).__name__}: {e}") from e
     compat = getattr(mod, "COMPATIBLE", None)
     if (not isinstance(compat, (set, frozenset, list, tuple)) or not compat
             or not all(isinstance(c, str) for c in compat)):
-        raise StrategyError(f"{path.name}: 必須宣告 COMPATIBLE = {{'<profile 名>', ...}} 或 {{'*'}}")
+        raise StrategyFailure(f"{path.name}: 必須宣告 COMPATIBLE = {{'<profile 名>', ...}} 或 {{'*'}}")
     mod.COMPATIBLE = set(compat)
     if not callable(getattr(mod, "propose", None)):
-        raise StrategyError(f"{path.name}: 必須定義可呼叫的 propose(ctx)")
+        raise StrategyFailure(f"{path.name}: 必須定義可呼叫的 propose(ctx)")
     return mod
 
 
@@ -145,7 +145,7 @@ def check_compatible(mod, profile_name: str) -> None:
     """雙邊宣告的策略端（I-6）：策略沒說懂這個 profile 就不准載進這個實例。"""
     if paths.COMPATIBLE_ANY in mod.COMPATIBLE or profile_name in mod.COMPATIBLE:
         return
-    raise StrategyError(f"策略 COMPATIBLE={sorted(mod.COMPATIBLE)} 不含實例 profile {profile_name!r}")
+    raise StrategyFailure(f"策略 COMPATIBLE={sorted(mod.COMPATIBLE)} 不含實例 profile {profile_name!r}")
 
 
 # ── 驗證 ────────────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ def _read_proposals(path: Path) -> list:
 
 def propose_in_subprocess(root, profile: Profile, name: str, *, budget: int, seed: int, tick: int,
                           params: dict | None, timeout_s: float) -> list:
-    """在子行程跑 propose；逾時殺掉（StrategyTimeout）、非零退出包成 StrategyError（父行程永遠活著，I-4）。"""
+    """在子行程跑 propose；逾時殺掉（StrategyTimeout）、非零退出包成 StrategyFailure（父行程永遠活著，I-4）。"""
     workdir = paths.strategy_workdir(root, profile.name, name)
     workdir.mkdir(parents=True, exist_ok=True)
     out = workdir / "_proposals.npz"
@@ -224,9 +224,9 @@ def propose_in_subprocess(root, profile: Profile, name: str, *, budget: int, see
         raise StrategyTimeout(f"策略 {name} propose 超過 {timeout_s}s，子行程已殺") from None
     if r.returncode != 0:
         tail = "\n".join((r.stderr or "").strip().splitlines()[-8:])
-        raise StrategyError(f"策略 {name} 子行程失敗（rc={r.returncode}）：\n{tail}")
+        raise StrategyFailure(f"策略 {name} 子行程失敗（rc={r.returncode}）：\n{tail}")
     if not out.exists():
-        raise StrategyError(f"策略 {name} 子行程正常結束但沒有輸出 {out}")
+        raise StrategyFailure(f"策略 {name} 子行程正常結束但沒有輸出 {out}")
     return validate_proposals(_read_proposals(out), profile, budget)
 
 

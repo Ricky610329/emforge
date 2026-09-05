@@ -44,6 +44,7 @@ EVENTS = {
     "promoted": ("id", "spec", "by"),
     "retired": ("profile", "by"),
     "rescored": ("spec", "n", "by"),
+    "ledger_tamper": ("spec", "detail"),
     # ── worker（queue/log/<tag>.jsonl） ──
     "worker_start": ("worker_ver", "machine"),
     "job_claimed": ("store", "prio"),

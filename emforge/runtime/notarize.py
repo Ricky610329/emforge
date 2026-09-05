@@ -7,6 +7,7 @@
 from datetime import datetime
 
 from .. import fs, paths
+from ..ledger import Ledger, LedgerTamper
 from ..model import KIND_REPEAT, KIND_SAMPLE, STATUS_DONE, Proposal
 from .dispatch import dispatch
 
@@ -85,9 +86,14 @@ def smoke_dispatch(rt, rec_id: str, *, n: int = 1, machine: str | None = None, b
 
 def _threshold(rt, nz: dict):
     vals = []
-    led = fs.read_json(paths.ledger_file(rt.root, rt.profile_name, rt.profile.spec), default=None)
-    if led and (led.get("best") or {}).get("score") is not None:
-        vals.append(led["best"]["score"])
+    lg = Ledger(rt.root, rt.profile_name, rt.profile.spec)
+    if lg.exists():
+        try:
+            best = lg.best()                        # 走 checksum（review：以前直接讀檔、繞過 tamper 檢查）
+            if best and best.get("score") is not None:
+                vals.append(best["score"])
+        except LedgerTamper as e:
+            rt.event("ledger_tamper", spec=rt.profile.spec, detail=str(e))
     vals += [e["conservative"] for e in fs.read_jsonl(paths.pending_jsonl(rt.root, rt.profile_name))
              if e.get("conservative") is not None]
     vals += [info["score"] for info in nz.values()]

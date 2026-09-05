@@ -64,6 +64,19 @@ def test_promote_refuses_id_not_in_db_or_not_in_pending_unless_force(setup):
         lg.promote(recs[1].id, by="", db=d, pending=pend)
 
 
+def test_promote_with_other_spec_recomputes_score_from_measure(setup):
+    """回歸 review（砍掉的 ledger.py:89）：promote --spec 別的規格時，分數要用那個 spec 對 db 量測重算，
+    不能抄 pending 裡 profile 規格算出的 conservative 寫進另一個規格的榜。"""
+    from emforge import specs
+    root, d, recs, pend = setup
+    specs.register_spec(model.Spec(name="fake_v2", labels=P.labels, measure=P.measure, axes=("m4",), offsets=(0.0,)))
+    best = ledger.Ledger(root, P.name, "fake_v2").promote(recs[1].id, by="ricky", db=d, pending=pend)
+    assert best["score"] == pytest.approx(-1.2 + 3), "m4 的保守值（min over 原始 −1+3 與重測 −1.2+3）"
+    assert best["score"] != pend.get(recs[1].id)["conservative"]
+    v1 = ledger.Ledger(root, P.name, "fake_v1").promote(recs[1].id, by="ricky", db=d, pending=pend)
+    assert v1["score"] == -1.2, "profile 自己的 spec：與 pending 的保守值一致（同一把尺算的）"
+
+
 def test_history_append_only_across_promotes(setup):
     root, d, recs, pend = setup
     lg = ledger.Ledger(root, P.name, "fake_v1")

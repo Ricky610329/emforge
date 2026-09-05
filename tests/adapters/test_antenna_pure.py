@@ -92,10 +92,10 @@ def test_stack_order_follows_profile_labels_f32_shape(root):
 def test_missing_label_or_wrong_n_points_raises(root):
     s = sim.DualPortSim(workdir=str(root), profile=_dual(), old_cls=_StubOld)
     del _StubOld.out["S21"]
-    with pytest.raises(sim.AdapterError, match="S21"):
+    with pytest.raises(sim.AdapterFailure, match="S21"):
         s.simulate(np.zeros((25, 25), bool))
     _StubOld.out["S21"] = np.zeros(16, np.float32)
-    with pytest.raises(sim.AdapterError, match="17"):
+    with pytest.raises(sim.AdapterFailure, match="17"):
         s.simulate(np.zeros((25, 25), bool))
 
 
@@ -138,6 +138,22 @@ def test_simulate_calls_start_call_end_in_order_and_ends_on_exception(root):
     s.close()
     assert old.calls[-2:] == ["kill", "quit"]
     assert old.kw == _dual().kwargs and old.record_path == str(root), "kwargs 原名直傳、workdir→record_path"
+
+
+def test_simulate_after_kill_does_not_call_legacy_end(root):
+    """回歸 review-9：看門狗 kill 後，except 路徑若還去叫舊 end()，舊碼內部會自己 reopen（6 次無守門的 DispatchEx、會卡）。
+    被殺過就不叫 end；open() 之後才恢復正常路徑。"""
+    s = sim.DualPortSim(workdir=str(root), profile=_dual(), old_cls=_StubOld)
+    s.open()
+    s.kill()
+    _StubOld.raise_in_call = True
+    with pytest.raises(RuntimeError):
+        s.simulate(np.zeros((25, 25), bool))
+    assert ("end", False) not in s._sim.calls and s._sim.calls[-1] == "call"
+    s.open()                                                # _restart 會 kill → open：旗標重設
+    with pytest.raises(RuntimeError):
+        s.simulate(np.zeros((25, 25), bool))
+    assert s._sim.calls[-1] == ("end", False), "沒被殺的例外照常 end(save_project=False)"
 
 
 def test_single_last_radiation_goes_to_extra_dual_has_none(root):

@@ -5,7 +5,7 @@
 - history append-only；`best` 永遠是保守值（公證 min）。
 - 換評估器＝`rescore` 建新榜（零重量），舊榜一個 byte 都不動（D3）。
 """
-from . import fs, paths
+from . import fs, paths, specs
 from .model import STATUS_DONE, Profile, Spec, canonical_json
 
 
@@ -70,6 +70,19 @@ class Ledger:
         doc["_checksum"] = _checksum(doc)
         fs.atomic_write_json(self.path, doc)
 
+    def _conservative(self, ms: list, entry: dict | None) -> float:
+        """分數用**本榜的 spec** 對 db 量測重算取 min（review：--spec 別的規格時不能抄 pending 裡 profile 規格的分數）；
+        spec 沒註冊才退回 pending 的保守值／量測 min。"""
+        try:
+            spec = specs.get_spec(self.spec)
+        except specs.UnknownSpec:
+            spec = None
+        if spec is not None:
+            vals = [s for s in (spec.score(r.measure) for r in ms) if s is not None]
+            if vals:
+                return min(vals)
+        return entry["conservative"] if entry else min(r.score for r in ms)
+
     def best(self) -> dict | None:
         return self.read()["best"] if self.exists() else None
 
@@ -86,7 +99,7 @@ class Ledger:
         entry = pending.get(rec_id)
         if entry is None and not force:
             raise NotPending(f"{rec_id} 不在 pending.jsonl——沒過公證；確定要就 force（會記錄）")
-        conservative = entry["conservative"] if entry else min(r.score for r in ms)
+        conservative = self._conservative(ms, entry)
         doc = self.read() if self.exists() else self._new()
         prev = doc["best"]
         best = {"id": rec_id, "score": conservative, "at": fs.now_iso(), "by": by, "note": note, "force": entry is None}

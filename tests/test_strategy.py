@@ -30,11 +30,11 @@ def _write(root, name, src):
 
 # ── 載入與相容 ──────────────────────────────────────────────────────────────
 def test_load_requires_compatible_set_and_propose_callable(root):
-    with pytest.raises(strategy.StrategyError, match="COMPATIBLE"):
+    with pytest.raises(strategy.StrategyFailure, match="COMPATIBLE"):
         strategy.load_strategy(_write(root, "no_compat", "def propose(ctx): return []"))
-    with pytest.raises(strategy.StrategyError, match="propose"):
+    with pytest.raises(strategy.StrategyFailure, match="propose"):
         strategy.load_strategy(_write(root, "no_propose", "COMPATIBLE = {'fake_f1'}\npropose = 3"))
-    with pytest.raises(strategy.StrategyError, match="COMPATIBLE"):
+    with pytest.raises(strategy.StrategyFailure, match="COMPATIBLE"):
         strategy.load_strategy(_write(root, "bad_compat", "COMPATIBLE = 'fake_f1'\ndef propose(ctx): return []"))
     mod = strategy.load_strategy(_write(root, "good", GOOD))
     assert callable(mod.propose) and mod.COMPATIBLE == {"fake_f1"}
@@ -43,7 +43,7 @@ def test_load_requires_compatible_set_and_propose_callable(root):
 def test_check_compatible_rejects_undeclared_profile_accepts_wildcard(root):
     """回歸 I-6（2026-08-31）雙邊宣告的策略端：策略沒說它懂這個 profile 就不准載進這個實例。"""
     mod = strategy.load_strategy(_write(root, "dual_only", "COMPATIBLE = {'dual_p01_db075'}\ndef propose(ctx): return []"))
-    with pytest.raises(strategy.StrategyError, match="COMPATIBLE"):
+    with pytest.raises(strategy.StrategyFailure, match="COMPATIBLE"):
         strategy.check_compatible(mod, "fake_f1")
     strategy.check_compatible(mod, "dual_p01_db075")
     anym = strategy.load_strategy(_write(root, "anyp", "COMPATIBLE = {'*'}\ndef propose(ctx): return []"))
@@ -55,9 +55,9 @@ def test_resolve_user_dir_shadows_shipped_and_unknown_raises(root):
     assert shipped.parent.name == "strategies" and "emforge" in shipped.parts
     user = _write(root, "blind", GOOD)
     assert strategy.resolve_strategy_path(root, "blind") == user, "使用者目錄蓋過內建"
-    with pytest.raises(strategy.StrategyError, match="nope"):
+    with pytest.raises(strategy.StrategyFailure, match="nope"):
         strategy.resolve_strategy_path(root, "nope")
-    with pytest.raises(strategy.StrategyError, match="保留"):
+    with pytest.raises(strategy.StrategyFailure, match="保留"):
         strategy.resolve_strategy_path(root, "notarize")
 
 
@@ -169,13 +169,13 @@ def test_propose_in_subprocess_returns_proposals_deterministically(root):
 
 
 def test_child_exception_becomes_strategy_error_parent_alive(root):
-    """回歸 I-4（2026-08-03）：策略程式碼炸了殺掉整個 worker。策略在子行程跑，例外變成父行程可捕捉的 StrategyError。"""
+    """回歸 I-4（2026-08-03）：策略程式碼炸了殺掉整個 worker。策略在子行程跑，例外變成父行程可捕捉的 StrategyFailure。"""
     testing.make_fake_root(root)
     _write(root, "boom", "COMPATIBLE = {'*'}\ndef propose(ctx):\n    raise RuntimeError('kaboom 炸了')")
-    with pytest.raises(strategy.StrategyError, match="kaboom"):
+    with pytest.raises(strategy.StrategyFailure, match="kaboom"):
         strategy.propose_in_subprocess(root, testing.FAKE_PROFILE, "boom", budget=1, seed=0, tick=0, params={}, timeout_s=60)
     _write(root, "badout", "COMPATIBLE = {'*'}\ndef propose(ctx):\n    return [dict(pattern=ctx.profile.fixed_on, kind='repeat')]")
-    with pytest.raises(strategy.StrategyError, match="kind"):
+    with pytest.raises(strategy.StrategyFailure, match="kind"):
         strategy.propose_in_subprocess(root, testing.FAKE_PROFILE, "badout", budget=1, seed=0, tick=0, params={}, timeout_s=60)
 
 

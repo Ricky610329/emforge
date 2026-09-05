@@ -21,7 +21,7 @@ class ProfileInconsistent(Exception):
     """profile 與這個模擬器包裝不一致（labels／shape／n_points／禁用 kwargs）。"""
 
 
-class AdapterError(Exception):
+class AdapterFailure(Exception):
     """模擬器回傳的東西不是協定要的形狀。"""
 
 
@@ -51,6 +51,7 @@ class _AntennaSim(Simulator):
             self._check_old_geom(cls)
         self._sim = cls(record_path=str(workdir), **dict(profile.kwargs))
         self._n = 0
+        self._killed = False
 
     def _validate(self, profile) -> None:
         bad = sorted(set(profile.kwargs) & FORBIDDEN_KWARGS)
@@ -79,6 +80,7 @@ class _AntennaSim(Simulator):
 
     # ── 協定 ──
     def open(self) -> None:
+        self._killed = False
         self._sim.open()
 
     def simulate(self, bits) -> SimResult:
@@ -88,10 +90,13 @@ class _AntennaSim(Simulator):
         try:
             out = self._sim(pattern)
         except Exception:
-            try:
-                self._sim.end(save_project=False)   # 炸了也要把 HFSS 專案關掉，不存
-            except Exception:  # noqa: BLE001
-                pass
+            #! 回歸 review-9：看門狗 kill 過就**不**叫舊 end()——舊 end() 內部會自己 reopen（6 次無守門的 DispatchEx，會卡）。
+            #  死掉的 HFSS 交給 worker 的 _restart（kill＋open_with_retries 有看門狗）。
+            if not self._killed:
+                try:
+                    self._sim.end(save_project=False)   # 正常例外：把 HFSS 專案關掉，不存
+                except Exception:  # noqa: BLE001
+                    pass
             raise
         elapsed = self._sim.end()
         return SimResult(response=self._stack(out), time_s=float(elapsed or 0.0), extra=self._extra())
@@ -99,17 +104,18 @@ class _AntennaSim(Simulator):
     def _stack(self, out) -> np.ndarray:
         missing = [l for l in self.LABELS if l not in out]
         if missing:
-            raise AdapterError(f"模擬器回傳缺 labels {missing}（有 {sorted(out)}）")
+            raise AdapterFailure(f"模擬器回傳缺 labels {missing}（有 {sorted(out)}）")
         rows = [np.asarray(_to_numpy(out[l]), np.float32).reshape(-1) for l in self.LABELS]
         bad = [(l, int(r.shape[0])) for l, r in zip(self.LABELS, rows) if r.shape[0] != N_POINTS]
         if bad:
-            raise AdapterError(f"響應點數不對 {bad}（每個 label 要 {N_POINTS} 點）")
+            raise AdapterFailure(f"響應點數不對 {bad}（每個 label 要 {N_POINTS} 點）")
         return np.stack(rows)
 
     def _extra(self) -> dict:
         return {}
 
     def kill(self) -> None:
+        self._killed = True
         try:
             self._sim.kill()
         except Exception:  # noqa: BLE001
