@@ -27,6 +27,7 @@ EVENTS = {
     "proposals_validated": ("name", "tick", "n_in", "n_dup", "n_out"),
     # ── dispatch / collect ──
     "batch_dispatched": ("store", "strategy", "n", "prio", "tick", "seed", "kind"),
+    "dispatch_failed": ("name", "tick", "error"),
     "record_added": ("id", "store", "score", "kind"),
     "batch_done": ("store", "n_done", "n_error"),
     "batch_failed": ("store", "reason"),

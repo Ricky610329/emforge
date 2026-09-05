@@ -52,10 +52,14 @@ def _open_candidates(rt, nz: dict, cfg, new_records: list) -> None:
         if threshold is not None and rec.score <= threshold:
             continue
         stores = []
-        for n in range(1, cfg.repeat_n + 1):
-            store = paths.notarize_store_name(rt.profile_name, rt.state["tick"], rec.id, n)
-            stores.append(dispatch(rt, "notarize", [Proposal(pattern=rec.bits, parent=rec.id, arm=rec.arm)],
-                                   tick=rt.state["tick"], seed=0, prio=cfg.notarize_prio, kind=KIND_REPEAT, store=store))
+        try:
+            for n in range(1, cfg.repeat_n + 1):
+                store = paths.notarize_store_name(rt.profile_name, rt.state["tick"], rec.id, n)
+                stores.append(dispatch(rt, "notarize", [Proposal(pattern=rec.bits, parent=rec.id, arm=rec.arm)],
+                                       tick=rt.state["tick"], seed=0, prio=cfg.notarize_prio, kind=KIND_REPEAT, store=store))
+        except Exception as e:  # noqa: BLE001 — 派不出去就不登記候選（review-3）；派出去的那半批照常收、只是不參與判定
+            rt.event("dispatch_failed", name="notarize", tick=rt.state["tick"], error=f"{type(e).__name__}: {e}")
+            continue
         nz[rec.id] = {"stores": stores, "tick": rt.state["tick"], "score": rec.score}
         rt.event("record_candidate", id=rec.id, score=rec.score, prev_best=threshold)
         rt.event("notarize_dispatched", id=rec.id, stores=stores)

@@ -229,6 +229,20 @@ def test_stop_resume_profile_and_worker(fake):
     assert "strategy_resumed" in ev and "profile_resumed" in ev
 
 
+def test_smoke_cli_does_not_touch_state_json(fake):
+    """回歸 review-4：smoke 建的第二個 Runtime 沒拿鎖，不准用舊快照覆寫跑著的 runtime 的 state.json。"""
+    rec = _seed_record(fake, 7, -1.0)
+    rt = make_rt(fake)
+    rt.state["tick"] = 120
+    rt.state["notarize"] = {"deadbeef": {"stores": ["x"], "tick": 118, "score": -1.0}}
+    rt.save_state()
+    p = paths.state_json(fake, "fake_f1")
+    before = (p.read_bytes(), p.stat().st_mtime_ns)
+    assert _main("smoke", rec.id, "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 0
+    assert (p.read_bytes(), p.stat().st_mtime_ns) == before
+    assert fs.read_json(p)["notarize"] == {"deadbeef": {"stores": ["x"], "tick": 118, "score": -1.0}}
+
+
 def test_smoke_dispatches_repeat_for_known_id(fake, capsys):
     rec = _seed_record(fake, 7, -1.0)
     assert _main("smoke", rec.id, "--root", fake, "--profile", "fake_f1", "--machine", "216", "--by", "ricky", "--n", 2) == 0

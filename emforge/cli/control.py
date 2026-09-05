@@ -83,9 +83,8 @@ def _add_stop(sub) -> None:
 
 
 def cmd_smoke(args) -> int:
-    rt = Runtime(root_of(args), args.profile)
+    rt = Runtime(root_of(args), args.profile, readonly=True)   # 不拿鎖、不寫 state.json（review-4）
     stores = smoke_dispatch(rt, args.id, n=args.n, machine=args.machine, by=args.by)
-    rt.save_state()
     for s in stores:
         print(f"dispatched {s}（kind=repeat, strategy=cli:smoke, machine={args.machine or '任一'}）")
     return EXIT_OK
@@ -104,7 +103,7 @@ def _add_smoke(sub) -> None:
 
 def cmd_abandon(args) -> int:
     from ..runtime.collect import abandon
-    rt = Runtime(root_of(args), args.profile)
+    rt = Runtime(root_of(args), args.profile, readonly=True)
     out = abandon(rt, args.store, by=args.by)
     print(f"abandoned {args.store}：收了 {out['n_collected']} 筆（含 error）、{out['n_missing']} 筆從沒跑；inflight 移除、佇列標 done")
     return EXIT_OK

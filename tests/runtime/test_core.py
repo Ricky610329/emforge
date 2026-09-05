@@ -57,6 +57,58 @@ def test_status_inflight_entries_carry_queue_state(rt):
     assert st["inflight"] and st["inflight"][0]["queue_state"] == "queued"
 
 
+def test_tick_number_is_saved_before_dispatch_so_crash_replay_uses_next_tick(rt_root, rt, monkeypatch):
+    """回歸 review-3：tick 號若在 tick 結束才存，中途死掉重啟會重播同一 tick → store 名撞既有批。
+    現在 tick 號一加就落地；重啟從下一號開始。"""
+    rt.acquire_lock()
+    real_schedule = core._schedule.schedule
+    died = []
+
+    def dispatch_then_die(r):
+        real_schedule(r)
+        if not died:
+            died.append(1)
+            raise RuntimeError("死在派工之後、tick 尾的 save_state 之前")
+
+    monkeypatch.setattr(core._schedule, "schedule", dispatch_then_die)
+    with pytest.raises(RuntimeError):
+        rt.tick()                                         # blind 已派 t00001、然後死
+    rt.release_lock()
+    assert fs.read_json(paths.state_json(rt_root, "fake_f1"))["tick"] == 1
+    assert paths.inflight_file(rt_root, "fake_f1", "fake_f1-blind-t00001").exists()
+    rt2 = make_rt(rt_root)
+    assert rt2.run(once=True) == 0, "重啟不會撞 BatchExists"
+    assert rt2.state["tick"] == 2
+
+
+def test_readonly_runtime_refuses_save_and_lock(rt_root):
+    """回歸 review-4：CLI（smoke／abandon）建的 Runtime 是唯讀的——不准寫 state.json、不准拿鎖。"""
+    ro = make_rt(rt_root, readonly=True)
+    with pytest.raises(RuntimeError, match="readonly"):
+        ro.save_state()
+    with pytest.raises(RuntimeError, match="readonly"):
+        ro.acquire_lock()
+
+
+def test_heartbeat_thread_keeps_lock_fresh_during_long_tick(rt_root):
+    """回歸 review-7：一個 tick 可能超過鎖的 stale 門檻（策略子行程逐個逾時）；背景心跳讓第二個實例拿不到鎖。"""
+    rt = make_rt(rt_root, heartbeat_s=0.05)
+    rt.acquire_lock()
+    lk = paths.runtime_lock(rt_root, "fake_f1")
+    old = time.time() - 24 * 3600
+    os.utime(lk, (old, old))
+    rt.start_heartbeat()
+    try:
+        time.sleep(0.4)                                   # 模擬「很久的 tick」期間
+        assert time.time() - fs.mtime(lk) < 5, "心跳有在 touch"
+        with pytest.raises(core.RuntimeLocked):
+            make_rt(rt_root).acquire_lock()
+    finally:
+        rt.stop_heartbeat()
+        rt.release_lock()
+    assert not lk.exists()
+
+
 def test_stop_file_exits_after_tick(rt):
     fs.touch(paths.runtime_stop(rt.root, "fake_f1"))
     rc = rt.run(once=False)

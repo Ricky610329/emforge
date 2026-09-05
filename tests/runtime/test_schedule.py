@@ -122,6 +122,20 @@ def test_schedule_skips_disabled_and_paused_profile(rt):
     assert _stores(rt) == [], "profile 暫停 → 不派任何策略"
 
 
+def test_schedule_survives_dispatch_failure_with_event(rt, monkeypatch):
+    """回歸 review-3：dispatch 的例外（BatchExists／LockTimeout／NAS 斷線）不能殺 runtime，也不算策略的錯。"""
+    def boom(*a, **k):
+        raise RuntimeError("NAS 斷了")
+
+    monkeypatch.setattr(sch, "dispatch", boom)
+    rt.state["tick"] = 1
+    sch.schedule(rt)                                      # 不拋
+    ev = _events(rt, "dispatch_failed")
+    assert ev and ev[0]["name"] == "blind" and "NAS" in ev[0]["error"] and ev[0]["tick"] == 1
+    st = rt.state["strategies"]["blind"]
+    assert st["errors_consecutive"] == 0 and st["paused"] is False, "派工失敗不是策略連敗"
+
+
 def test_seed_recorded_and_same_tick_reproduces(rt):
     rt.state["tick"] = 5
     sch.schedule(rt)

@@ -12,6 +12,10 @@ from ..batches import Batch
 from ..model import KIND_REPEAT, KIND_SAMPLE, KINDS, Job, record_id
 
 
+class StoreExists(Exception):
+    """同名 store 已有 inflight 或批——重播了同一個 tick？在寫任何東西之前拒絕（review-3）。"""
+
+
 def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, prio: int,
              kind: str = KIND_SAMPLE, store: str | None = None, origin: str = "runtime",
              machine: str | None = None) -> str | None:
@@ -22,6 +26,8 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
         raise ValueError("sample 批的 store 名由 runtime 決定；repeat 批必須指定 store")
     profile = rt.profile
     store = store or paths.store_name(profile.name, strategy_name, tick)
+    if paths.inflight_file(rt.root, profile.name, store).exists() or Batch(rt.root, store).exists():
+        raise StoreExists(f"store {store} 已存在（inflight 或批）——tick 號重播？什麼都沒寫")
     keep, dropped = _dedup(rt, proposals, kind)
     rt.event("proposals_validated", name=strategy_name, tick=tick, n_in=len(proposals), n_dup=dropped, n_out=len(keep))
     if not keep:

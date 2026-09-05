@@ -71,6 +71,21 @@ def test_dispatch_all_dups_returns_none_and_writes_nothing(rt):
     assert len(queue.Queue(rt.root).list()) == 1
 
 
+def test_dispatch_refuses_existing_store_without_writing(rt):
+    """回歸 review-3：同一 store 名再派（重播 tick）必須在寫任何東西**之前**拒絕——不能先覆寫 inflight 再撞 BatchExists。"""
+    store = dp.dispatch(rt, "blind", _props(2), tick=1, seed=0, prio=9)
+    inf_path = paths.inflight_file(rt.root, "fake_f1", store)
+    inf = fs.read_json(inf_path)
+    inf["collected"] = [inf["ids"][0]]
+    fs.atomic_write_json(inf_path, inf)
+    with pytest.raises(dp.StoreExists):
+        dp.dispatch(rt, "blind", _props(3, seed=9), tick=1, seed=0, prio=9)
+    assert fs.read_json(inf_path)["collected"] == [inf["ids"][0]], "既有 inflight 一個 byte 都沒動"
+    assert len(queue.Queue(rt.root).list()) == 1
+    ev = [e["event"] for e in fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1"))]
+    assert ev.count("batch_dispatched") == 1
+
+
 def test_dispatch_error_records_do_not_block_reproposal(rt):
     props = _props(1)
     rt.db.add(_record(props[0], status="error"))

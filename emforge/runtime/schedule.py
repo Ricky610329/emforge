@@ -37,7 +37,11 @@ def schedule(rt) -> None:
         if not props:
             rt.event("strategy_empty", name=sc.name, tick=tick)
             continue
-        store = dispatch(rt, sc.name, props, tick=tick, seed=seed, prio=sc.prio)
+        try:
+            store = dispatch(rt, sc.name, props, tick=tick, seed=seed, prio=sc.prio)
+        except Exception as e:  # noqa: BLE001 — 派工失敗（StoreExists／鎖逾時／NAS）不是策略的錯，也不能殺 runtime（review-3）
+            rt.event("dispatch_failed", name=sc.name, tick=tick, error=f"{type(e).__name__}: {e}")
+            continue
         if store:
             st["last_dispatch_tick"] = tick
             inflight.append({"store": store, "strategy": sc.name, "kind": KIND_SAMPLE, "prio": sc.prio, "ids": []})

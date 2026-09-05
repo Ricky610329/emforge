@@ -117,6 +117,21 @@ def test_notarize_completes_with_partial_when_repeat_store_fails(rt):
     assert len(fs.read_jsonl(paths.pending_jsonl(rt.root, "fake_f1"))) == 1
 
 
+def test_notarize_survives_dispatch_failure_and_does_not_register_candidate(rt, monkeypatch):
+    """回歸 review-3：公證重測派不出去（NAS／StoreExists）→ 事件、不登記候選（下個 tick 不會卡在等一個不存在的批）。"""
+    new = _first_batch(rt)
+    rt.state["tick"] = 1
+
+    def boom(*a, **k):
+        raise RuntimeError("NAS 斷了")
+
+    monkeypatch.setattr(nz, "dispatch", boom)
+    nz.notarize_step(rt, new)                            # 不拋
+    ev = _events(rt, "dispatch_failed")
+    assert ev and ev[0]["name"] == "notarize"
+    assert rt.state["notarize"] == {} and _events(rt, "notarize_dispatched") == []
+
+
 def test_kind_repeat_only_set_in_notarize_module():
     """D7 紅線：grep 原始碼——KIND_REPEAT 只在 notarize.py 被當作 dispatch 參數。"""
     from emforge.runtime import core, schedule
