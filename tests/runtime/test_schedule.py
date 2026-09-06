@@ -16,12 +16,12 @@ P = testing.FAKE_PROFILE
 
 
 def _events(rt, name=None):
-    ev = fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1"))
+    ev = fs.read_jsonl(rt.root / paths.events_jsonl("fake_f1"))
     return [e for e in ev if name is None or e["event"] == name]
 
 
 def _stores(rt):
-    return sorted(p.stem for p in paths.inflight_dir(rt.root, "fake_f1").glob("*.json"))
+    return sorted(p.stem for p in (rt.root / paths.inflight_dir("fake_f1")).glob("*.json"))
 
 
 def test_schedule_dispatches_by_prio_and_records_inflight(rt):
@@ -140,7 +140,7 @@ def test_seed_recorded_and_same_tick_reproduces(rt):
     rt.state["tick"] = 5
     sch.schedule(rt)
     store = "fake_f1-blind-t00005"
-    inf = fs.read_json(paths.inflight_file(rt.root, "fake_f1", store))
+    inf = fs.read_json(rt.root / paths.inflight_file("fake_f1", store))
     seed = inf["seed"]
     assert seed == sch.strategy_seed(rt.state["seed_base"], "fake_f1", "blind", 5)
     again = strategy.propose_in_process(rt.root, P, "blind", budget=3, seed=seed, tick=5, params={})
@@ -157,7 +157,7 @@ def test_yaml_seed_overrides_derived(rt):
     rt.reload_config()
     rt.state["tick"] = 1
     sch.schedule(rt)
-    assert fs.read_json(paths.inflight_file(rt.root, "fake_f1", "fake_f1-blind-t00001"))["seed"] == 4242
+    assert fs.read_json(rt.root / paths.inflight_file("fake_f1", "fake_f1-blind-t00001"))["seed"] == 4242
 
 
 def _seed_db(rt, n):

@@ -2,11 +2,18 @@
 
 resume 走 `control.json`（runtime 下個 tick 消費），不直接改 state.json——runtime 每 tick 會覆寫它。
 """
+from pathlib import Path
+
 from .. import events, fs, paths
 from ..queue import LiveClaim, Queue
 from ..runtime.core import Runtime
 from ..runtime.notarize import smoke_dispatch
 from .base import EXIT_LIVE_CLAIM, EXIT_OK, add_root, err, root_of
+
+
+def _p(root, key: str) -> Path:
+    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
+    return Path(root) / key
 
 
 def cmd_requeue(args) -> int:
@@ -18,7 +25,7 @@ def cmd_requeue(args) -> int:
         err(str(e))
         return EXIT_LIVE_CLAIM
     job = next(j for j in q.list() if j.store == args.store)
-    events.emit(paths.events_jsonl(root, job.sim_profile), "batch_requeued", store=args.store, by=args.by)
+    events.emit(root, paths.events_jsonl(job.sim_profile), "batch_requeued", store=args.store, by=args.by)
     print(f"requeued {args.store}（claim／done／fail 一起清；進度在結果檔，會續跑）")
     return EXIT_OK
 
@@ -32,7 +39,7 @@ def _add_requeue(sub) -> None:
 
 
 def cmd_resume(args) -> int:
-    p = paths.control_json(root_of(args), args.profile)
+    p = _p(root_of(args), paths.control_json(args.profile))
     ctl = fs.read_json(p, default=None) or {}
     if args.strategy:
         ctl.setdefault("resume_strategies", [])
@@ -63,7 +70,7 @@ def cmd_stop(args) -> int:
         (q.clear_stop if args.clear else q.request_stop)(args.machine_tag)
         target = f"worker{' ' + args.machine_tag if args.machine_tag else '（全機）'}"
     elif args.profile:
-        p = paths.runtime_stop(root, args.profile)
+        p = _p(root, paths.runtime_stop(args.profile))
         (fs.release if args.clear else fs.touch)(p)
         target = f"runtime {args.profile}"
     else:

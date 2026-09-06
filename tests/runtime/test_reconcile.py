@@ -15,13 +15,13 @@ def test_reconcile_clean_on_fresh_root(rt):
 
 
 def test_reconcile_flags_inflight_without_job_and_run_refuses(rt):
-    fs.atomic_write_json(paths.inflight_file(rt.root, "fake_f1", "ghost"),
+    fs.atomic_write_json(rt.root / paths.inflight_file("fake_f1", "ghost"),
                          {"store": "ghost", "strategy": "blind", "tick": 1, "seed": 0, "kind": "sample", "prio": 9,
                           "ids": [], "items": {}, "collected": [], "at": "x"})
     problems = reconcile.reconcile(rt)
     assert any("ghost" in p and "inflight_without" in p for p in problems)
     assert rt.run(once=True) == 2, "不一致 → exit 2、不 tick"
-    ev = [e for e in fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1")) if e["event"] == "reconcile_mismatch"]
+    ev = [e for e in fs.read_jsonl(rt.root / paths.events_jsonl("fake_f1")) if e["event"] == "reconcile_mismatch"]
     assert ev and "ghost" in ev[0]["detail"]
 
 
@@ -57,13 +57,13 @@ def test_reconcile_fail_with_inflight_and_abandoned_done_are_both_consistent(rt)
     make_batch(rt.root, "f1")
     q = queue.Queue(rt.root)
     q.add(make_job("f1"))
-    fs.atomic_write_json(paths.inflight_file(rt.root, "fake_f1", "f1"),
+    fs.atomic_write_json(rt.root / paths.inflight_file("fake_f1", "f1"),
                          {"store": "f1", "strategy": "blind", "tick": 1, "seed": 0, "kind": "sample", "prio": 9,
                           "ids": [], "items": {}, "collected": [], "at": "x"})
     q.pick("216")
     q.mark_fail("f1", "216", "dead")
     assert reconcile.reconcile(rt) == []
-    fs.release(paths.inflight_file(rt.root, "fake_f1", "f1"))
+    fs.release(rt.root / paths.inflight_file("fake_f1", "f1"))
     q.mark_done("f1", "abandon:ricky", n_done=0, n_error=0, error_ids=[])
     assert reconcile.reconcile(rt) == []
 
@@ -72,9 +72,9 @@ def test_reconcile_fail_with_inflight_and_abandoned_done_are_both_consistent(rt)
 def test_reconcile_flags_inflight_without_complete_batch(rt, missing):
     make_batch(rt.root, "half")
     queue.Queue(rt.root).add(make_job("half"))
-    fs.atomic_write_json(paths.inflight_file(rt.root, "fake_f1", "half"),
+    fs.atomic_write_json(rt.root / paths.inflight_file("fake_f1", "half"),
                          {"store": "half", "strategy": "blind", "tick": 1, "seed": 0, "kind": "sample", "prio": 9,
                           "ids": [], "items": {}, "collected": [], "at": "x"})
     assert reconcile.reconcile(rt) == []
-    (paths.batch_manifest if missing == "manifest" else paths.batch_patterns)(rt.root, "half").unlink()
+    (rt.root / (paths.batch_manifest if missing == "manifest" else paths.batch_patterns)("half")).unlink()
     assert any("half" in p for p in reconcile.reconcile(rt))

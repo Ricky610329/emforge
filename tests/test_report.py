@@ -74,10 +74,10 @@ def test_report_refuses_cross_profile_without_flag_warns_with_flag(root):
 
 def test_report_counts_dup_dropped_from_events(root):
     _seed(root, 1, 1)
-    ev = paths.events_jsonl(root, P.name)
-    events.emit(ev, "proposals_validated", name="top_k_flip", tick=1, n_in=10, n_dup=3, n_out=7)
-    events.emit(ev, "proposals_validated", name="top_k_flip", tick=2, n_in=10, n_dup=4, n_out=6)
-    events.emit(ev, "proposals_validated", name="blind", tick=1, n_in=5, n_dup=0, n_out=5)
+    ev = paths.events_jsonl(P.name)
+    events.emit(root, ev, "proposals_validated", name="top_k_flip", tick=1, n_in=10, n_dup=3, n_out=7)
+    events.emit(root, ev, "proposals_validated", name="top_k_flip", tick=2, n_in=10, n_dup=4, n_out=6)
+    events.emit(root, ev, "proposals_validated", name="blind", tick=1, n_in=5, n_dup=0, n_out=5)
     rows = {r["strategy"]: r for r in report.strategy_rows(dbm.Database(root), P.name, k_min=1)}
     assert rows["top_k_flip"]["dup_dropped"] == 7 and rows["blind"]["dup_dropped"] == 0
 

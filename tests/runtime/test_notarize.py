@@ -17,7 +17,7 @@ P = testing.FAKE_PROFILE
 
 
 def _events(rt, name):
-    return [e for e in fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1")) if e["event"] == name]
+    return [e for e in fs.read_jsonl(rt.root / paths.events_jsonl("fake_f1")) if e["event"] == name]
 
 
 def _first_batch(rt, n=3):
@@ -52,7 +52,7 @@ def test_notarize_pass_appends_pending_never_touches_ledger(rt):
     assert all(r.kind == "repeat" and r.strategy == "notarize" and r.id == best.id for r in repeats) and len(repeats) == 2
     rt.state["tick"] = 2
     nz.notarize_step(rt, repeats)
-    pend = fs.read_jsonl(paths.pending_jsonl(rt.root, "fake_f1"))
+    pend = fs.read_jsonl(rt.root / paths.pending_jsonl("fake_f1"))
     assert len(pend) == 1 and pend[0]["id"] == best.id and pend[0]["conservative"] == best.score and pend[0]["spread"] == 0
     assert len(pend[0]["scores"]) == 3
     assert not list((rt.root / "ledger").rglob("*.json")), "永不碰榜（沒有任何榜檔被寫）"
@@ -76,7 +76,7 @@ def test_notarize_reject_when_spread_exceeds_noise_floor(rt):
     repeats = col.collect(rt)
     rt.state["tick"] = 2
     nz.notarize_step(rt, repeats)
-    assert fs.read_jsonl(paths.pending_jsonl(rt.root, "fake_f1")) == []
+    assert fs.read_jsonl(rt.root / paths.pending_jsonl("fake_f1")) == []
     rej = _events(rt, "notarize_reject")
     assert rej and rej[0]["spread"] > rej[0]["noise_floor"] and rt.state["notarize"] == {}
 
@@ -91,7 +91,7 @@ def test_notarize_threshold_uses_ledger_best_and_pending(rt):
     nz.notarize_step(rt, new)
     assert _events(rt, "record_candidate") == [], "沒破榜就不公證"
     lg._write({"profile": "fake_f1", "spec": "fake_v1", "best": {"id": "x", "score": best.score - 100}, "history": []})
-    fs.append_jsonl(paths.pending_jsonl(rt.root, "fake_f1"), {"id": "y", "conservative": best.score + 1})
+    fs.append_jsonl(rt.root / paths.pending_jsonl("fake_f1"), {"id": "y", "conservative": best.score + 1})
     nz.notarize_step(rt, new)
     assert _events(rt, "record_candidate") == [], "已有更好的待審 → 不重複公證"
 
@@ -100,7 +100,7 @@ def test_threshold_on_tampered_ledger_emits_event_and_still_opens_candidates(rt)
     """回歸 review（砍掉的 notarize.py:83）：_threshold 以前直接讀榜檔、繞過 checksum。被手改的榜 → ledger_tamper 事件、
     門檻當沒有榜，runtime 繼續（不炸、不用假分數當門檻）。"""
     new = _first_batch(rt)
-    p = paths.ledger_file(rt.root, "fake_f1", "fake_v1")
+    p = rt.root / paths.ledger_file("fake_f1", "fake_v1")
     p.parent.mkdir(parents=True)
     fs.atomic_write_json(p, {"profile": "fake_f1", "spec": "fake_v1", "best": {"id": "x", "score": 999.0}, "history": []})
     rt.state["tick"] = 1
@@ -127,7 +127,7 @@ def test_notarize_completes_with_partial_when_repeat_store_fails(rt):
     rt.state["tick"] = 2
     nz.notarize_step(rt, repeats)
     assert rt.state["notarize"] == {}, "一個 store 死了、另一個回來了 → 以手上的兩筆判定，不等到天荒地老"
-    assert len(fs.read_jsonl(paths.pending_jsonl(rt.root, "fake_f1"))) == 1
+    assert len(fs.read_jsonl(rt.root / paths.pending_jsonl("fake_f1"))) == 1
 
 
 def test_notarize_survives_dispatch_failure_and_does_not_register_candidate(rt, monkeypatch):

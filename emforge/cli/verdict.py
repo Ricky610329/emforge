@@ -2,7 +2,7 @@
 
 這是**唯一**能寫榜的路徑；runtime 只寫 pending（迴圈不加冕）。
 """
-from .. import events, fs, ledger, paths, profiles, specs
+from .. import events, ledger, paths, profiles, specs
 from ..db import Database
 from .base import EXIT_EXISTS, EXIT_LOCKED, EXIT_OK, EXIT_TAMPER, add_root, err, root_of
 
@@ -22,7 +22,7 @@ def cmd_promote(args) -> int:
     except ledger.LedgerTamper as e:
         err(str(e))
         return EXIT_TAMPER
-    events.emit(paths.events_jsonl(root, profile.name), "promoted", id=args.id, spec=spec, by=args.by, note=args.note,
+    events.emit(root, paths.events_jsonl(profile.name), "promoted", id=args.id, spec=spec, by=args.by, note=args.note,
                 score=best["score"], force=best["force"])
     print(f"promoted {args.id} → 榜 {profile.name}/{spec} score={best['score']} by={args.by}")
     return EXIT_OK
@@ -42,9 +42,8 @@ def _add_promote(sub) -> None:
 
 def cmd_retire(args) -> int:
     root = root_of(args)
-    marker = paths.retired_marker(root, args.profile)
-    fs.atomic_write_json(marker, {"by": args.by, "at": fs.now_iso()})
-    events.emit(paths.events_jsonl(root, args.profile), "retired", profile=args.profile, by=args.by)
+    marker = profiles.retire(root, args.profile, by=args.by)
+    events.emit(root, paths.events_jsonl(args.profile), "retired", profile=args.profile, by=args.by)
     print(f"retired {args.profile}：拒收新工作，資料凍結保留（{marker}）")
     return EXIT_OK
 
@@ -67,7 +66,7 @@ def cmd_rescore(args) -> int:
     except ledger.LedgerExists as e:
         err(str(e))
         return EXIT_EXISTS
-    events.emit(paths.events_jsonl(root, profile.name), "rescored", spec=spec.name, n=out["n"], by=args.by)
+    events.emit(root, paths.events_jsonl(profile.name), "rescored", spec=spec.name, n=out["n"], by=args.by)
     best = out["best"] or {}
     print(f"rescored {profile.name}/{spec.name}: n={out['n']} best={best.get('id')} score={best.get('score')}")
     return EXIT_OK

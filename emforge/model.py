@@ -3,15 +3,16 @@
 這裡是「schema」——舊系統完全沒有（全靠慣例、真相散在 docstring，見 docs/incidents.md 技術債）。
 JSON 鍵一律等於欄位名（跨邊界不改名）。陣列用 numpy：pattern `bool[H,W]`、response `float32[n_labels, n_points]`。
 """
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 from . import paths
-from .fs import sha1_hex
 
 STATUS_QUEUED, STATUS_RUNNING, STATUS_DONE, STATUS_ERROR = "queued", "running", "done", "error"
 STATUSES = (STATUS_QUEUED, STATUS_RUNNING, STATUS_DONE, STATUS_ERROR)
@@ -22,6 +23,20 @@ ARM_BLIND = "blind"
 
 
 # ── 小工具 ──────────────────────────────────────────────────────────────────
+#? 這兩個原本住在 fs.py，但它們與檔案系統無關（時間戳與雜湊都是 schema 的一部分：`at` 欄位、`record_id`／
+#  `profile_hash`／榜的 `_checksum`）。M12b 搬進來，讓已抽象化的模組不必為了它們 import fs。
+def now_iso() -> str:
+    """本地時間 `YYYY-MM-DDTHH:MM:SS`（欄位名一律 `at`）。"""
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def sha1_hex(*parts: bytes) -> str:
+    h = hashlib.sha1()
+    for p in parts:
+        h.update(p)
+    return h.hexdigest()
+
+
 def _json_default(o):
     """canonical_json 的後備轉換：Mapping（含 MappingProxyType 凍結 targets）→ dict、numpy → python。"""
     if isinstance(o, Mapping):

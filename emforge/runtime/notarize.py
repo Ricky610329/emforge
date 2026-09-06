@@ -5,11 +5,17 @@
 門檻＝max(榜首分數, 待審中最好的保守值, 公證中的候選)：沒破就不重測（冷啟動會頻繁公證——數值是佔位，待實測）。
 """
 from datetime import datetime
+from pathlib import Path
 
 from .. import fs, paths
 from ..ledger import Ledger, LedgerTamper
 from ..model import KIND_REPEAT, KIND_SAMPLE, STATUS_DONE, Proposal
 from .dispatch import dispatch
+
+
+def _p(root, key: str) -> Path:
+    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
+    return Path(root) / key
 
 
 def notarize_step(rt, new_records: list) -> None:
@@ -35,7 +41,7 @@ def _complete_ongoing(rt, nz: dict, cfg) -> None:
             continue
         spread, conservative = max(scores) - min(scores), min(scores)
         if spread <= cfg.noise_floor:
-            fs.append_jsonl(paths.pending_jsonl(rt.root, rt.profile_name),
+            fs.append_jsonl(_p(rt.root, paths.pending_jsonl(rt.profile_name)),
                             {"id": rid, "tick": rt.state["tick"], "scores": scores, "conservative": conservative,
                              "spread": spread, "stores": info["stores"], "at": fs.now_iso(), "status": "待審（迴圈不加冕）"})
             rt.event("notarize_pass", id=rid, scores=scores, conservative=conservative, spread=spread)
@@ -45,7 +51,7 @@ def _complete_ongoing(rt, nz: dict, cfg) -> None:
 
 def _open_candidates(rt, nz: dict, cfg, new_records: list) -> None:
     threshold = _threshold(rt, nz)
-    pending_ids = {e["id"] for e in fs.read_jsonl(paths.pending_jsonl(rt.root, rt.profile_name))}
+    pending_ids = {e["id"] for e in fs.read_jsonl(_p(rt.root, paths.pending_jsonl(rt.profile_name)))}
     cands = [r for r in new_records if r.status == STATUS_DONE and r.score is not None and r.kind == KIND_SAMPLE]
     for rec in sorted(cands, key=lambda r: -r.score):
         if rec.id in nz or rec.id in pending_ids:
@@ -94,7 +100,7 @@ def _threshold(rt, nz: dict):
                 vals.append(best["score"])
         except LedgerTamper as e:
             rt.event("ledger_tamper", spec=rt.profile.spec, detail=str(e))
-    vals += [e["conservative"] for e in fs.read_jsonl(paths.pending_jsonl(rt.root, rt.profile_name))
+    vals += [e["conservative"] for e in fs.read_jsonl(_p(rt.root, paths.pending_jsonl(rt.profile_name)))
              if e.get("conservative") is not None]
     vals += [info["score"] for info in nz.values()]
     return max(vals) if vals else None

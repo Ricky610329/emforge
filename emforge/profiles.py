@@ -2,6 +2,8 @@
 
 守門順序固定在 `make_simulator`：載入類別 → 比 geom_ver → 比 labels → **才**建構（昂貴操作之前，I-6／I-7）。
 使用者的 profile／spec 寫在 `<root>/registry.py`，runtime 與 worker 啟動都執行＝雙邊同源。
+
+退役旗標（`db/<profile>/RETIRED`）是共享狀態 → 走 `Depot`；`registry.py` 是**程式碼**，用本機路徑 runpy 載入。
 """
 import importlib
 import runpy
@@ -9,7 +11,8 @@ import runpy
 import numpy as np
 
 from . import paths
-from .model import Profile
+from .depot import open_depot
+from .model import Profile, now_iso
 from .specs import RegistryConflict  # noqa: F401 — 同一個衝突例外，兩個註冊表共用
 
 
@@ -90,9 +93,16 @@ def make_simulator(profile: Profile, workdir):
     return cls(workdir=str(workdir), profile=profile)
 
 
-def is_retired(root, profile: Profile) -> bool:
-    """註冊表旗標或 `db/<profile>/RETIRED` 標記檔（CLI `retire` 寫的）任一為真。"""
-    return bool(profile.retired) or paths.retired_marker(root, profile.name).exists()
+def is_retired(depot, profile: Profile) -> bool:
+    """註冊表旗標或 `db/<profile>/RETIRED` 標記（CLI `retire` 寫的）任一為真。`depot` 吃 `Depot | str | Path`。"""
+    return bool(profile.retired) or open_depot(depot).exists(paths.retired_marker(profile.name))
+
+
+def retire(depot, profile: str, *, by: str) -> str:
+    """寫退役標記；回它的 key。凍結＝拒收新工作，資料一個 byte 都不動。"""
+    key = paths.retired_marker(profile)
+    open_depot(depot).put_json(key, {"by": by, "at": now_iso()})
+    return key
 
 
 def load_user_registry(root) -> bool:

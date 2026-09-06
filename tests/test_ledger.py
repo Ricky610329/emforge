@@ -92,9 +92,9 @@ def test_ledger_checksum_detects_manual_edit(setup):
     root, d, recs, pend = setup
     lg = ledger.Ledger(root, P.name, "fake_v1")
     lg.promote(recs[1].id, by="ricky", db=d, pending=pend)
-    raw = fs.read_json(paths.ledger_file(root, P.name, "fake_v1"))
+    raw = fs.read_json(root / paths.ledger_file(P.name, "fake_v1"))
     raw["best"]["score"] = 99.0
-    fs.atomic_write_json(paths.ledger_file(root, P.name, "fake_v1"), raw)
+    fs.atomic_write_json(root / paths.ledger_file(P.name, "fake_v1"), raw)
     with pytest.raises(ledger.LedgerTamper):
         lg.read()
     with pytest.raises(ledger.LedgerTamper):
@@ -106,13 +106,13 @@ def test_rescore_creates_new_spec_ledger_leaves_old_untouched(setup):
     root, d, recs, pend = setup
     old = ledger.Ledger(root, P.name, "fake_v1")
     old.promote(recs[1].id, by="ricky", db=d, pending=pend)
-    before = paths.ledger_file(root, P.name, "fake_v1").read_bytes()
+    before = (root / paths.ledger_file(P.name, "fake_v1")).read_bytes()
     v2 = model.Spec(name="fake_v2", labels=P.labels, measure=P.measure, axes=("m4",), offsets=(0.0,))
     out = ledger.rescore(root, P, v2, d, by="ricky")
     assert out["n"] == 3 and out["best"]["id"] == recs[1].id and out["best"]["score"] == pytest.approx(-1.2 + 3)
     new = ledger.Ledger(root, P.name, "fake_v2")
     assert new.best()["id"] == recs[1].id and new.history()[0]["event"] == "rescore"
-    assert paths.ledger_file(root, P.name, "fake_v1").read_bytes() == before
+    assert (root / paths.ledger_file(P.name, "fake_v1")).read_bytes() == before
     with pytest.raises(ledger.LedgerExists):
         ledger.rescore(root, P, v2, d, by="ricky")
     out2 = ledger.rescore(root, P, v2, d, by="ricky", force=True)
@@ -121,7 +121,7 @@ def test_rescore_creates_new_spec_ledger_leaves_old_untouched(setup):
 
 def test_rescore_never_rewrites_record_files_and_needs_same_measure(setup):
     root, d, recs, pend = setup
-    files = sorted(paths.db_dir(root, P.name).glob("*.npz"))
+    files = sorted((root / paths.db_dir(P.name)).glob("*.npz"))
     mt = [os.path.getmtime(f) for f in files]
     ledger.rescore(root, P, model.Spec(name="fake_v3", labels=P.labels, measure=P.measure, axes=("m1",), offsets=(5.0,)), d, by="x")
     assert [os.path.getmtime(f) for f in files] == mt

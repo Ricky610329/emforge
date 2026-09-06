@@ -103,7 +103,7 @@ strategies:
 
 
 def test_load_yaml_defaults_max_inflight_1_reads_runtime_block_rejects_unknown_keys(root):
-    y = paths.strategies_yaml(root, "fake_f1")
+    y = root / paths.strategies_yaml("fake_f1")
     y.parent.mkdir(parents=True)
     y.write_text(YAML, encoding="utf-8")
     cfg = strategy.load_strategies_yaml(y)
@@ -121,7 +121,7 @@ def test_load_yaml_defaults_max_inflight_1_reads_runtime_block_rejects_unknown_k
 
 
 def test_yaml_profile_mismatch_duplicate_and_reserved_names_rejected(root):
-    y = paths.strategies_yaml(root, "fake_f1")
+    y = root / paths.strategies_yaml("fake_f1")
     y.parent.mkdir(parents=True)
     y.write_text(YAML, encoding="utf-8")
     with pytest.raises(strategy.ConfigError, match="profile"):

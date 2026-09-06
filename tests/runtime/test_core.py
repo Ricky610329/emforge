@@ -14,7 +14,7 @@ def test_lock_refuses_second_instance_same_profile_allows_other(rt_root, rt):
     rt.acquire_lock()
     with pytest.raises(core.RuntimeLocked):
         make_rt(rt_root).acquire_lock()
-    other = paths.strategies_yaml(rt_root, "other_p")
+    other = rt_root / paths.strategies_yaml("other_p")
     other.parent.mkdir(parents=True)
     other.write_text("profile: other_p\nstrategies: []\n", encoding="utf-8")
     from emforge import model, profiles, testing
@@ -28,7 +28,7 @@ def test_lock_refuses_second_instance_same_profile_allows_other(rt_root, rt):
 
 def test_lock_with_stale_heartbeat_broken(rt_root, rt):
     rt.acquire_lock()
-    lk = paths.runtime_lock(rt_root, "fake_f1")
+    lk = rt_root / paths.runtime_lock("fake_f1")
     old = time.time() - 24 * 3600
     os.utime(lk, (old, old))
     r2 = make_rt(rt_root)
@@ -40,12 +40,12 @@ def test_lock_with_stale_heartbeat_broken(rt_root, rt):
 def test_run_once_executes_single_tick_writes_status_and_events(rt):
     rc = rt.run(once=True)
     assert rc == 0
-    st = fs.read_json(paths.status_json(rt.root, "fake_f1"))
+    st = fs.read_json(rt.root / paths.status_json("fake_f1"))
     assert st["profile"] == "fake_f1" and st["tick"] == 1 and st["profile_hash"] == rt.profile.profile_hash
     assert set(st["strategies"]) == {"top_k_flip", "blind"} and "inflight" in st and "db" in st
-    ev = [e["event"] for e in fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1"))]
+    ev = [e["event"] for e in fs.read_jsonl(rt.root / paths.events_jsonl("fake_f1"))]
     assert ev[0] == "runtime_start" and "batch_dispatched" in ev and ev[-1] == "runtime_stop"
-    assert not paths.runtime_lock(rt.root, "fake_f1").exists(), "結束釋放鎖"
+    assert not (rt.root / paths.runtime_lock("fake_f1")).exists(), "結束釋放鎖"
 
 
 def test_status_inflight_entries_carry_queue_state(rt):
@@ -53,7 +53,7 @@ def test_status_inflight_entries_carry_queue_state(rt):
     rt.acquire_lock()
     rt.tick()
     rt.release_lock()
-    st = fs.read_json(paths.status_json(rt.root, "fake_f1"))
+    st = fs.read_json(rt.root / paths.status_json("fake_f1"))
     assert st["inflight"] and st["inflight"][0]["queue_state"] == "queued"
 
 
@@ -74,8 +74,8 @@ def test_tick_number_is_saved_before_dispatch_so_crash_replay_uses_next_tick(rt_
     with pytest.raises(RuntimeError):
         rt.tick()                                         # blind 已派 t00001、然後死
     rt.release_lock()
-    assert fs.read_json(paths.state_json(rt_root, "fake_f1"))["tick"] == 1
-    assert paths.inflight_file(rt_root, "fake_f1", "fake_f1-blind-t00001").exists()
+    assert fs.read_json(rt_root / paths.state_json("fake_f1"))["tick"] == 1
+    assert (rt_root / paths.inflight_file("fake_f1", "fake_f1-blind-t00001")).exists()
     rt2 = make_rt(rt_root)
     assert rt2.run(once=True) == 0, "重啟不會撞 BatchExists"
     assert rt2.state["tick"] == 2
@@ -94,7 +94,7 @@ def test_heartbeat_thread_keeps_lock_fresh_during_long_tick(rt_root):
     """回歸 review-7：一個 tick 可能超過鎖的 stale 門檻（策略子行程逐個逾時）；背景心跳讓第二個實例拿不到鎖。"""
     rt = make_rt(rt_root, heartbeat_s=0.05)
     rt.acquire_lock()
-    lk = paths.runtime_lock(rt_root, "fake_f1")
+    lk = rt_root / paths.runtime_lock("fake_f1")
     old = time.time() - 24 * 3600
     os.utime(lk, (old, old))
     rt.start_heartbeat()
@@ -110,10 +110,10 @@ def test_heartbeat_thread_keeps_lock_fresh_during_long_tick(rt_root):
 
 
 def test_stop_file_exits_after_tick(rt):
-    fs.touch(paths.runtime_stop(rt.root, "fake_f1"))
+    fs.touch(rt.root / paths.runtime_stop("fake_f1"))
     rc = rt.run(once=False)
     assert rc == 0
-    ev = [e["event"] for e in fs.read_jsonl(paths.events_jsonl(rt.root, "fake_f1"))]
+    ev = [e["event"] for e in fs.read_jsonl(rt.root / paths.events_jsonl("fake_f1"))]
     assert ev[-1] == "runtime_stop" and "batch_dispatched" not in ev, "STOP 在 tick 之前檢查"
 
 
@@ -122,7 +122,7 @@ def test_state_persists_across_restart(rt_root, rt):
     assert rt.state["tick"] == 1
     rt2 = make_rt(rt_root)
     rt2.run(once=True)
-    assert rt2.state["tick"] == 2 and fs.read_json(paths.state_json(rt_root, "fake_f1"))["tick"] == 2
+    assert rt2.state["tick"] == 2 and fs.read_json(rt_root / paths.state_json("fake_f1"))["tick"] == 2
 
 
 def test_yaml_reload_on_mtime_invalid_keeps_last_good(rt_root, rt):
@@ -136,7 +136,7 @@ def test_yaml_reload_on_mtime_invalid_keeps_last_good(rt_root, rt):
     os.utime(y, (time.time() + 10, time.time() + 10))
     rt.reload_config()
     assert [s.name for s in rt.config.strategies] == ["blind"] and rt.config.strategies[0].batch == 2, "沿用上次有效"
-    ev = [e for e in fs.read_jsonl(paths.events_jsonl(rt_root, "fake_f1")) if e["event"] == "config_invalid"]
+    ev = [e for e in fs.read_jsonl(rt_root / paths.events_jsonl("fake_f1")) if e["event"] == "config_invalid"]
     assert ev and "batchh" in ev[0]["error"]
 
 
@@ -150,7 +150,7 @@ def test_yaml_missing_at_start_raises(root):
 def test_quiet_fleet_waits(rt_root, rt):
     rt.acquire_lock()
     rt.tick()                                   # blind 派了一批
-    inflight = list(paths.inflight_dir(rt_root, "fake_f1").glob("*.json"))
+    inflight = list((rt_root / paths.inflight_dir("fake_f1")).glob("*.json"))
     assert inflight
     rt.config.runtime.quiet_s = 1
     old = time.time() - 3600
@@ -158,5 +158,5 @@ def test_quiet_fleet_waits(rt_root, rt):
         os.utime(f, (old, old))
     n_before = len(rt.queue.list())
     rt.tick()
-    ev = [e["event"] for e in fs.read_jsonl(paths.events_jsonl(rt_root, "fake_f1"))]
+    ev = [e["event"] for e in fs.read_jsonl(rt_root / paths.events_jsonl("fake_f1"))]
     assert "fleet_quiet" in ev and len(rt.queue.list()) == n_before, "機隊靜默 → 只等、不排程"

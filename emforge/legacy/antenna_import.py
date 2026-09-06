@@ -18,6 +18,11 @@ from .. import profiles as core
 from ..adapters.antenna import profiles as aprof
 from ..db import Database
 
+
+def _p(root, key: str) -> Path:
+    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
+    return Path(root) / key
+
 CONTROL_KEYS = {"timeout", "keep_project"}          # 舊白名單裡不進模擬器的鍵，不影響映射
 REPEAT_KINDS = {"repeat", "notarize"}
 PARENT_KEYS = ("parent", "parent_id", "source_id", "base_id")
@@ -214,7 +219,7 @@ def _signature(old: Path, store: str) -> dict:
 
 def _import_store(old: Path, out_root: Path, db: Database, rep: StoreReport, resolver: dict, opts: _Opts) -> None:
     prof = core.get_profile(rep.profile)
-    imported_path = paths.db_dir(out_root, prof.name) / "_imported.json"
+    imported_path = _p(out_root, paths.db_imported(prof.name))
     imported = fs.read_json(imported_path, default={})
     sig = _signature(old, rep.store)
     rep.n_pt = sig["n_pt"]

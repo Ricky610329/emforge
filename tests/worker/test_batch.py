@@ -40,7 +40,7 @@ def test_writes_result_file_per_sample_and_resumes_skipping_done(root, claimed):
     assert out == "done" and set(res) == set(ids) and all(r["status"] == "done" for r in res.values())
     r = res[ids[0]]
     assert np.asarray(r["response"], np.float32).shape == (2, 17) and r["attempts"] == 1 and r["extra"] == {}
-    paths.batch_result(root, job.store, ids[1]).unlink()      # 模擬中斷：少一筆
+    (root / paths.batch_result(job.store, ids[1])).unlink()      # 模擬中斷：少一筆
     q.pick("216")                                             # 續跑自己的 claim
     sims = []
 
@@ -120,7 +120,7 @@ def test_workdir_removed_on_done_fail_yield(root, claimed):
     assert out == "done" and not seen[0].exists()
     q.mark_done(job.store, "216", n_done=3, n_error=0, error_ids=[])
     q.requeue(job.store)
-    shutil.rmtree(paths.batch_results_dir(root, job.store))   # requeue 保留進度；要重跑得清結果
+    shutil.rmtree(root / paths.batch_results_dir(job.store))   # requeue 保留進度；要重跑得清結果
     q.pick("216")
     out, _, _, work = _run(root, claimed, _factory(fail_ids=set(ids)), fuse=Fuse(max_fail=1, cooldown_s=0, max_blowout=1),
                            retry_passes=0)
@@ -144,8 +144,8 @@ def test_yields_when_claim_taken_over(root, claimed):
     def steal():
         calls["n"] += 1
         if calls["n"] == 1:
-            fs.release(paths.claim_file(root, job.store))
-            fs.try_claim(paths.claim_file(root, job.store), {"machine": "218", "at": "x"})
+            fs.release(root / paths.claim_file(job.store))
+            fs.try_claim(root / paths.claim_file(job.store), {"machine": "218", "at": "x"})
 
     _HookSim.hook = steal
     try:
@@ -203,9 +203,9 @@ def test_run_batch_touches_claim_after_each_sample(root, claimed):
     """review（砍掉的 queue.py:165）配套：worker 每筆後 touch claim，claim mtime 才是真的心跳。"""
     q, b, job, ids = claimed
     old = time.time() - 3600
-    os.utime(paths.claim_file(root, job.store), (old, old))
+    os.utime(root / paths.claim_file(job.store), (old, old))
     _run(root, claimed)
-    assert time.time() - fs.mtime(paths.claim_file(root, job.store)) < 5
+    assert time.time() - fs.mtime(root / paths.claim_file(job.store)) < 5
 
 
 def test_worker_knows_no_measure_or_score(root, claimed):

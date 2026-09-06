@@ -6,8 +6,9 @@
 """
 import numpy as np
 
-from . import fs, paths, strategy
+from . import paths, strategy
 from .db import Database
+from .depot import open_depot
 from .model import ARM_BLIND, STATUS_DONE
 
 DEFAULT_K_MIN = 20
@@ -39,9 +40,9 @@ def _comparable(name: str) -> bool:
     return name not in NON_COMPARABLE and not name.startswith(NON_COMPARABLE_PREFIXES)
 
 
-def _dup_dropped(events_path) -> dict:
+def _dup_dropped(depot, profile: str) -> dict:
     out: dict = {}
-    for e in fs.read_jsonl(events_path):
+    for e in depot.read_log(paths.events_jsonl(profile)):
         if e.get("event") == "proposals_validated":
             out[e["name"]] = out.get(e["name"], 0) + int(e.get("n_dup", 0))
     return out
@@ -55,7 +56,7 @@ def strategy_rows(db: Database, profile: str, *, k_min: int = DEFAULT_K_MIN) -> 
     metas = db.metas(profile)
     done = [m for m in metas if m["status"] == STATUS_DONE and m["score"] is not None]
     blind = [m["score"] for m in done if m["arm"] == ARM_BLIND]
-    dup = _dup_dropped(paths.events_jsonl(db.root, profile))
+    dup = _dup_dropped(db.depot, profile)
     conservative: dict = {}
     for m in done:
         conservative[m["id"]] = min(conservative.get(m["id"], m["score"]), m["score"])
@@ -87,9 +88,10 @@ def worker_ver_warnings(db: Database, profile: str) -> list:
             for s, v in sorted(by_store.items()) if len(v) > 1]
 
 
-def _k_min_from_yaml(root, profile: str) -> int:
+def _k_min_from_yaml(depot, profile: str) -> int:
     try:
-        return strategy.load_strategies_yaml(paths.strategies_yaml(root, profile)).runtime.k_min
+        text = depot.get_bytes(paths.strategies_yaml(profile)).decode("utf-8")
+        return strategy.parse_strategies_yaml(text).runtime.k_min
     except Exception:  # noqa: BLE001 — 沒有 yaml（純資料庫瀏覽）就用預設
         return DEFAULT_K_MIN
 
@@ -118,15 +120,16 @@ def _render(profile: str, rows: list, k_min: int, blind_n: int) -> list:
     return lines
 
 
-def report(root, profile_names: list, *, cross_profile: bool = False, k_min: int | None = None) -> str:
+def report(depot, profile_names: list, *, cross_profile: bool = False, k_min: int | None = None) -> str:
     if len(profile_names) > 1 and not cross_profile:
         raise CrossProfileRefused("不同 profile 的分數不可比（era ≡ profile）；要並排請加 --cross-profile")
-    db = Database(root)
+    depot = open_depot(depot)
+    db = Database(depot)
     lines = []
     if len(profile_names) > 1:
         lines += ["⚠ 跨 profile 並排：不同儀器的分數不可比，只供瀏覽、不供裁決。", ""]
     for p in profile_names:
-        km = k_min if k_min is not None else _k_min_from_yaml(root, p)
+        km = k_min if k_min is not None else _k_min_from_yaml(depot, p)
         lines += _render(p, strategy_rows(db, p, k_min=km), km, blind_count(db, p))
         lines += worker_ver_warnings(db, p)
     return "\n".join(lines)

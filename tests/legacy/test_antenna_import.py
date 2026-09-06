@@ -225,10 +225,10 @@ def test_parent_resolved_across_stores_ambiguous_none(old, out):
 def test_idempotent_rerun_no_dupes_changed_mtime_reimports_force(old, out):
     write_store(old, "dedust_i", [dict(seed=61), dict(seed=62)], port="dual", geom="p01", setup={"diag_bridge_w": 0.075}, dbw=0.075)
     reps, _ = li.import_legacy(old, out, stores=["dedust_i"])
-    n_files = len(list(paths.db_dir(out, "dual_p01_db075").glob("*.npz")))
+    n_files = len(list((out / paths.db_dir("dual_p01_db075")).glob("*.npz")))
     reps2, _ = li.import_legacy(old, out, stores=["dedust_i"])
-    assert reps2[0].skipped is True and len(list(paths.db_dir(out, "dual_p01_db075").glob("*.npz"))) == n_files
-    imported = json.loads((paths.db_dir(out, "dual_p01_db075") / "_imported.json").read_text(encoding="utf-8"))
+    assert reps2[0].skipped is True and len(list((out / paths.db_dir("dual_p01_db075")).glob("*.npz"))) == n_files
+    imported = json.loads((out / paths.db_dir("dual_p01_db075") / "_imported.json").read_text(encoding="utf-8"))
     assert "dedust_i" in imported and imported["dedust_i"]["n_records"] == 2
     res = old / "dedust_i" / "results.json"
     os.utime(res, (1_900_000_000, 1_900_000_000))
@@ -274,4 +274,4 @@ def test_cli_import_legacy(old, out, capsys):
     assert rc == 0
     assert "dedust_cli" in capsys.readouterr().out
     assert len(Database(out).view("dual_p01_db075").query()) == 1
-    assert Path(paths.db_dir(out, "dual_p01_db075") / "_imported.json").exists()
+    assert Path(out / paths.db_dir("dual_p01_db075") / "_imported.json").exists()

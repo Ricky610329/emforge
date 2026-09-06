@@ -24,6 +24,17 @@ MAX_FUNCTION_LINES = 60
 #? 檔名要說出它做什麼——這幾個名字說的是「我不知道放哪」。
 BANNED_MODULE_STEMS = {"utils", "util", "misc", "helpers", "common", "dedust", "tools", "stuff"}
 
+#? 已抽象化的模組：共享狀態只准經 `Depot`（M12b）。M12c 加 queue、M12d 加 runtime／worker／cli——
+#  所以這是一張**清單**，擴充就是往這裡加一個檔名。
+DEPOT_ONLY_MODULES = ("db.py", "batches.py", "ledger.py", "events.py", "report.py", "profiles.py")
+#? `strategy.py` 半套：策略碼與 registry.py 要用本機路徑 importlib／runpy 載入（程式碼不抽象），
+#  但它一樣不准碰 fs 原語或自己 open(。
+DEPOT_ONLY_PARTIAL = ("strategy.py",)
+FS_IMPORTS = {"pathlib", "shutil", "glob", "tempfile"}
+#? `os.path` 也算（getmtime／exists 都在裡面）。
+FS_OS_ATTRS = {"path", "replace", "utime", "open", "unlink", "remove", "rename", "makedirs", "scandir",
+               "listdir", "mkdir", "stat", "fsync"}
+
 
 def _core_modules():
     for p in sorted(PKG.rglob("*.py")):
@@ -82,6 +93,50 @@ def test_no_function_exceeds_60_lines():
 def test_no_module_named_utils_misc_or_dedust():
     bad = [str(p.relative_to(PKG)) for p in _all_modules() if p.stem in BANNED_MODULE_STEMS]
     assert not bad, f"檔名要說出它做什麼：{bad}"
+
+
+def _imports_fs(node) -> bool:
+    """`from .. import fs`／`from .fs import x`／`from emforge.fs import x`／`import emforge.fs` 都算。"""
+    if isinstance(node, ast.Import):
+        return any(a.name in ("emforge.fs",) for a in node.names)
+    mod = node.module or ""
+    if node.level and (mod == "fs" or mod.startswith("fs.")):
+        return True
+    if node.level and mod == "" and any(a.name == "fs" for a in node.names):
+        return True
+    return mod == "emforge.fs" or (mod == "emforge" and any(a.name == "fs" for a in node.names))
+
+
+def _fs_offenders(path, *, full: bool):
+    """回這個模組裡「還認得檔案系統」的證據；`full=False` 只查 fs 原語與 `open(`。"""
+    bad = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if _imports_fs(node):
+                bad.append(f"L{node.lineno}: import 了 emforge.fs（fs 原語）")
+            elif full:
+                mods = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                        else ([node.module] if node.module and not node.level else []))
+                for m in mods:
+                    if m.split(".")[0] in FS_IMPORTS:
+                        bad.append(f"L{node.lineno}: import {m}")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open":
+            bad.append(f"L{node.lineno}: open(")
+        elif full and isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                and node.value.id == "os" and node.attr in FS_OS_ATTRS:
+            bad.append(f"L{node.lineno}: os.{node.attr}")
+    return [f"{path.name} {b}" for b in bad]
+
+
+def test_coordination_modules_touch_state_only_via_depot():
+    """M12b 的紅線：已抽象化的模組不准 import pathlib／shutil／glob／emforge.fs，不准 os.path／os.replace…／open(。
+    換後端＝實作一個 `Depot`；只要有一個模組偷偷開檔，那個保證就是假的。"""
+    offenders = []
+    for name in DEPOT_ONLY_MODULES:
+        offenders += _fs_offenders(PKG / name, full=True)
+    for name in DEPOT_ONLY_PARTIAL:
+        offenders += _fs_offenders(PKG / name, full=False)
+    assert not offenders, "共享狀態只准經 Depot：\n" + "\n".join(offenders)
 
 
 def test_cli_version_returns_zero(capsys):

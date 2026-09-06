@@ -15,7 +15,7 @@ strategies:
 
 
 def write_yaml(root, text=YAML, profile="fake_f1"):
-    y = paths.strategies_yaml(root, profile)
+    y = root / paths.strategies_yaml(profile)
     y.parent.mkdir(parents=True, exist_ok=True)
     y.write_text(text, encoding="utf-8")
     return y

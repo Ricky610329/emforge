@@ -2,9 +2,10 @@
 
 事件是 runtime／worker 對外（人、AI 層、report）唯一的敘事管道，所以名字與必填欄位是**封閉集合**：
 新事件要加在這裡（連帶 docs/implementation.md 的事件表），不能在別處自由發明。
-runtime 寫 `runtime_state/<profile>/events.jsonl`；worker 寫 `queue/log/<tag>.jsonl`（各自單寫者，fs.append_jsonl 契約）。
+runtime 寫 `runtime_state/<profile>/events.jsonl`；worker 寫 `queue/log/<tag>.jsonl`（各自單寫者，`Depot.append` 契約）。
 """
-from . import fs
+from .depot import open_depot
+from .model import now_iso
 
 EVENTS = {
     # ── runtime ──
@@ -75,11 +76,12 @@ def make(event: str, /, **fields) -> dict:
     missing = [f for f in EVENTS[event] if f not in fields]
     if missing:
         raise EventFieldsMissing(f"事件 {event} 缺必填欄位 {missing}")
-    return {"at": fs.now_iso(), "event": event, **fields}
+    return {"at": now_iso(), "event": event, **fields}
 
 
-def emit(path, event: str, /, **fields) -> dict:
-    """append 一行到 jsonl（單寫者檔）並回傳寫入的 dict。"""
+def emit(depot, key: str, event: str, /, **fields) -> dict:
+    """append 一筆到日誌 key（單寫者）並回傳寫入的 dict。`depot` 吃 `Depot | str | Path`。
+    三個參數都是 positional-only：事件欄位裡有 `name`／`key`，不能撞。"""
     e = make(event, **fields)
-    fs.append_jsonl(path, e)
+    open_depot(depot).append(key, e)
     return e

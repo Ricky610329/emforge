@@ -1,9 +1,11 @@
 """emforge/cli/setup.py — 準備與體檢：version／init／check-strategy／doctor／import-legacy。"""
 import json
 import os
+from pathlib import Path
 
 from .. import __version__, doctor, paths, profiles, strategy
 from .._version import describe
+from ..depot import open_depot
 from .base import EXIT_OK, add_root, root_of
 
 REGISTRY_TEMPLATE = '''"""<root>/registry.py — 這個根目錄的模擬庫／評估器註冊表（append-only；改內容＝換名字）。
@@ -28,6 +30,11 @@ strategies:
 """
 
 
+def _p(root, key: str) -> Path:
+    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
+    return Path(root) / key
+
+
 def cmd_version(args) -> int:
     print(f"emforge {__version__} ({describe()})")
     return EXIT_OK
@@ -39,11 +46,11 @@ def _add_version(sub) -> None:
 
 def cmd_init(args) -> int:
     root = root_of(args)
-    for d in paths.layout_dirs(root):
-        d.mkdir(parents=True, exist_ok=True)
+    open_depot(root).ensure_prefixes(paths.layout_prefixes())
+    paths.user_strategies_dir(root).mkdir(parents=True, exist_ok=True)   # 本機程式碼目錄，不經 depot
     targets = [(paths.registry_py(root), REGISTRY_TEMPLATE)]
     if args.profile:
-        targets.append((paths.strategies_yaml(root, args.profile), YAML_TEMPLATE.format(profile=args.profile)))
+        targets.append((_p(root, paths.strategies_yaml(args.profile)), YAML_TEMPLATE.format(profile=args.profile)))
     for path, text in targets:
         if path.exists():
             print(f"已存在，不覆寫：{path}")

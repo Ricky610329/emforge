@@ -8,14 +8,19 @@ claim→條件式 PUT、atomic_write→PUT、mtime→LastModified、Lock→lease
 - `open(O_CREAT|O_EXCL)` 原子；同目錄 `os.replace` 原子；server mtime 可信且各機 NTP 同步（`doctor` 量偏移）。
 - SMB 上多寫者 `O_APPEND` 交錯**無保證**——所以 `append_jsonl` 只給單寫者檔，多方匯總一律「一方一檔」。
 """
-import hashlib
 import json
 import os
 import random
 import shutil
 import time
-from datetime import datetime
 from pathlib import Path
+
+from . import model
+
+#? M12b：`now_iso`／`sha1_hex` 搬去 model.py（它們是 schema 不是檔案系統語義）。這裡重匯出讓未遷模組先照舊用，
+#  M12c 拆掉 `Lock` 時一起清。
+now_iso = model.now_iso
+sha1_hex = model.sha1_hex
 
 
 class LockTimeout(Exception):
@@ -263,16 +268,3 @@ def sweep_dirs(parent) -> list:
             shutil.rmtree(child, ignore_errors=True)
             removed.append(child)
     return removed
-
-
-# ── 小工具 ──────────────────────────────────────────────────────────────────
-def now_iso() -> str:
-    """本地時間 `YYYY-MM-DDTHH:MM:SS`（欄位名一律 `at`）。"""
-    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-
-def sha1_hex(*parts: bytes) -> str:
-    h = hashlib.sha1()
-    for p in parts:
-        h.update(p)
-    return h.hexdigest()

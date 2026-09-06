@@ -17,7 +17,8 @@ import random
 import time
 from abc import ABC, abstractmethod
 
-from ..fs import FsCorrupt, LockTimeout, now_iso
+from ..fs import FsCorrupt, LockTimeout
+from ..model import now_iso
 
 
 class Depot(ABC):

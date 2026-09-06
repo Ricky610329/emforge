@@ -19,7 +19,7 @@ P = testing.FAKE_PROFILE
 
 
 def _events(root, profile="fake_f1"):
-    return [e["event"] for e in fs.read_jsonl(paths.events_jsonl(root, profile))]
+    return [e["event"] for e in fs.read_jsonl(root / paths.events_jsonl(profile))]
 
 
 def test_two_strategies_fake_worker_db_pending_promote_report(root, capsys):
@@ -52,7 +52,7 @@ def test_two_strategies_fake_worker_db_pending_promote_report(root, capsys):
     n_done = len(db.ids("fake_f1"))
     assert n_done >= 3 + 4, "blind 3 ＋ top_k_flip 4（重測是同 id 不算新設計）"
     assert len(db.measurements("fake_f1", cand)) == 3, "原始 ＋ 兩次重測"
-    st = fs.read_json(paths.status_json(root, "fake_f1"))
+    st = fs.read_json(root / paths.status_json("fake_f1"))
     assert st["tick"] == 3 and st["pending_count"] == len(pend) and st["db"]["n_done"] >= 7
 
 
@@ -78,9 +78,9 @@ def test_restart_mid_batch_resumes_without_duplicate_records(root):
     rt2 = make_rt(root)                                      # 重啟：state 重讀、對帳
     assert rt2.run(once=True) == 0
     assert len(Database(root).ids("fake_f1")) == 3
-    added = [e for e in fs.read_jsonl(paths.events_jsonl(root, "fake_f1")) if e["event"] == "record_added"]
+    added = [e for e in fs.read_jsonl(root / paths.events_jsonl("fake_f1")) if e["event"] == "record_added"]
     assert sum(1 for e in added if e["kind"] == "sample") == 3, "三筆樣本各入庫一次（重測是另外的 kind=repeat）"
-    assert not paths.inflight_file(root, "fake_f1", store).exists()
+    assert not (root / paths.inflight_file("fake_f1", store)).exists()
     assert rt2.state["tick"] == 3
 
 

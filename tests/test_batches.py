@@ -3,12 +3,10 @@
 
 防什麼：I-15（整份結果檔互相覆寫）、I-5（每次全讀）、批寫一半就被 worker 撿走。
 """
-import os
-
 import numpy as np
 import pytest
 
-from emforge import batches, fs, model, paths, testing
+from emforge import batches, model, paths, testing
 
 P = testing.FAKE_PROFILE
 
@@ -39,7 +37,7 @@ def test_write_manifest_and_patterns_roundtrip_packbits(root):
     assert got[ids[0]].dtype == bool
     m = b.manifest()
     assert m["profile_hash"] == P.profile_hash and m["items"][1]["id"] == ids[1]
-    with np.load(paths.batch_patterns(root, b.store), allow_pickle=False) as z:
+    with np.load(root / paths.batch_patterns(b.store), allow_pickle=False) as z:
         assert z["packed"].shape == (3, 8) and z["packed"].dtype == np.uint8, "packbits：8×8 一筆 8 bytes"
 
 
@@ -57,17 +55,18 @@ def test_write_refuses_existing_store_and_mismatched_ids(root):
 def test_manifest_is_written_last(root, monkeypatch):
     """manifest.json 是「批完整」的標記：patterns 先落、manifest 最後——worker 看到 manifest 就一定有 patterns。"""
     order = []
-    real = fs.atomic_write_bytes
+    b = batches.Batch(root, "s")
+    real = b.depot.put_bytes
 
-    def spy(path, data):
-        order.append(paths.Path(path).name)
-        return real(path, data)
+    def spy(key, data):
+        order.append(paths.stem_of(key))
+        return real(key, data)
 
-    monkeypatch.setattr(batches.fs, "atomic_write_bytes", spy)
+    monkeypatch.setattr(b.depot, "put_bytes", spy)
     pats = _pats(1)
     ids = [model.record_id(pats[0], P.name)]
-    batches.Batch(root, "s").write(_manifest("s", ids), pats, ids)
-    assert order == ["patterns.npz", "manifest.json"]
+    b.write(_manifest("s", ids), pats, ids)
+    assert order == ["patterns", "manifest"], "patterns 先落、manifest 最後（put_json 也走 put_bytes）"
 
 
 def test_result_files_are_per_id_merge_semantics(root):
@@ -87,23 +86,22 @@ def test_read_results_incremental_by_known_ids(root, monkeypatch):
     for i in ("a1", "b2", "c3"):
         b.write_result(i, {"id": i})
     opened = []
-    real = fs.read_json
+    real = b.depot.get_json
 
-    def spy(path, *a, **k):
-        opened.append(paths.Path(path).stem)
-        return real(path, *a, **k)
+    def spy(key, *a, **k):
+        opened.append(paths.stem_of(key))
+        return real(key, *a, **k)
 
-    monkeypatch.setattr(batches.fs, "read_json", spy)
+    monkeypatch.setattr(b.depot, "get_json", spy)
     got = b.results(known_ids={"a1"})
     assert set(got) == {"b2", "c3"} and sorted(opened) == ["b2", "c3"]
     assert batches.Batch(root, "nothing").results() == {} and batches.Batch(root, "nothing").result_ids() == set()
 
 
-def test_newest_result_mtime_is_progress_signal(root):
+def test_newest_result_at_is_progress_signal(root):
     b = batches.Batch(root, "s")
-    assert b.newest_result_mtime() is None
+    assert b.newest_result_at() is None
     b.write_result("a", {"id": "a"})
-    t = b.newest_result_mtime()
-    assert t is not None
-    os.utime(paths.batch_result(root, "s", "a"), (1_000_000, 1_000_000))
-    assert b.newest_result_mtime() == 1_000_000
+    assert b.newest_result_at() is not None
+    b.depot.set_modified_at(paths.batch_result("s", "a"), 1_000_000)
+    assert b.newest_result_at() == 1_000_000

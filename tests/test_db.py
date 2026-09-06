@@ -30,7 +30,7 @@ def test_add_writes_one_file_named_id_dash_store(root):
     d = dbm.Database(root, write_profile=P)
     r = _rec(1, "st1")
     assert d.add(r) is True
-    f = paths.record_file(root, P, r.id, "st1")
+    f = root / paths.record_file(P, r.id, "st1")
     assert f.exists() and f.suffix == ".npz"
     back = d.load(P, f.stem)
     assert back.id == r.id and np.array_equal(back.bits, r.bits) and np.array_equal(back.response, r.response)
@@ -45,7 +45,7 @@ def test_add_same_id_same_store_returns_false_keeps_first(root):
     r2 = _rec(2, "st1", score=-9.0)
     assert d.add(r2) is False
     assert d.load(P, f"{r.id}-st1").score == -2.0
-    assert len(list(paths.db_dir(root, P).glob("*.npz"))) == 1
+    assert len(list((root / paths.db_dir(P)).glob("*.npz"))) == 1
 
 
 def test_add_same_id_different_store_creates_second_file(root):
@@ -60,7 +60,7 @@ def test_add_refuses_other_profile_when_write_bound(root):
     d = dbm.Database(root, write_profile=P)
     with pytest.raises(dbm.ProfileWriteRefused):
         d.add(_rec(4, "st1", profile="other_p"))
-    assert not paths.db_dir(root, "other_p").exists()
+    assert not (root / paths.db_dir("other_p")).exists()
     dbm.Database(root).add(_rec(4, "st1", profile="other_p"))  # 不綁定的實例（匯入器）可以
 
 
@@ -76,26 +76,26 @@ def test_add_rejects_id_that_does_not_match_bits_and_profile(root):
 def test_index_appended_not_rebuilt_on_add(root, monkeypatch):
     """回歸 I-5（2026-08-27）：全史查重表每次重建撐爆記憶體。入庫時 append 索引；開庫只補差集、不重載已知檔。"""
     loads = {"n": 0}
-    real = np.load
-
-    def counting(*a, **k):
-        loads["n"] += 1
-        return real(*a, **k)
-
-    monkeypatch.setattr(dbm.np, "load", counting)
     d = dbm.Database(root, write_profile=P)
+    real = d.depot.get_bytes
+
+    def counting(key):
+        loads["n"] += 1     # 讀一筆紀錄檔＝一次 get_bytes（索引走 read_log，不算）
+        return real(key)
+
+    monkeypatch.setattr(d.depot, "get_bytes", counting)
     for s in (10, 11, 12):
         d.add(_rec(s, "st1"))
     assert loads["n"] == 0, "add 不需要讀任何檔"
     assert len(d.metas(P)) == 3
-    d2 = dbm.Database(root)
+    d2 = dbm.Database(d.depot)
     assert d2.refresh(P) == 0 and loads["n"] == 0, "索引完整 → 零載入"
     assert len(d2.metas(P)) == 3
     dbm.Database(root).add(_rec(13, "st2"))  # 另一個正常寫者：它自己會 append 索引
     assert d2.refresh(P) == 0 and loads["n"] == 0, "從索引檔合併即可，仍零載入"
     assert len(d2.metas(P)) == 4
     r = _rec(14, "st3")
-    dbm._save_npz(paths.record_file(root, P, r.id, "st3"), r)  # 有人直接搬檔進來、沒寫索引
+    dbm._save_npz(d.depot, paths.record_file(P, r.id, "st3"), r)  # 有人直接搬檔進來、沒寫索引
     assert d2.refresh(P) == 1 and loads["n"] == 1, "只載入那一筆索引沒有的檔"
     assert len(d2.metas(P)) == 5
 
@@ -105,11 +105,11 @@ def test_index_picks_up_files_dropped_behind_its_back_and_drops_vanished(root):
     r = _rec(20, "st1")
     d.add(r)
     d.add(_rec(21, "st1"))
-    paths.record_file(root, P, r.id, "st1").unlink()  # 有人手動刪檔（不該，但要能自癒）
+    (root / paths.record_file(P, r.id, "st1")).unlink()  # 有人手動刪檔（不該，但要能自癒）
     assert d.refresh(P) == 0
     assert {m["id"] for m in d.metas(P)} == {_rec(21, "st1").id}
     # 索引檔本身被刪 → 從檔重建
-    paths.db_index(root, P).unlink()
+    (root / paths.db_index(P)).unlink()
     d3 = dbm.Database(root)
     assert d3.refresh(P) == 1 and len(d3.metas(P)) == 1
 

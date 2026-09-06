@@ -4,9 +4,12 @@
   這是「繞過會留紀錄」而非「不可能」（architecture §12）。
 - history append-only；`best` 永遠是保守值（公證 min）。
 - 換評估器＝`rescore` 建新榜（零重量），舊榜一個 byte 都不動（D3）。
+
+儲存一律走 `Depot`（榜＝doc、pending＝log），這個檔不認得檔案系統：建構子吃 `Depot | str | Path`。
 """
-from . import fs, paths, specs
-from .model import STATUS_DONE, Profile, Spec, canonical_json
+from . import paths, specs
+from .depot import open_depot
+from .model import STATUS_DONE, Profile, Spec, canonical_json, now_iso, sha1_hex
 
 
 class LedgerTamper(Exception):
@@ -26,20 +29,20 @@ class UnknownRecord(Exception):
 
 
 def _checksum(doc: dict) -> str:
-    return fs.sha1_hex(canonical_json({k: v for k, v in doc.items() if k != "_checksum"}).encode("utf-8"))[:16]
+    return sha1_hex(canonical_json({k: v for k, v in doc.items() if k != "_checksum"}).encode("utf-8"))[:16]
 
 
 class Pending:
     """公證通過、等人審的候選。runtime 寫、人／AI 讀、promote 查。"""
 
-    def __init__(self, root, profile: str):
-        self.path = paths.pending_jsonl(root, profile)
+    def __init__(self, depot, profile: str):
+        self.depot, self.key = open_depot(depot), paths.pending_jsonl(profile)
 
     def append(self, entry: dict) -> None:
-        fs.append_jsonl(self.path, entry)
+        self.depot.append(self.key, entry)
 
     def list(self) -> list:
-        return fs.read_jsonl(self.path)
+        return self.depot.read_log(self.key)
 
     def has(self, rec_id: str) -> bool:
         return self.get(rec_id) is not None
@@ -50,17 +53,24 @@ class Pending:
 
 
 class Ledger:
-    def __init__(self, root, profile: str, spec: str):
-        self.root, self.profile, self.spec = root, profile, spec
-        self.path = paths.ledger_file(root, profile, spec)
+    def __init__(self, depot, profile: str, spec: str):
+        self.depot, self.profile, self.spec = open_depot(depot), profile, spec
+        self.key = paths.ledger_file(profile, spec)
+
+    @property
+    def where(self) -> str:
+        """人讀的位置（錯誤訊息用）——後端無關。"""
+        return f"{self.depot.spec}/{self.key}"
 
     def exists(self) -> bool:
-        return self.path.exists()
+        return self.depot.exists(self.key)
 
     def read(self) -> dict:
-        doc = fs.read_json(self.path)
+        doc = self.depot.get_json(self.key)
+        if doc is None:
+            raise FileNotFoundError(self.where)
         if doc.get("_checksum") != _checksum(doc):
-            raise LedgerTamper(f"{self.path} checksum 不符——榜檔被手改？榜只能經 promote／rescore 寫")
+            raise LedgerTamper(f"{self.where} checksum 不符——榜檔被手改？榜只能經 promote／rescore 寫")
         return doc
 
     def _new(self) -> dict:
@@ -68,7 +78,7 @@ class Ledger:
 
     def _write(self, doc: dict) -> None:
         doc["_checksum"] = _checksum(doc)
-        fs.atomic_write_json(self.path, doc)
+        self.depot.put_json(self.key, doc)
 
     def _conservative(self, ms: list, entry: dict | None) -> float:
         """分數用**本榜的 spec** 對 db 量測重算取 min（review：--spec 別的規格時不能抄 pending 裡 profile 規格的分數）；
@@ -102,7 +112,7 @@ class Ledger:
         conservative = self._conservative(ms, entry)
         doc = self.read() if self.exists() else self._new()
         prev = doc["best"]
-        best = {"id": rec_id, "score": conservative, "at": fs.now_iso(), "by": by, "note": note, "force": entry is None}
+        best = {"id": rec_id, "score": conservative, "at": now_iso(), "by": by, "note": note, "force": entry is None}
         doc["best"] = best
         doc["history"].append({"event": "promote", "id": rec_id, "score": conservative,
                                "prev_id": prev["id"] if prev else None, "prev_score": prev["score"] if prev else None,
@@ -111,14 +121,14 @@ class Ledger:
         return best
 
 
-def rescore(root, profile: Profile, spec: Spec, db, *, by: str, force: bool = False) -> dict:
+def rescore(depot, profile: Profile, spec: Spec, db, *, by: str, force: bool = False) -> dict:
     """為 spec 建（或重算）榜：掃 db/<profile>/ 每筆 done 用 Record.measure 重算 score（零重量、不重寫 Record 檔）；
     首任王＝保守值（同 id 取 min）最高者。榜已存在需 force，且只 append history。"""
     if spec.measure != profile.measure:
         raise ValueError(f"spec {spec.name} 的 measure={spec.measure!r} ≠ profile 的 {profile.measure!r}——換尺＝換儀器，不是 rescore")
-    lg = Ledger(root, profile.name, spec.name)
+    lg = Ledger(depot, profile.name, spec.name)
     if lg.exists() and not force:
-        raise LedgerExists(f"榜 {lg.path} 已存在；要重算請 force")
+        raise LedgerExists(f"榜 {lg.where} 已存在；要重算請 force")
     conservative: dict = {}
     for ln in db.metas(profile.name):
         if ln["status"] != STATUS_DONE:
@@ -127,7 +137,7 @@ def rescore(root, profile: Profile, spec: Spec, db, *, by: str, force: bool = Fa
         s = spec.score(rec.measure)
         if s is not None:
             conservative[rec.id] = min(conservative.get(rec.id, s), s)
-    now = fs.now_iso()
+    now = now_iso()
     best = None
     if conservative:
         bid = max(sorted(conservative), key=lambda i: conservative[i])

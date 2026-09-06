@@ -1,13 +1,19 @@
 """emforge/cli/show.py — 唯讀：status／events／pending／jobs／watch／report。AI 層與人讀狀態的入口。"""
 import json
+from pathlib import Path
 
 from .. import fs, ledger, paths, report
 from ..queue import Queue
 from .base import EXIT_OK, EXIT_REFUSED, add_root, err, root_of
 
 
+def _p(root, key: str) -> Path:
+    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
+    return Path(root) / key
+
+
 def cmd_status(args) -> int:
-    st = fs.read_json(paths.status_json(root_of(args), args.profile), default=None)
+    st = fs.read_json(_p(root_of(args), paths.status_json(args.profile)), default=None)
     print(json.dumps(st, ensure_ascii=False, indent=1) if st else f"尚無 status（profile {args.profile} 的 runtime 還沒跑過）")
     return EXIT_OK
 
@@ -20,7 +26,7 @@ def _add_status(sub) -> None:
 
 
 def cmd_events(args) -> int:
-    ev = fs.read_jsonl(paths.events_jsonl(root_of(args), args.profile))
+    ev = fs.read_jsonl(_p(root_of(args), paths.events_jsonl(args.profile)))
     if args.event:
         ev = [e for e in ev if e.get("event") == args.event]
     for e in ev[-args.last:] if args.last else ev:

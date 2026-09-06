@@ -77,7 +77,7 @@ def test_concurrent_add_loses_no_job(root):
         th.join()
     assert not errors
     assert sorted(j.store for j in q.list()) == sorted(stores)
-    assert not paths.jobs_lock(root).exists()
+    assert not (root / paths.jobs_lock()).exists()
 
 
 # ── pick ────────────────────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ def test_pick_resumes_own_claim_after_restart(root):
 def test_pick_clears_ownerless_claim_older_than_60s(root):
     """回歸 I-2（2026-08-03）：O_EXCL 建檔與寫 JSON 之間 worker 死了 → 空 claim 沒人接。>60s 的無主 claim 自動清。"""
     q = _q(root, ("s", 5))
-    c = paths.claim_file(root, "s")
+    c = root / paths.claim_file("s")
     c.parent.mkdir(parents=True, exist_ok=True)
     c.write_text("", encoding="utf-8")
     assert q.pick("216") is None, "新鮮的空 claim 可能正在被寫，先讓一下"
@@ -129,11 +129,11 @@ def test_pick_takes_over_stale_claim_only_when_results_dir_also_stale(root):
     """回歸 I-2：stale 判定看**進度**（results/ 最新檔）而不只看 claim 時間——跑得慢不等於死了。"""
     q = _q(root, ("s", 5))
     assert q.pick("218").store == "s"
-    c = paths.claim_file(root, "s")
+    c = root / paths.claim_file("s")
     _age(c, 3 * 3600)
     batches.Batch(root, "s").write_result("x", {"id": "x"})       # 218 剛剛還有產出
     assert q.pick("216") is None, "claim 老但有進度 → 不接管"
-    _age(paths.batch_result(root, "s", "x"), 3 * 3600)
+    _age(root / paths.batch_result("s", "x"), 3 * 3600)
     assert q.pick("216").store == "s", "claim 老且沒進度 → 接管"
     assert q.claim_owner("s") == "216"
 
@@ -142,14 +142,14 @@ def test_pick_takes_over_fail_when_not_listed_skips_when_listed(root):
     q = _q(root, ("s", 5))
     q.pick("216")
     q.mark_fail("s", "216", reason="連敗熔斷")
-    assert q.state("s") == "fail" and not paths.claim_file(root, "s").exists()
+    assert q.state("s") == "fail" and not (root / paths.claim_file("s")).exists()
     assert q.pick("216") is None, "我死過，讓別台"
     j = q.pick("218")
     assert j is not None and j.store == "s"
-    assert fs.read_claim(paths.claim_file(root, "s"))["prior_fail"] == ["216"]
-    assert not paths.fail_file(root, "s").exists()
+    assert fs.read_claim(root / paths.claim_file("s"))["prior_fail"] == ["216"]
+    assert not (root / paths.fail_file("s")).exists()
     q.mark_fail("s", "218", reason="又熔斷")
-    assert fs.read_json(paths.fail_file(root, "s"))["machines"] == ["216", "218"], "死亡名單累積"
+    assert fs.read_json(root / paths.fail_file("s"))["machines"] == ["216", "218"], "死亡名單累積"
     assert q.pick("218") is None and q.pick("216") is None and q.pick("37").store == "s"
 
 
@@ -158,15 +158,15 @@ def test_requeue_clears_claim_done_fail_and_restores_job_atomically(root):
     q = _q(root, ("s", 5))
     q.pick("216")
     q.mark_done("s", "216", n_done=1, n_error=1, error_ids=["x"])
-    paths.fail_file(root, "s").write_text("{}", encoding="utf-8")   # 髒狀態：done 與 fail 同時在
+    (root / paths.fail_file("s")).write_text("{}", encoding="utf-8")   # 髒狀態：done 與 fail 同時在
     q.requeue("s")
     assert q.state("s") == "queued"
     for f in (paths.claim_file, paths.done_file, paths.fail_file):
-        assert not f(root, "s").exists()
+        assert not (root / f("s")).exists()
     assert q.pick("218").store == "s"
     with pytest.raises(queue.LiveClaim):
         q.requeue("s")                       # 新鮮 claim 正在跑 → 拒（先 stop 那台）
-    _age(paths.claim_file(root, "s"), 3 * 3600)
+    _age(root / paths.claim_file("s"), 3 * 3600)
     q.requeue("s")                           # 陳 claim 可以清
     assert q.state("s") == "queued"
     with pytest.raises(queue.MissingJob):
@@ -183,7 +183,7 @@ def test_take_over_fail_lost_race_returns_none_not_crash(root, monkeypatch):
 
     def vanish_then_read(path, *a, **k):
         if str(path).endswith("s.fail"):
-            paths.fail_file(root, "s").unlink(missing_ok=True)      # B 先接走了
+            (root / paths.fail_file("s")).unlink(missing_ok=True)      # B 先接走了
         return real(path, *a, **k)
 
     monkeypatch.setattr(queue.fs, "read_json", vanish_then_read)
@@ -197,11 +197,11 @@ def test_requeue_refuses_when_batch_has_recent_progress_even_if_claim_old(root):
     live＝claim 新鮮 **或** 批有進度。"""
     q = _q(root, ("s", 5))
     q.pick("216")
-    _age(paths.claim_file(root, "s"), 3 * 3600)
+    _age(root / paths.claim_file("s"), 3 * 3600)
     batches.Batch(root, "s").write_result("x", {"id": "x"})
     with pytest.raises(queue.LiveClaim):
         q.requeue("s")
-    _age(paths.batch_result(root, "s", "x"), 3 * 3600)
+    _age(root / paths.batch_result("s", "x"), 3 * 3600)
     q.requeue("s")
     assert q.state("s") == "queued"
 
@@ -209,12 +209,12 @@ def test_requeue_refuses_when_batch_has_recent_progress_even_if_claim_old(root):
 def test_touch_claim_updates_mtime_only_if_exists(root):
     q = _q(root, ("s", 5))
     q.touch_claim("s")                                   # 沒 claim：no-op、不建檔
-    assert not paths.claim_file(root, "s").exists()
+    assert not (root / paths.claim_file("s")).exists()
     q.pick("216")
-    _age(paths.claim_file(root, "s"), 3600)
+    _age(root / paths.claim_file("s"), 3600)
     q.touch_claim("s")
-    assert time.time() - fs.mtime(paths.claim_file(root, "s")) < 5
-    assert fs.read_claim(paths.claim_file(root, "s"))["machine"] == "216", "只 touch，內容不動"
+    assert time.time() - fs.mtime(root / paths.claim_file("s")) < 5
+    assert fs.read_claim(root / paths.claim_file("s"))["machine"] == "216", "只 touch，內容不動"
 
 
 def test_watch_treats_vanishing_fail_as_not_terminal(root, monkeypatch):
@@ -267,6 +267,6 @@ def test_mark_done_records_summary_and_releases_claim(root):
     q = _q(root, ("s", 5))
     q.pick("216")
     q.mark_done("s", "216", n_done=1, n_error=1, error_ids=["abc"])
-    d = fs.read_json(paths.done_file(root, "s"))
+    d = fs.read_json(root / paths.done_file("s"))
     assert d["machine"] == "216" and d["n_done"] == 1 and d["n_error"] == 1 and d["error_ids"] == ["abc"] and d["at"]
-    assert not paths.claim_file(root, "s").exists()
+    assert not (root / paths.claim_file("s")).exists()

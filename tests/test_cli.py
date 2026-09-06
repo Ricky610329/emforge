@@ -51,10 +51,11 @@ def test_main_converts_exceptions_to_exit_1_with_stderr(root, capsys):
 # ── init / version / check-strategy ─────────────────────────────────────────
 def test_init_creates_root_layout_and_templates(root, capsys):
     assert _main("init", "--root", root, "--profile", "fake_f1") == 0
-    for d in paths.layout_dirs(root):
-        assert d.is_dir()
+    for prefix in paths.layout_prefixes():
+        assert (root / prefix).is_dir()
+    assert paths.user_strategies_dir(root).is_dir()
     assert paths.registry_py(root).exists() and "register" in paths.registry_py(root).read_text(encoding="utf-8")
-    y = paths.strategies_yaml(root, "fake_f1").read_text(encoding="utf-8")
+    y = (root / paths.strategies_yaml("fake_f1")).read_text(encoding="utf-8")
     assert "profile: fake_f1" in y and "blind" in y
     assert _main("init", "--root", root, "--profile", "fake_f1") == 0, "重跑不覆寫既有檔"
     assert "已存在" in capsys.readouterr().out
@@ -75,11 +76,11 @@ def test_check_strategy_dry_runs_in_process(fake, capsys):
 # ── run / worker ────────────────────────────────────────────────────────────
 def test_run_once_single_tick(fake):
     assert _main("run", "--root", fake, "--profile", "fake_f1", "--once", "--in-process") == 0
-    assert fs.read_json(paths.status_json(fake, "fake_f1"))["tick"] == 1
+    assert fs.read_json(fake / paths.status_json("fake_f1"))["tick"] == 1
 
 
 def test_run_reconcile_mismatch_returns_2(fake):
-    fs.atomic_write_json(paths.inflight_file(fake, "fake_f1", "ghost"),
+    fs.atomic_write_json(fake / paths.inflight_file("fake_f1", "ghost"),
                          {"store": "ghost", "strategy": "blind", "tick": 1, "seed": 0, "kind": "sample", "prio": 9,
                           "ids": [], "items": {}, "collected": [], "at": "x"})
     assert _main("run", "--root", fake, "--profile", "fake_f1", "--once", "--in-process") == 2
@@ -170,7 +171,7 @@ def test_promote_unknown_id_nonzero_prints_reason(fake, capsys):
     assert "pending" in capsys.readouterr().err
     assert _main("promote", rec.id, "--root", fake, "--profile", "fake_f1", "--by", "ricky", "--force", "--note", "人工") == 0
     assert ledger.Ledger(fake, "fake_f1", "fake_v1").best()["id"] == rec.id
-    ev = [e for e in fs.read_jsonl(paths.events_jsonl(fake, "fake_f1")) if e["event"] == "promoted"]
+    ev = [e for e in fs.read_jsonl(fake / paths.events_jsonl("fake_f1")) if e["event"] == "promoted"]
     assert ev and ev[0]["by"] == "ricky"
     assert _main("promote", rec.id, "--root", fake, "--profile", "fake_f1", "--by", "") == 1
 
@@ -184,8 +185,8 @@ def test_rescore_and_retire(fake, capsys):
     assert _main("rescore", "--root", fake, "--profile", "fake_f1", "--spec", "fake_v1", "--by", "ricky", "--force") == 0
     assert _main("rescore", "--root", fake, "--profile", "fake_f1", "--spec", "unregistered_v9", "--by", "ricky") == 1
     assert _main("retire", "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 0
-    assert paths.retired_marker(fake, "fake_f1").exists()
-    assert [e["event"] for e in fs.read_jsonl(paths.events_jsonl(fake, "fake_f1"))][-1] == "retired"
+    assert (fake / paths.retired_marker("fake_f1")).exists()
+    assert [e["event"] for e in fs.read_jsonl(fake / paths.events_jsonl("fake_f1"))][-1] == "retired"
 
 
 def test_requeue_refuses_live_claim(fake):
@@ -195,7 +196,7 @@ def test_requeue_refuses_live_claim(fake):
     q.pick("216")
     assert _main("requeue", "s1", "--root", fake, "--by", "ricky") == 7
     old = time.time() - 3 * 3600
-    os.utime(paths.claim_file(fake, "s1"), (old, old))
+    os.utime(fake / paths.claim_file("s1"), (old, old))
     assert _main("requeue", "s1", "--root", fake, "--by", "ricky") == 0
     assert q.state("s1") == "queued"
     assert _main("requeue", "nope", "--root", fake, "--by", "ricky") == 1
@@ -204,9 +205,9 @@ def test_requeue_refuses_live_claim(fake):
 # ── 控制 ────────────────────────────────────────────────────────────────────
 def test_stop_resume_profile_and_worker(fake):
     assert _main("stop", "--root", fake, "--profile", "fake_f1") == 0
-    assert paths.runtime_stop(fake, "fake_f1").exists()
+    assert (fake / paths.runtime_stop("fake_f1")).exists()
     assert _main("stop", "--root", fake, "--profile", "fake_f1", "--clear") == 0
-    assert not paths.runtime_stop(fake, "fake_f1").exists()
+    assert not (fake / paths.runtime_stop("fake_f1")).exists()
     assert _main("stop", "--root", fake, "--worker", "--machine-tag", "216") == 0
     assert queue.Queue(fake).stop_requested("216") and not queue.Queue(fake).stop_requested("218")
     assert _main("stop", "--root", fake, "--worker") == 0 and queue.Queue(fake).stop_requested("218")
@@ -221,11 +222,11 @@ def test_stop_resume_profile_and_worker(fake):
     rt.save_state()
     assert _main("resume", "--root", fake, "--profile", "fake_f1", "--strategy", "blind", "--by", "ricky") == 0
     assert _main("resume", "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 0
-    assert paths.control_json(fake, "fake_f1").exists()
+    assert (fake / paths.control_json("fake_f1")).exists()
     rt.apply_control()
     assert rt.strategy_state("blind")["paused"] is False and rt.strategy_state("blind")["errors_consecutive"] == 0
-    assert rt.state["paused_profile"] is None and not paths.control_json(fake, "fake_f1").exists()
-    ev = [e["event"] for e in fs.read_jsonl(paths.events_jsonl(fake, "fake_f1"))]
+    assert rt.state["paused_profile"] is None and not (fake / paths.control_json("fake_f1")).exists()
+    ev = [e["event"] for e in fs.read_jsonl(fake / paths.events_jsonl("fake_f1"))]
     assert "strategy_resumed" in ev and "profile_resumed" in ev
 
 
@@ -236,7 +237,7 @@ def test_smoke_cli_does_not_touch_state_json(fake):
     rt.state["tick"] = 120
     rt.state["notarize"] = {"deadbeef": {"stores": ["x"], "tick": 118, "score": -1.0}}
     rt.save_state()
-    p = paths.state_json(fake, "fake_f1")
+    p = fake / paths.state_json("fake_f1")
     before = (p.read_bytes(), p.stat().st_mtime_ns)
     assert _main("smoke", rec.id, "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 0
     assert (p.read_bytes(), p.stat().st_mtime_ns) == before
@@ -250,7 +251,7 @@ def test_smoke_dispatches_repeat_for_known_id(fake, capsys):
     jobs = queue.Queue(fake).list()
     assert len(jobs) == 2 and all(j.machine == "216" and j.prio == 1 and j.origin == "cli:smoke" for j in jobs)
     for j in jobs:
-        inf = fs.read_json(paths.inflight_file(fake, "fake_f1", j.store))
+        inf = fs.read_json(fake / paths.inflight_file("fake_f1", j.store))
         assert inf["kind"] == "repeat" and inf["strategy"] == "cli:smoke" and inf["ids"] == [rec.id]
         assert j.store in out and "smoke" in j.store and ":" not in j.store
     assert batches.Batch(fake, jobs[0].store).ids() == [rec.id]
@@ -269,7 +270,7 @@ def test_abandon_cli(fake, capsys):
     q.mark_fail(store, "216", "dead")
     assert _main("abandon", store, "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 0
     assert "abandoned" in capsys.readouterr().out
-    assert not paths.inflight_file(fake, "fake_f1", store).exists() and q.state(store) == "done"
+    assert not (fake / paths.inflight_file("fake_f1", store)).exists() and q.state(store) == "done"
     assert _main("abandon", store, "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 1
 
 
@@ -287,7 +288,7 @@ def test_doctor_reports_versions_and_refuses_when_ansysedt_running(fake, capsys,
 def test_runtime_applies_control_at_tick_start(fake):
     rt = make_rt(fake)
     rt.strategy_state("blind")["paused"] = True
-    fs.atomic_write_json(paths.control_json(fake, "fake_f1"), {"resume_strategies": ["blind"], "by": "ricky"})
+    fs.atomic_write_json(fake / paths.control_json("fake_f1"), {"resume_strategies": ["blind"], "by": "ricky"})
     rt.acquire_lock()
     rt.tick()
     rt.release_lock()

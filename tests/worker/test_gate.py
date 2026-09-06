@@ -41,8 +41,8 @@ def test_gate_order_profile_exists_hash_geom_labels_and_stops_at_first_failure(r
 
 def test_gate_rejects_retired_profile(root):
     testing.make_fake_root(root)
-    paths.retired_marker(root, P.name).parent.mkdir(parents=True, exist_ok=True)
-    paths.retired_marker(root, P.name).write_text("{}", encoding="utf-8")
+    (root / paths.retired_marker(P.name)).parent.mkdir(parents=True, exist_ok=True)
+    (root / paths.retired_marker(P.name)).write_text("{}", encoding="utf-8")
     v = gate(make_job("s"), root)
     assert not v.ok and v.reason.startswith("profile_retired")
 

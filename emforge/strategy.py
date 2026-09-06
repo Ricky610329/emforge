@@ -81,8 +81,14 @@ def _from_mapping(cls, d: dict, where: str):
 
 
 def load_strategies_yaml(path, profile: str | None = None) -> StrategiesFile:
-    """讀 `strategies.yaml`。未知鍵、重名、保留字、名字不合規、profile 不符一律 ConfigError（不靜默）。"""
-    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    """從**本機路徑**讀 `strategies.yaml` 再解析。已抽象化的呼叫端（report）用 `parse_strategies_yaml(text)`；
+    runtime 這一半在 M12d 一起遷。"""
+    return parse_strategies_yaml(Path(path).read_text(encoding="utf-8"), profile)
+
+
+def parse_strategies_yaml(text: str, profile: str | None = None) -> StrategiesFile:
+    """解析 `strategies.yaml` 的文字。未知鍵、重名、保留字、名字不合規、profile 不符一律 ConfigError（不靜默）。"""
+    raw = yaml.safe_load(text) or {}
     unknown = set(raw) - {"profile", "runtime", "strategies"}
     if unknown:
         raise ConfigError(f"頂層不明鍵 {sorted(unknown)}")

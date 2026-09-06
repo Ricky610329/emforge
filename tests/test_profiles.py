@@ -89,8 +89,8 @@ def test_is_retired_by_flag_or_marker(root):
     p = _profile()
     profiles.register_profile(p)
     assert profiles.is_retired(root, p) is False
-    paths.retired_marker(root, p.name).parent.mkdir(parents=True)
-    paths.retired_marker(root, p.name).write_text('{"by": "ricky"}', encoding="utf-8")
+    (root / paths.retired_marker(p.name)).parent.mkdir(parents=True)
+    (root / paths.retired_marker(p.name)).write_text('{"by": "ricky"}', encoding="utf-8")
     assert profiles.is_retired(root, p) is True
     assert profiles.is_retired(root, _profile(name="fake_f2", retired=True)) is True
 

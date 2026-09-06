@@ -11,7 +11,7 @@ P = testing.FAKE_PROFILE
 
 
 def _events(root, tag="216"):
-    return [e["event"] for e in fs.read_jsonl(paths.worker_log(root, tag))]
+    return [e["event"] for e in fs.read_jsonl(root / paths.worker_log(tag))]
 
 
 def test_loop_sweeps_workdir_and_prints_worker_ver_on_start(root, capsys):
@@ -32,9 +32,9 @@ def test_loop_once_returns_after_one_job(root):
     q.add(make_job("s1"))
     rc = loop.worker_loop(root, "216", once=True, work_root=root / "work", sleep=lambda s: None)
     assert rc == 0 and q.state("s1") == "done"
-    done = fs.read_json(paths.done_file(root, "s1"))
+    done = fs.read_json(root / paths.done_file("s1"))
     assert done["n_done"] == 3 and done["n_error"] == 0 and done["machine"] == "216"
-    assert set(paths.batch_results_dir(root, "s1").glob("*.json")) and len(ids) == 3
+    assert set((root / paths.batch_results_dir("s1")).glob("*.json")) and len(ids) == 3
     ev = _events(root)
     assert ev[:2] == ["worker_start", "job_claimed"] and "job_done" in ev and ev[-1] == "worker_stop"
     assert not list((root / "db").glob("*/*.npz")), "worker 不寫資料庫"
@@ -50,7 +50,7 @@ def test_loop_gate_failure_marks_fail_and_continues_to_next_job(root):
     rc = loop.worker_loop(root, "216", once=True, work_root=root / "work", sleep=lambda s: None)
     assert rc == 0
     assert q.state("bad") == "fail" and q.state("good") == "done"
-    assert fs.read_json(paths.fail_file(root, "bad"))["last"].startswith("profile_hash_mismatch")
+    assert fs.read_json(root / paths.fail_file("bad"))["last"].startswith("profile_hash_mismatch")
     assert "gate_rejected" in _events(root)
 
 
@@ -110,8 +110,8 @@ def test_loop_survives_filesystem_error_marks_fail_and_continues(root, monkeypat
     rc = loop.worker_loop(root, "216", once=False, work_root=root / "work",
                           sleep=lambda s: q.request_stop("216"))
     assert rc == 0
-    assert q.state("s1") == "fail" and "worker_exception" in fs.read_json(paths.fail_file(root, "s1"))["last"]
-    assert not paths.claim_file(root, "s1").exists(), "claim 不留著"
+    assert q.state("s1") == "fail" and "worker_exception" in fs.read_json(root / paths.fail_file("s1"))["last"]
+    assert not (root / paths.claim_file("s1")).exists(), "claim 不留著"
     assert q.state("s2") == "done", "worker 活著，下一個照跑"
     ev = _events(root)
     assert "job_failed" in ev and ev[-1] == "worker_stop"
@@ -127,4 +127,4 @@ def test_loop_run_batch_fail_marks_fail(root):
                           sim_factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p, fail_ids=set(ids)),
                           max_fail=1, max_blowout=1)
     assert rc == 0 and q.state("s1") == "fail"
-    assert "216" in fs.read_json(paths.fail_file(root, "s1"))["machines"]
+    assert "216" in fs.read_json(root / paths.fail_file("s1"))["machines"]
