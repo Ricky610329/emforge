@@ -24,12 +24,13 @@ from ..heartbeat import Heartbeat
 from ..model import now_iso, record_id
 from ..worker.guard import guarded_call, open_with_retries
 from ..worker.workdir import WorkDir, default_work_root
-from . import estop
+from . import estop, reference
 from .limits import Limits, check_preconditions, confirm_ok, confirm_token
 from .states import DeviceState, write_state
 
 HISTORY_MAX = 50
 RECENT_MAX = 50
+REFERENCE_REFRESH_S = 3600.0
 
 
 class DeviceBusy(Exception):
@@ -70,6 +71,7 @@ class Instrument:
         self._used_tokens: set = set()
         self._hb: Heartbeat | None = None
         self._opened_once = False
+        self._reference_at: float | None = None
 
     # ── 日誌／狀態 ──────────────────────────────────────────────────────────
     def log(self, event: str, /, **fields) -> None:
@@ -91,7 +93,14 @@ class Instrument:
     def _beat(self) -> bool:
         self.estop_engaged()
         self._set()
+        if self._reference_at is not None and self._clock() - self._reference_at >= REFERENCE_REFRESH_S:
+            self.refresh_reference()
         return True
+
+    def refresh_reference(self) -> bool:
+        """刷 `devices/<tag>/reference.{md,json}`（open 成功後與每小時）。"""
+        self._reference_at = self._clock()
+        return reference.write_reference(self)
 
     # ── 生命週期 ────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -178,6 +187,7 @@ class Instrument:
             raise
         self._opened_once = True
         self._set("ready")
+        self.refresh_reference()
 
     def simulate(self, bits):
         """一筆進一筆出（SimResult）；急停硬檢查；錯誤計數後原樣拋（結果檔由呼叫端 make_result／error_result）。"""

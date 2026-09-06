@@ -485,3 +485,4 @@ def propose(ctx):
 
 實作完整清單見 `implementation.md` §13：Record 檔用 `.npz`（核心零 torch）、`Context` 多 `params`、`Record` 多 `extra`、批結果改逐筆檔 `batches/<store>/results/<id>.json`、`profile_hash` 納入 measure 名、Simulator 協定收成 `open/simulate/kill/close`、state/status 分檔、resume 走 `control.json`、保留字不含 `blind`、single geom_ver 單邊、`deliver` 未實作。
 **2026-09-06（M12）**：§2／§7 假設的「共享檔案系統（NAS）＋O_EXCL／rename 協調原語」抽成 `Depot` 介面（doc／log／lease／列舉四種語義；`FileDepot` 逐位元＝原佈局、`MemoryDepot` 給測試；契約測試對每個後端同套跑）——基礎設施可換（S3／SQL），算法層一行不改；`--root`＝本機程式碼根、`--depot`＝共享狀態後端。
+**2026-09-06（M13–M14）**：worker 不再直接開 Simulator，改經**儀器層** `device.Instrument`（MHS 式：狀態字典 `devices/<tag>/`、程序＝open/simulate/kill/close/abort/selfcheck/simulate_once、租約、`Limits`＋前置檢查、兩段式 confirm、急停三層——解除只能 CLI）；`fleet` 儀表板與說明檔給人與 AI 層讀；每台各自的 MCP server 在 M15 貼上這些方法。§4 的「worker 只認 Simulator 協定」仍成立——Instrument 本身就實作那個協定。

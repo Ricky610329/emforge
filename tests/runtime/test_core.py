@@ -245,3 +245,32 @@ def test_heartbeat_detects_foreign_owner_as_lost_and_does_not_touch_it(rt_root, 
     assert rt.heartbeat() is False and rt.lock_lost()
     assert rt.depot.modified_at(key) == 1_000_000, "別人的鎖不 touch"
     r2.release_lock()
+
+
+# ── M14：機隊字典進 runtime ─────────────────────────────────────────────────
+def test_fleet_quiet_counts_busy_instrument_heartbeat(rt_root, rt):
+    """排隊≠停滯：inflight 檔與結果都老，但有儀器正拿著這批在跑（狀態字典新鮮）→ 不算靜默。"""
+    from emforge.device import states
+    rt.acquire_lock()
+    rt.tick()
+    rt.config.runtime.quiet_s = 1
+    old = time.time() - 3600
+    for inf in rt.inflight():
+        rt.depot.set_modified_at(paths.inflight_file("fake_f1", inf["store"]), old)
+    assert rt.fleet_quiet() is True
+    store = rt.inflight()[0]["store"]
+    states.write_state(rt.depot, states.DeviceState(tag="216", state="busy", owner=f"queue:{store}", store=store))
+    assert rt.fleet_quiet() is False, "忙碌儀器的心跳算進度"
+    rt.depot.set_modified_at(paths.device_state("216"), old)
+    assert rt.fleet_quiet() is True, "儀器心跳也老了（離線）→ 靜默"
+    rt.release_lock()
+
+
+def test_status_carries_fleet_summary(rt):
+    from emforge.device import states
+    states.write_state(rt.depot, states.DeviceState(tag="218", state="idle", n_done=5))
+    rt.acquire_lock()
+    rt.tick()
+    rt.release_lock()
+    fleet = rt.depot.get_json(paths.status_json("fake_f1"))["fleet"]
+    assert fleet[0]["tag"] == "218" and fleet[0]["state"] == "idle" and fleet[0]["offline"] is False and fleet[0]["n_done"] == 5

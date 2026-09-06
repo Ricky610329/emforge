@@ -9,14 +9,16 @@
 |---|---|---|
 | 模組 | `snake_case` 單數名詞、扁平；檔名說出它做什麼 | `db.py`, `fs.py`, `worker/gate.py`, `worker/fuse.py` |
 | **禁用檔名** | `utils` `util` `misc` `helpers` `common` `tools` `stuff` `dedust` | — |
-| 類別 | `CapWords`；契約型別名照架構文件 | `Profile` `Spec` `Proposal` `Context` `Record` `Job` `Database` `View` `Ledger` `Pending` `Queue` `Runtime` `SimResult`；後端 `Depot` `FileDepot` `MemoryDepot`（不叫 Store：`store` 已是「一批」的名字） |
+| 類別 | `CapWords`；契約型別名照架構文件 | `Profile` `Spec` `Proposal` `Context` `Record` `Job` `Database` `View` `Ledger` `Pending` `Queue` `Runtime` `SimResult`；後端 `Depot` `FileDepot` `MemoryDepot`（不叫 Store：`store` 已是「一批」的名字）；儀器層 `Instrument` `DeviceState` `Limits` `Heartbeat` |
 | 假件 | `Fake*`（不叫 `Mock*`），住 `emforge/testing.py` | `FakeSimulator` |
 | 函式 | 動詞開頭 `snake_case`；判斷式 `is_`/`has_`；私有 `_` 前綴 | `record_id()`, `try_claim()`, `is_stale()` |
 | 常數 | `UPPER_SNAKE`；字串值本身小寫 snake | `STATUS_DONE = "done"`, `KIND_REPEAT = "repeat"`, `ARM_BLIND = "blind"` |
-| 例外 | `CapWords` 名詞結尾，不加 `Exception`/`Error` 後綴 | `LockTimeout` `GeomVerMismatch` `StrategyFailure` `StrategyTimeout` `AdapterFailure` `StoreExists` `CrossProfileRefused` `AntennaUnavailable`；`ProposalError`（← 唯一例外：與 ValueError 對稱） |
+| 例外 | `CapWords` 名詞結尾，不加 `Exception`/`Error` 後綴 | `LockTimeout` `GeomVerMismatch` `StrategyFailure` `StrategyTimeout` `AdapterFailure` `StoreExists` `CrossProfileRefused` `AntennaUnavailable` `EstopEngaged` `DeviceBusy` `PreconditionFailed` `ConfirmRejected` `Aborted`；`ProposalError`（← 唯一例外：與 ValueError 對稱） |
 | CLI 子命令 ↔ 函式 | kebab-case ↔ `cmd_<snake>` | `import-legacy` ↔ `cmd_import_legacy` |
 | CLI 旗標 ↔ 屬性 | kebab ↔ `args.<snake>` | `--max-inflight` ↔ `args.max_inflight` |
-| 環境變數 | `EMFORGE_` 前綴 | `EMFORGE_ROOT`（本機程式碼／設定根）`EMFORGE_DEPOT`（共享狀態後端 spec：`file://…`／`memory://…`）`EMFORGE_ANTENNA_REPO` `EMFORGE_MACHINE` `EMFORGE_WORK` |
+| 環境變數 | `EMFORGE_` 前綴 | `EMFORGE_ROOT`（本機程式碼／設定根）`EMFORGE_DEPOT`（共享狀態後端 spec：`file://…`／`memory://…`）`EMFORGE_ANTENNA_REPO` `EMFORGE_MACHINE` `EMFORGE_WORK` `EMFORGE_DEVICE_TOKEN`（儀器兩段式 confirm 的 secret；M15 也是 MCP 共享 token） |
+| 租約 owner | `<來源>:<對象>` | 儀器租約 `queue:<store>`／`mcp:<by>`；runtime 鎖 `<tag>:<pid>:<rand>`；jobs.lock `<host>:<pid>` |
+| 急停 scope | `fleet` \| `device` \| `local`（外層優先回報） | `queue/ESTOP`／`queue/ESTOP.<tag>`／`<root>/ESTOP` |
 | Depot key | POSIX 相對字串、只能來自 `paths.py`；前綴以 `/` 結尾；末段 `.` 開頭或含 `.broken.`＝後端內部、不列 | `db/fake_f1/_index.jsonl`, `queue/state/`（前綴） |
 | 單位 | 後綴 `_s`／`_min`；無單位的量不加 | `timeout_s`, `stale_s`, `noise_floor` |
 | 時間戳 | 欄位名 `at`，ISO 8601 本地時間 `YYYY-MM-DDTHH:MM:SS` | `"at": "2026-09-01T14:03:22"` |
@@ -58,12 +60,14 @@
 ├── queue/state/<store>.claim|.done|.fail   queue/STOP  queue/STOP.<tag>
 ├── queue/log/<tag>.jsonl              各 worker 單寫者事件檔
 ├── batches/<store>/manifest.json  patterns.npz  results/<id>.json
+├── queue/ESTOP  queue/ESTOP.<tag>     急停（全機／單機）；本機層是 <root>/ESTOP
+├── devices/<tag>/ state.json  reference.md  reference.json  log.jsonl  adhoc/<stamp>-<id>.json   儀器層（一台一目錄）
 └── runtime_state/<profile>/ lock  strategies.yaml  state.json  status.json  events.jsonl  pending.jsonl  STOP
                              inflight/<store>.json  strategies/<name>/（策略 workdir，runtime 永不讀）
 ```
 
 - `_` 前綴的檔＝可重建快取（`_index.jsonl`、`_imported.json`）。
-- `registry.py`、`strategies/`、`runtime_state/<p>/strategies/`（策略 workdir）是**本機路徑**，不經 Depot；其餘全部是 Depot key。
+- `registry.py`、`strategies/`、`runtime_state/<p>/strategies/`（策略 workdir）、`ESTOP`（本機急停）是**本機路徑**，不經 Depot；其餘全部是 Depot key。
 - worker 本機工作目錄：`<EMFORGE_WORK>/<store>/`，啟動時整個清。
 
 ## 測試

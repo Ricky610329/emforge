@@ -1,7 +1,7 @@
 # 實作文檔（依程式碼寫；code 與本文不一致時以 code 與 tests/ 為準）
 
 > 讀者：要動手改／接手的人。設計的「為什麼」在 `architecture.md`；本文只講「現在是怎麼做的」。
-> 版本：emforge 0.1.0，274 條測試全綠（2026-09-01）；M12（2026-09-06）基礎設施解耦後 ~400 條。事故編號 `I-N` 見 `incidents.md`。
+> 版本：emforge 0.1.0，274 條測試全綠（2026-09-01）；M12（2026-09-06）基礎設施解耦後 ~400 條；M13–M14 儀器層後 ~450 條。事故編號 `I-N` 見 `incidents.md`。
 
 ---
 
@@ -46,13 +46,17 @@ emforge/
   report.py       每策略報表、p_beats_blind、K_MIN 閘、跨 profile 拒、worker_ver 警告
   doctor.py       機器體檢
   netid.py        機器 tag（EMFORGE_MACHINE 或 IP 末段）
+  heartbeat.py    背景心跳執行緒（runtime 鎖與儀器狀態字典共用）：fn 回 False → `lost` 旗標（鎖丟了就停，M13）
   testing.py      FakeSimulator、fake_measure、FAKE_PROFILE／FAKE_SPEC、register_fakes、make_fake_root、run_all_jobs
-  worker/         loop.py gate.py guard.py fuse.py workdir.py batch.py（一檔一職責）
+  worker/         loop.py gate.py guard.py fuse.py workdir.py batch.py（一檔一職責；batch／loop 經 device，gate／guard／fuse／workdir 是 leaf）
+  device/         **儀器層**（M13–M14，MHS 式）：estop.py（急停三層）limits.py（Limits／check_preconditions／confirm token）
+                  states.py（DeviceState 唯一真相、write_state／read_fleet）instrument.py（Instrument 狀態機＋租約＋Simulator 直傳＋simulate_once）
+                  reference.py（說明檔 md＋json；程序清單＝M15 MCP tools）
   runtime/        core.py reconcile.py schedule.py dispatch.py collect.py notarize.py
   strategies/     blind.py top_k_flip.py（內建；使用者同名檔蓋過）
   adapters/antenna/  _bind.py sim.py measure.py profiles.py（唯一碰 torch／antenna 的地方）
   legacy/antenna_import.py  舊 NAS 資料匯入（torch lazy）
-  cli/            __init__（接線）base setup loops show verdict control
+  cli/            __init__（接線）base setup loops show verdict control device（fleet／device-state／device-describe／device-estop）
 ```
 
 守門測試（`tests/test_smoke.py`）：核心（`adapters/`、`legacy/` 以外）零 `torch/antenna/scipy/matplotlib/pandas/win32com` import；單檔 ≤ 400 行；單函式 ≤ 60 行；禁 `utils/misc/helpers/common/dedust` 檔名；
@@ -84,8 +88,13 @@ emforge/
 ├── batches/<store>/manifest.json          doc    runtime  {store, sim_profile, profile_hash, strategy, tick, seed, prio, kind, items:[{id,parent,arm,note}]}；patterns 先、manifest 最後
 ├── batches/<store>/patterns.npz           doc    runtime  ids(<U16) packed(n, ceil(HW/8)) shape
 ├── batches/<store>/results/<id>.json      doc    持 claim 的 worker  {id, status, response, time_s, extra, machine, worker_ver, profile_hash, at, attempts} | {…, status:"error", error}；newest()＝進度心跳
+├── queue/ESTOP  queue/ESTOP.<tag>      marker CLI device-estop  急停 {by, reason, at}（全機／單機；第三層 <root>/ESTOP 是本機路徑）；**解除只能 CLI**
+├── devices/<tag>/state.json            doc    該台 Instrument  DeviceState（轉換即寫＋30 s 心跳；offline 由讀者用 modified_at 推導；寫失敗吞掉）
+├── devices/<tag>/reference.md|.json    doc    該台 Instrument  說明檔（open 成功與每小時刷；程序清單＝MCP tools）
+├── devices/<tag>/log.jsonl             log    該台 Instrument  裝置事件（device_*／lease_refused／estop_*）
+├── devices/<tag>/adhoc/<stamp>-<id>.json  doc 該台 Instrument  simulate_once 結果（與批結果同格式、**不入 db**）
 └── runtime_state/<profile>/
-    ├── lock                               lease  該 profile 的 runtime  {owner=tag:pid:rand, pid, machine, at}；背景 30 s touch；stale = max(600 s, 5×tick_s)；release 只刪自己的
+    ├── lock                               lease  該 profile 的 runtime  {owner=tag:pid:rand, pid, machine, at}；背景 30 s touch（鎖不是自己的 → lost → 下一圈停）；stale = max(600 s, 5×tick_s)；release 只刪自己的
     ├── strategies.yaml                    doc    人／init  見 §5；**內容 sha1** 變才重讀（不看 mtime）；無效沿用上次
     ├── state.json                         doc    runtime  {tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{id:{stores,tick,score}}, seed_base}
     ├── status.json                        doc    runtime  每 tick 導出（人讀）
@@ -125,12 +134,13 @@ state.tick += 1 → save_state     #! tick 號一加就落地：中途死掉重�
 → heartbeat（touch lock；鎖被破後 touch 是 no-op、不重建）→ apply_control（control.json：resume）→ reload_config（yaml **內容 sha1**）
 → new = collect()                # 增量收結果、量測、評分、入庫、收尾 inflight、錯誤率
 → notarize_step(new) → save_state   # 完成中的公證 → pending；新破榜候選 → 重測 ×repeat_n；登記後立刻落地
-→ fleet_quiet()? 事件 fleet_quiet：schedule()   # 有 inflight 且 quiet_s 內整個機隊沒產出 → 只等
+→ fleet_quiet()? 事件 fleet_quiet：schedule()   # 有 inflight 且 quiet_s 內整個機隊沒產出 → 只等（M14：正拿著我們的批在跑的儀器，其狀態字典心跳也算產出）
 → save_state → write_status
 ```
 `run(once)`：acquire_lock（`Depot.claim`；stale → `break_if_stale`，沒破到＝別人先破，重試 claim 決勝負）→ 背景心跳執行緒（每 `heartbeat_s`=30 s touch 鎖；一個 tick 超過 stale 門檻也不會被第二個實例破鎖，review-7）
 → runtime_start → `db.refresh`（索引 append 前死掉的檔補回去，事件 index_repaired）→ `reconcile()` 不一致 → 事件 reconcile_mismatch、**return 2**（I-14）
-→ 迴圈：STOP 檔 → runtime_stop；tick；sleep(tick_s)。
+→ 迴圈：heartbeat（鎖不見了或換主 → 事件 lock_lost、runtime_stop、**return 3**，M13 收 §12-16）→ STOP 檔 → runtime_stop；tick；sleep(tick_s)。
+`status.json["fleet"]`＝`device.states.read_fleet` 摘要（tag／state／owner／store／n_done／offline…）。
 `Runtime(readonly=True)`（CLI smoke／abandon 用）：不拿鎖、`save_state` 拋——別用舊快照覆寫跑著的 runtime（review-4）。
 
 ### 5.2 reconcile（`reconcile.py`）
@@ -185,6 +195,11 @@ strategies:
 ## 6. worker
 
 `worker_loop(root, tag, *, depot=None)`：載入本機 registry.py → 印 worker_ver ＋ depot spec → 清 `<EMFORGE_WORK>/`（I-1）→ worker_start → 迴圈：STOP（job 之間）→ `Queue(depot).pick(tag)` → `gate(job, depot)` → `run_batch` → mark_done／mark_fail。守門不過＝那批 `.fail`、worker 繼續；`once=True` 跑完第一個真正執行的 job 就回。
+**儀器層**（M13）：worker 經 `device.Instrument` 跑批——`Instrument` 實作 Simulator 協定（`bind/open/simulate/kill/close`），`run_batch(..., instrument=inst)` 把它當 sim 用，逐筆邏輯不變。
+多的是：主迴圈**急停中 job 之間不撿**（等 poll_s 再看）；`inst.acquire("queue:<store>")` 拿不到（MCP 持有）→ 放掉 claim、`job_yield reason=device_busy`、等一輪；
+每筆前急停 → `job_yield reason=estop_engaged` 並放掉**自己的** claim（急停可能只停這台，別台可續跑）；正在跑的那筆由 `guard.guarded_call(abort_if=急停, poll_s=5)` 殺掉 → 結果 `error: aborted: estop_engaged`（吃一次 attempts、不重開、不算保險絲）。
+`Instrument.open()` 前：急停硬檢查 → `limits.check_preconditions`（allowed_profiles → `gate.check` → timeout_s ≤ max_sample_s → `doctor.health` 阻擋；開過一次後「ansysedt 在跑」不算阻擋——那是自己的）。
+`inst` 沒給就自建、收工時 `stop()`；M15 的 MCP server 與迴圈共用同一台。
 **故障邊界**（review-6）：gate 之後的任何例外（FsBusy／PermissionError／FileNotFoundError…）→ 那批 `.fail` 記 `worker_exception:…`、claim 釋放、工作目錄清掉、**worker 繼續**下一個 job；`fs.release` 對 sharing violation 退避重試；接管 `.fail` 時檔已被別台搶走＝輸了競賽、跳過。
 
 `gate`（順序固定、不建構不 open）：profile 註冊且未退役 → job.profile_hash == 註冊表 → 載入類別、geom_ver（模擬器宣告 None＝單邊跳過）→ labels。
@@ -233,17 +248,22 @@ def propose(ctx):
 | `stop --root R (--profile P | --worker [--machine-tag T]) [--clear]` | STOP 檔 | 0 |
 | `smoke <id> --root R --profile P --by WHO [--machine T --n N]` | 對已量 id 派重測（切機驗同一儀器） | 0 |
 | `import-legacy --root OLD --out R [--depot D] --stores g1,g2 [--profile auto --map s=p --include-errors --verify --dry-run --force --no-rad]` | 舊資料匯入（舊樹＝本機路徑只讀；輸出經 depot） | 0；verify 不符 2 |
+| `fleet --root R [--mcp-config]` | 機隊儀表板（每台狀態字典＋offline 推導＋全機 ESTOP 提示）；`--mcp-config` 吐 `.mcp.json` 片段（url 由 M15 填） | 0 |
+| `device-state <tag>`／`device-describe <tag> [--json]` | 一台的狀態字典／說明檔（open 成功後才有） | 0；尚無 1 |
+| `device-estop engage [--tag T \| --local] --by WHO --reason R` | 按急停（全機／單機／本機層）；儀器 open／simulate 硬擋、正在跑的那筆 abort、worker 不撿 | 0；缺 --reason 1 |
+| `device-estop clear [--tag T \| --local] --confirm` | **唯一**解除急停的路徑（MCP 沒有） | 0；沒 --confirm 2 |
 
 任何未預期例外 → stderr `emforge: <Type>: <msg>`、exit 1。
 
 ## 9. 事件（`events.py`，封閉集合）
 
-runtime：`runtime_start runtime_stop reconcile_mismatch config_reloaded config_invalid fleet_quiet profile_paused profile_resumed index_repaired`
+runtime：`runtime_start runtime_stop lock_lost reconcile_mismatch config_reloaded config_invalid fleet_quiet profile_paused profile_resumed index_repaired`
 策略：`strategy_loaded strategy_rejected strategy_error strategy_timeout strategy_paused strategy_resumed strategy_empty proposals_validated(n_in,n_dup,n_out)`
 派收：`batch_dispatched dispatch_failed record_added batch_done batch_failed batch_abandoned batch_requeued profile_tamper`
 公證：`record_candidate notarize_dispatched notarize_pass notarize_reject`
 榜：`promoted retired rescored ledger_tamper`
-worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample_error job_done job_failed job_yield gate_rejected sim_restart worker_stop`
+worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample_error job_done job_failed job_yield(reason: claim_taken_over|foreground_job_appeared|estop_engaged|device_busy) gate_rejected sim_restart worker_stop`
+儀器（devices/<tag>/log.jsonl，單寫者＝該台 Instrument）：`device_start device_stop device_fault device_simulate device_abort lease_refused estop_engaged estop_cleared`
 
 ## 10. AI 加值層怎麼接
 
@@ -307,11 +327,14 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 13. 策略層（N 個策略並行）沒有實測資料：所有「多樣性從策略池湧現」都是推論（architecture.md §12）。
 14. `fail` 非終態的代價：一批被所有機器判死後會**永遠 inflight**（策略被 max_inflight 卡住、notarize 除外），直到人 `abandon`——status.json 的 `queue_state=fail` 是唯一提示，沒有自動逾時。
 15. `abandon` 與跑著的 runtime 的 collect 有一個很小的競賽窗（runtime 記憶體裡的 inflight 在 abandon 刪檔後不會再寫回，但同一 tick 內兩邊可能各 add 同一筆——db.add 冪等，只是事件可能各發一次）。
-16. 心跳執行緒與主迴圈共用 `Depot.touch`；NAS 短暫斷線時心跳靜默失敗（吞例外），鎖可能在斷線超過 stale 門檻時被第二個實例破掉——與 review-7 前相比只是視窗變小、不是消失。被破後原實例的 touch 是 no-op（不重建鎖）、release 只刪自己的，但它**還會繼續 tick** 直到自己發現（目前沒有「鎖丟了就停」的檢查）。
+16. 心跳執行緒與主迴圈共用 `Depot.touch`；NAS 短暫斷線時心跳靜默失敗（吞例外），鎖可能在斷線超過 stale 門檻時被第二個實例破掉——與 review-7 前相比只是視窗變小、不是消失。~~被破後原實例還會繼續 tick~~ → M13：心跳先看鎖還是不是自己的（owner 比對），不是 → `lost`，主迴圈下一圈 `lock_lost`＋停（回 3）；**視窗＝一個 tick**（正在跑的那個 tick 會跑完）。
 17. `promote --spec` 的分數重算用 `Record.measure`（量測凍結）；spec 若換了 measure 名（＝換儀器）`rescore` 會拒，但 promote 不會——它只認 spec 名有沒有註冊。
 18. `FileDepot.break_if_stale` 不是仲裁：Windows 上兩個並發 rename 可以都成功（契約測試實抓）；破鎖後一律接 `claim`，claim 才決勝負。mtime 身分檢查把誤搬的新鎖放回去，但「放回」在第三方剛好又 claim 到的微秒窗會失敗（留 `.broken.*` 證據、回 False）。
 19. `list` 可最終一致的後端（S3）：`db.refresh` 對「列舉回空而索引非空」不壓實；`inflight()` 對「列到但讀不到」跳過；`Batch.results` 同。其餘列舉呼叫端（`report`、`profiles()`）還沒逐一審過。
 20. `memory://` depot 只存在本行程：`run` 自動 in-process；`worker --depot memory://…` 會什麼都撿不到（另一個行程的 runtime 看不見）——只給測試與單行程 demo。
+21. 急停的三層都是「檔存在即真」，**沒有簽章**：任何能寫 depot 的人都能 engage／clear（clear 走 CLI 只是流程約束，不是權限）。正在跑的那筆被殺是 `abort_if` 每 `estop_poll_s`（5 s）查一次 depot——急停到真的殺掉最多晚 5 s；殺完那筆算 error（attempts+1），三次急停剛好落在同一筆會把它三振成毒樣本。
+22. 儀器租約（`Instrument.acquire`）是**行程內**的鎖（同機只能一個 HFSS 使用者、MCP 與 worker 同一行程），不在 depot——換機器看不到；跨機協調仍靠 queue 的 claim。`status.json["fleet"]`／`fleet` 的 `offline` 只是「心跳年齡 > 90 s」，儀器行程死掉與 NAS 斷線分不出來。
+23. `check_preconditions` 每次 `open()` 都跑 `doctor.health`（含 `tasklist`，~0.1 s）與 `depot.selfcheck()`（建一個探針檔）；重開頻繁（保險絲冷卻）時會多幾次 NAS 往返。「開過一次後 ansysedt 在跑不算阻擋」假設殘留的 ansysedt 是自己的——同機有人手開 HFSS 就抓不到。
 
 ## 13. 與 architecture.md 的偏差
 
@@ -332,6 +355,9 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | §4 心跳＝tick 時 touch | 背景執行緒每 30 s | review-7：一個 tick 可能超過 stale 門檻 |
 | §2／§7 假設共享檔案系統（NAS）；O_EXCL＋rename 是協調原語 | 抽成 `Depot` 介面（doc／log／lease／列舉）；`FileDepot` 逐位元＝原佈局；`--root`（本機程式碼）與 `--depot`（共享狀態）分工 | Ricky 2026-09-05：不倚賴特定渠道、支援多種部署（日月光）；「算法、基礎設施都解耦」 |
 | 破鎖＝rename 恰一人成功 | 破鎖可能多人 True、claim 仲裁 | M12a 契約測試抓到 Windows 並發 rename 可都成功 |
+| worker 直接開 Simulator | worker 經 `device.Instrument`（狀態機／租約／急停三層／前置檢查／說明檔／`simulate_once`） | Ricky 2026-09-05：參考 MHS「讓 HFSS 那裡更專注於模擬」、三台各自是 MCP server（M15）；儀器層寫在 Depot 上，不用二次搬家 |
+| 狀態字典 `devices/<tag>.json` | `devices/<tag>/{state.json, reference.md, reference.json, log.jsonl, adhoc/}` | 一台一目錄：機隊列舉＝`dir_names`，說明檔／日誌／ad-hoc 結果不混進狀態列表 |
+| 鎖被破後原 runtime 繼續 tick（§12-16） | 心跳比對 owner → `lock_lost` → 下一圈停（回 3） | M13 順手收掉 |
 
 ## 14. 未驗證與待決
 

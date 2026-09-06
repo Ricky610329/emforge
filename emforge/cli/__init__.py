@@ -4,8 +4,9 @@
   loops.py    run／worker（長跑行程）
   show.py     status／events／pending／jobs／watch／report（唯讀）
   verdict.py  promote／retire／rescore（人／AI 的裁決；唯一能寫榜）
-  control.py  requeue／resume／stop／smoke（操作 runtime／佇列）
-  base.py     exit code、--root、stderr
+  control.py  requeue／resume／stop／smoke／abandon（操作 runtime／佇列）
+  device.py   fleet／device-state／device-describe／device-estop（儀器層，M14）
+  base.py     exit code、--root／--depot、stderr
 
 慣例：子命令 kebab-case ↔ `cmd_<snake>`；每個模組的 `COMMANDS` 是 kebab 名 → `_add_*`（tests 逐一對帳）。
 所有命令回 int；`main` 把任何例外轉成 exit 1 並印到 stderr（I-8）。
@@ -13,10 +14,11 @@
 import argparse
 import sys
 
-from . import control, loops, setup, show, verdict
+from . import control, device, loops, setup, show, verdict
 from .base import EXIT_ERROR, err
 
-COMMANDS = {**setup.COMMANDS, **loops.COMMANDS, **show.COMMANDS, **verdict.COMMANDS, **control.COMMANDS}
+COMMANDS = {**setup.COMMANDS, **loops.COMMANDS, **show.COMMANDS, **verdict.COMMANDS, **control.COMMANDS,
+            **device.COMMANDS}
 
 
 def build_parser() -> argparse.ArgumentParser:

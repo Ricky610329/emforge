@@ -33,8 +33,9 @@ DEPOT_ONLY_MODULES = (
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
     "runtime/schedule.py",
     "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py",
-    "device/__init__.py", "device/limits.py", "device/states.py",
+    "device/__init__.py", "device/limits.py", "device/states.py", "device/reference.py",
     "cli/__init__.py", "cli/__main__.py", "cli/control.py", "cli/show.py", "cli/verdict.py", "cli/loops.py",
+    "cli/device.py",
     "strategies/__init__.py", "strategies/blind.py", "strategies/top_k_flip.py",
 )
 #? DEPOT_ONLY_PARTIAL：可以用本機路徑（pathlib）——但只給「程式碼／設定根」（registry.py、strategies/、策略 workdir、

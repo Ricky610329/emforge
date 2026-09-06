@@ -12,6 +12,7 @@ from .. import _version, events, netid, paths, profiles, strategy
 from ..batches import Batch
 from ..db import Database
 from ..depot import FileDepot, open_depot
+from ..device.states import read_fleet
 from ..heartbeat import Heartbeat
 from ..model import now_iso, sha1_hex
 from ..queue import Queue
@@ -149,15 +150,20 @@ class Runtime:
         return out
 
     def fleet_quiet(self) -> bool:
-        """有派出去的批、但 quiet_s 內整個機隊沒有任何產出 → 只等，不排程（排隊 ≠ 停滯）。"""
+        """有派出去的批、但 quiet_s 內整個機隊沒有任何產出 → 只等，不排程（排隊 ≠ 停滯）。
+        M14：正拿著我們某批在跑的儀器，其狀態字典的心跳也算進度（一筆 HFSS 可能長過 quiet_s）。"""
         infl = self.inflight()
         if not infl:
             return False
+        stores = {inf["store"] for inf in infl}
         newest = 0.0
         for inf in infl:
             m = self.depot.modified_at(paths.inflight_file(self.profile_name, inf["store"])) or 0.0
             r = Batch(self.depot, inf["store"]).newest_result_at() or 0.0
             newest = max(newest, m, r)
+        for dev in read_fleet(self.depot):
+            if dev.get("store") in stores and dev.get("state") in ("opening", "ready", "busy"):
+                newest = max(newest, self.depot.modified_at(paths.device_state(dev["tag"])) or 0.0)
         return (self.depot.now() - newest) > self.config.runtime.quiet_s
 
     def apply_control(self) -> None:
@@ -215,6 +221,8 @@ class Runtime:
             "notarize_in_progress": sorted(self.state.get("notarize", {})),
             "pending_count": len(self.depot.read_log(paths.pending_jsonl(self.profile_name))),
             "db": {"n_records": len(metas), "n_done": sum(1 for m in metas if m["status"] == "done")},
+            "fleet": [{k: d.get(k) for k in ("tag", "state", "owner", "store", "profile", "n_done", "n_error",
+                                             "last_result_at", "estop", "offline", "age_s")} for d in read_fleet(self.depot)],
         }
         self.depot.put_json(paths.status_json(self.profile_name), status)
 

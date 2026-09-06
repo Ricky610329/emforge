@@ -335,3 +335,46 @@ def test_runtime_applies_control_at_tick_start(fake):
     rt.release_lock()
     assert rt.strategy_state("blind")["paused"] is False
     assert isinstance(rt, Runtime)
+
+
+# ── M14：儀器層 CLI ──────────────────────────────────────────────────────────
+def test_fleet_device_state_describe_and_estop_cli(fake, capsys, monkeypatch):
+    from emforge.device import estop, states
+    from emforge.device.instrument import Instrument
+    monkeypatch.setattr(doctor, "ansysedt_running", lambda: False)
+    assert _main("fleet", "--root", fake) == 0 and "無儀器" in capsys.readouterr().out
+    inst = Instrument(fake, "216", depot=fake, work_root=fake / "work", sleep=lambda s: None, worker_ver="emforge=test",
+                      sim_factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p))
+    inst.start()
+    inst.bind(P, inst.work.make("s1"), store="s1")
+    inst.open()
+    inst.close()
+    inst.stop()
+    states.write_state(fake, states.DeviceState(tag="218", state="busy", store="s2", owner="queue:s2"))
+    os.utime(fake / paths.device_state("218"), (time.time() - 3600, time.time() - 3600))
+    assert _main("fleet", "--root", fake) == 0
+    out = capsys.readouterr().out
+    assert "216" in out and "idle" in out and "218" in out and "offline" in out and "s2" in out
+    assert _main("fleet", "--root", fake, "--mcp-config") == 0
+    assert "emforge-216" in capsys.readouterr().out
+    assert _main("device-state", "216", "--root", fake) == 0 and '"state": "idle"' in capsys.readouterr().out
+    assert _main("device-state", "999", "--root", fake) == 1
+    assert _main("device-describe", "216", "--root", fake) == 0
+    out = capsys.readouterr().out
+    assert "fake_f1" in out and "device_simulate" in out
+    assert _main("device-describe", "999", "--root", fake) == 1
+    # e-stop：engage 單機／全機／本機；clear 要 --confirm（唯一解除路徑＝CLI）
+    assert _main("device-estop", "engage", "--root", fake, "--tag", "216", "--by", "ricky", "--reason", "冒煙") == 0
+    assert estop.engaged(fake, fake, "216")["scope"] == "device" and estop.engaged(fake, fake, "218") is None
+    assert _main("device-estop", "clear", "--root", fake, "--tag", "216") == 2, "沒 --confirm 拒"
+    assert estop.engaged(fake, fake, "216") is not None
+    assert _main("device-estop", "clear", "--root", fake, "--tag", "216", "--confirm") == 0
+    assert estop.engaged(fake, fake, "216") is None
+    assert _main("device-estop", "engage", "--root", fake, "--by", "ricky", "--reason", "全停") == 0
+    assert estop.engaged(fake, fake, "218")["scope"] == "fleet"
+    assert _main("fleet", "--root", fake) == 0 and "ESTOP" in capsys.readouterr().out
+    assert _main("device-estop", "clear", "--root", fake, "--confirm") == 0 and estop.engaged(fake, fake, "218") is None
+    assert _main("device-estop", "engage", "--root", fake, "--local", "--by", "ricky", "--reason", "磁碟") == 0
+    assert paths.estop_local(fake).exists() and estop.engaged(fake, fake, "216")["scope"] == "local"
+    assert _main("device-estop", "clear", "--root", fake, "--local", "--confirm") == 0 and not paths.estop_local(fake).exists()
+    assert _main("device-estop", "engage", "--root", fake, "--by", "ricky") == 1, "engage 要 --reason"

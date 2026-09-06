@@ -260,11 +260,18 @@ def test_run_batch_via_instrument_yields_on_estop_before_next_sample(root, claim
 
 def test_run_batch_aborts_running_sample_on_estop_and_counts_attempt(root, claimed):
     from emforge.device import estop
-    import threading
     q, b, job, ids = claimed
-    inst = _inst(root, q, factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p, hang_ids={ids[0]}))
+
+    class _HangThenEstop(testing.FakeSimulator):
+        """第一筆開始跑之後才按急停（不能用計時器：open 前的體檢時間不定，急停可能在第一筆前就被看到）。"""
+
+        def simulate(self, bits):
+            if testing.record_id(bits, self.profile.name) in self.hang_ids:
+                estop.engage(q.depot, None, by="x", reason="r")
+            return super().simulate(bits)
+
+    inst = _inst(root, q, factory=lambda wd, p: _HangThenEstop(workdir=str(wd), profile=p, hang_ids={ids[0]}))
     inst.start()
-    threading.Timer(0.15, lambda: estop.engage(q.depot, None, by="x", reason="r")).start()
     out, res, events, _ = _run(root, claimed, instrument=inst, timeout_s=10, retry_passes=0, estop_poll_s=0.02)
     assert out == "yield"
     r = res[ids[0]]
