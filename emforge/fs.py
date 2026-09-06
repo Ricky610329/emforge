@@ -86,6 +86,21 @@ def read_json(path, default=_MISSING, *, retries: int = 6):
     raise FsCorrupt(f"{path}: {last}")
 
 
+def read_bytes(path, *, retries: int = 6) -> bytes | None:
+    """整份讀 bytes；缺檔回 None；被佔用（替換瞬間的 sharing violation）短暫重試，用盡拋 FsBusy。"""
+    path = Path(path)
+    for i in range(max(1, retries)):
+        try:
+            return path.read_bytes()
+        except FileNotFoundError:
+            return None
+        except PermissionError as e:
+            if i == retries - 1:
+                raise FsBusy(f"{path}: {e}")
+            time.sleep(0.02 * (i + 1))
+    return None
+
+
 # ── jsonl（單寫者） ──────────────────────────────────────────────────────────
 def append_jsonl(path, obj) -> None:
     """append 一行。契約：**單寫者**檔（runtime 對自己的 events/pending、worker 對自己的 log/<tag>）。"""
@@ -98,16 +113,19 @@ def append_jsonl(path, obj) -> None:
 
 
 def read_jsonl(path) -> list:
-    """逐行 JSON → list；空行跳過；缺檔回 []。"""
+    """逐行 JSON → list；空行跳過；缺檔回 []；壞行拋 FsCorrupt。"""
     path = Path(path)
     if not path.exists():
         return []
     out = []
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+        for lineno, line in enumerate(f, 1):
             line = line.strip()
             if line:
-                out.append(json.loads(line))
+                try:
+                    out.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    raise FsCorrupt(f"{path}:{lineno}: {e}") from e
     return out
 
 
@@ -144,20 +162,21 @@ def read_claim(path) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def release(path) -> None:
-    """刪認領檔；不存在不算錯（重複釋放、被接管後釋放都會發生）。
+def release(path) -> bool:
+    """刪認領檔；回 True＝這次刪掉了、False＝本來就不在（重複釋放、被接管後釋放都會發生，不算錯）。
     #! 回歸 review-6：Windows 上別的行程正開著這個檔（jobs／claim_owner 讀取中）unlink 會 PermissionError——退避重試，用盡才拋 FsBusy。"""
     path = Path(path)
     for i, backoff in enumerate(_REPLACE_BACKOFF_S):
         try:
             os.unlink(path)
-            return
+            return True
         except FileNotFoundError:
-            return
+            return False
         except PermissionError:
             if i == len(_REPLACE_BACKOFF_S) - 1:
                 raise FsBusy(f"unlink 重試 {len(_REPLACE_BACKOFF_S)} 次仍被佔用：{path}")
             time.sleep(backoff)
+    return False
 
 
 # ── mtime 心跳 ──────────────────────────────────────────────────────────────
