@@ -5,9 +5,10 @@ header 用 `${EMFORGE_DEVICE_TOKEN}` 佔位）。`device-serve <tag>`＝不撿�
 `device-estop clear` 是**唯一**解除急停的路徑（要 `--confirm`）；MCP 只有 engage。
 """
 import json
+from pathlib import Path
 
 from .. import paths
-from ..device import estop, mcp_server
+from ..device import estop, mcp_client, mcp_server
 from ..device.states import read_fleet
 from ..worker.loop import make_instrument
 from .base import EXIT_ERROR, EXIT_OK, EXIT_REFUSED, add_root, depot_of, err, root_of
@@ -140,5 +141,33 @@ def _add_device_serve(sub) -> None:
     s.set_defaults(fn=cmd_device_serve)
 
 
+def _bits_arg(value: str) -> str:
+    """`--bits 0101…` 或 `--bits @file`（檔內 0／1 可含換行；server 端 parse_bits 會清空白）。"""
+    return Path(value[1:]).read_text(encoding="utf-8") if value.startswith("@") else value
+
+
+def cmd_device_simulate(args) -> int:
+    """對一台儀器的 MCP 下單跑一筆（兩段式：先印 token，再帶 --confirm）。token 讀 EMFORGE_DEVICE_TOKEN。"""
+    call = {"profile": args.profile, "bits": _bits_arg(args.bits), "by": args.by}
+    if args.confirm:
+        call["confirm"] = args.confirm
+    res = mcp_client.call_device(args.url, "device_simulate", call, token=device_token(), timeout_s=args.timeout_s)
+    print(json.dumps(res, ensure_ascii=False, indent=1))
+    if res.get("needs_confirm"):
+        print(f"→ 確認無誤再跑一次，帶 --confirm {res['token']}（{int(res.get('preview', {}).get('timeout_s') or 0)} s 上限）")
+    return EXIT_OK
+
+
+def _add_device_simulate(sub) -> None:
+    s = sub.add_parser("device-simulate", help="經 MCP 對一台儀器跑一筆（兩段式 confirm；結果不入 db）")
+    s.add_argument("--url", required=True, help="該台的 MCP 端點，如 http://10.0.0.216:8765/mcp（fleet --mcp-config 有）")
+    s.add_argument("--profile", required=True)
+    s.add_argument("--bits", required=True, help="'0101…'（H×W 個 0／1）或 @檔案")
+    s.add_argument("--confirm", help="第一次呼叫印出的 token")
+    s.add_argument("--by", default="cli")
+    s.add_argument("--timeout-s", type=float, default=3600.0, help="HTTP 讀逾時（模擬一筆 100–250 s）")
+    s.set_defaults(fn=cmd_device_simulate)
+
+
 COMMANDS = {"fleet": _add_fleet, "device-state": _add_device_state, "device-describe": _add_device_describe,
-            "device-estop": _add_device_estop, "device-serve": _add_device_serve}
+            "device-estop": _add_device_estop, "device-serve": _add_device_serve, "device-simulate": _add_device_simulate}

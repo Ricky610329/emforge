@@ -53,3 +53,18 @@ def test_confirm_valid_checks_without_consuming():
     assert L.confirm_valid("s3cret", "simulate", "k", "00000000", used=used, now=t0) is False
     used.add(tok)
     assert L.confirm_valid("s3cret", "simulate", "k", tok, used=used, now=t0) is False
+
+
+def test_load_limits_from_root_file_default_when_missing_and_loud_when_broken(root):
+    """M16：部署設定 `<root>/limits.json`（本機路徑）；沒有＝預設；壞 JSON 要指名檔案（別默默用預設把上限放掉）。"""
+    from emforge import paths
+    lim, src = L.load_limits(root)
+    assert lim == L.Limits() and src == "default"
+    paths.limits_json(root).write_text('{"max_sample_s": 1234, "allowed_profiles": ["fake_f1"], "unknown": 1}', encoding="utf-8")
+    lim, src = L.load_limits(root)
+    assert lim.max_sample_s == 1234 and lim.allowed_profiles == ("fake_f1",) and src == str(paths.limits_json(root))
+    paths.limits_json(root).write_text("{oops", encoding="utf-8")
+    import pytest
+    with pytest.raises(ValueError, match="limits.json"):
+        L.load_limits(root)
+    assert set(L.LIMITS_TEMPLATE) == set(L.Limits().to_dict()), "init 範本欄位＝Limits 欄位"

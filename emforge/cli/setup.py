@@ -7,6 +7,7 @@ import os
 
 from .. import __version__, doctor, paths, profiles, strategy
 from .._version import describe
+from ..device.limits import LIMITS_TEMPLATE
 from .base import EXIT_OK, add_root, depot_of, root_of
 
 REGISTRY_TEMPLATE = '''"""<root>/registry.py — 這個根目錄的模擬庫／評估器註冊表（append-only；改內容＝換名字）。
@@ -51,6 +52,12 @@ def cmd_init(args) -> int:
     else:
         reg.write_text(REGISTRY_TEMPLATE, encoding="utf-8")
         print(f"建立：{reg}")
+    lim = paths.limits_json(root)                                        # 儀器上限（本機檔；每台改自己的）
+    if lim.exists():
+        print(f"已存在，不覆寫：{lim}")
+    else:
+        lim.write_text(json.dumps(LIMITS_TEMPLATE, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        print(f"建立：{lim}")
     if args.profile:
         key = paths.strategies_yaml(args.profile)
         if depot.exists(key):

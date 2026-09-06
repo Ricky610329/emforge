@@ -13,7 +13,7 @@
 | 假件 | `Fake*`（不叫 `Mock*`），住 `emforge/testing.py` | `FakeSimulator` |
 | 函式 | 動詞開頭 `snake_case`；判斷式 `is_`/`has_`；私有 `_` 前綴 | `record_id()`, `try_claim()`, `is_stale()` |
 | 常數 | `UPPER_SNAKE`；字串值本身小寫 snake | `STATUS_DONE = "done"`, `KIND_REPEAT = "repeat"`, `ARM_BLIND = "blind"` |
-| 例外 | `CapWords` 名詞結尾，不加 `Exception`/`Error` 後綴 | `LockTimeout` `GeomVerMismatch` `StrategyFailure` `StrategyTimeout` `AdapterFailure` `StoreExists` `CrossProfileRefused` `AntennaUnavailable` `EstopEngaged` `DeviceBusy` `PreconditionFailed` `ConfirmRejected` `Aborted`；`ProposalError`（← 唯一例外：與 ValueError 對稱） |
+| 例外 | `CapWords` 名詞結尾，不加 `Exception`/`Error` 後綴 | `LockTimeout` `GeomVerMismatch` `StrategyFailure` `StrategyTimeout` `AdapterFailure` `StoreExists` `CrossProfileRefused` `AntennaUnavailable` `EstopEngaged` `DeviceBusy` `PreconditionFailed` `ConfirmRejected` `Aborted` `DeviceCallFailed`；`ProposalError`（← 唯一例外：與 ValueError 對稱） |
 | CLI 子命令 ↔ 函式 | kebab-case ↔ `cmd_<snake>` | `import-legacy` ↔ `cmd_import_legacy` |
 | CLI 旗標 ↔ 屬性 | kebab ↔ `args.<snake>` | `--max-inflight` ↔ `args.max_inflight` |
 | 環境變數 | `EMFORGE_` 前綴 | `EMFORGE_ROOT`（本機程式碼／設定根）`EMFORGE_DEPOT`（共享狀態後端 spec：`file://…`／`memory://…`）`EMFORGE_ANTENNA_REPO` `EMFORGE_MACHINE` `EMFORGE_WORK` `EMFORGE_DEVICE_TOKEN`（儀器兩段式 confirm 的 secret＝MCP 共享 bearer token；不走旗標）`EMFORGE_MCP_HOST`／`EMFORGE_MCP_PORT`（`--serve`／`device-serve` 的預設綁定，127.0.0.1／8765） |
@@ -57,6 +57,7 @@
 <root>/
 ├── registry.py                        使用者 append-only 註冊表（profile / spec）
 ├── strategies/<name>.py               使用者策略（優先於內建）
+├── limits.json                        這台儀器的上限（本機檔；init 留範本、沒有＝預設）
 ├── db/<profile>/<id>-<store>.npz      一筆一檔；_index.jsonl 增量索引；RETIRED 標記
 ├── ledger/<profile>/<spec>.json       一榜；含 _checksum；history append-only
 ├── queue/jobs.json  jobs.lock         共用佇列（全程持鎖）
@@ -70,7 +71,7 @@
 ```
 
 - `_` 前綴的檔＝可重建快取（`_index.jsonl`、`_imported.json`）。
-- `registry.py`、`strategies/`、`runtime_state/<p>/strategies/`（策略 workdir）、`ESTOP`（本機急停）是**本機路徑**，不經 Depot；其餘全部是 Depot key。
+- `registry.py`、`strategies/`、`runtime_state/<p>/strategies/`（策略 workdir）、`ESTOP`（本機急停）、`limits.json`（儀器上限）是**本機路徑**，不經 Depot；其餘全部是 Depot key。
 - worker 本機工作目錄：`<EMFORGE_WORK>/<store>/`，啟動時整個清。
 
 ## 測試

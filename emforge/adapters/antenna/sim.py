@@ -3,8 +3,11 @@
 舊契約 `open() → 每筆 start(num) / __call__(Tensor) → {label: Tensor(17)} / end() → 秒 / quit()`；
 這裡收成 `open() / simulate(bits) → SimResult / kill() / close()`；`num` 是內部計數器，worker 不需要知道。
 建構**不碰 COM**（舊 PatchSimulator.__init__ 只建目錄），所以守門與建構都在 open 之前。
+M16：`open()` 在非主執行緒先 `pythoncom.CoInitialize()`（MCP 的 tool 跑在 SDK 的 worker thread；COM apartment 是 per-thread）。
 """
+import logging
 import sys
+import threading
 
 import numpy as np
 
@@ -35,6 +38,19 @@ def _to_pattern(bits):
         return _bind.load_torch().as_tensor(arr)
     except _bind.AntennaUnavailable:
         return arr                              # 沒 torch（純測試）就給 numpy，stub 不在意
+
+
+def com_init() -> bool:
+    """非主執行緒才 `pythoncom.CoInitialize()`（主執行緒由行程初始化；重叫無害但不必）。沒 pythoncom → 記一行、照開。回有沒有叫。"""
+    if threading.current_thread() is threading.main_thread():
+        return False
+    try:
+        import pythoncom
+    except ImportError:
+        logging.getLogger(__name__).warning("非主執行緒開模擬器但沒有 pythoncom（非 Windows／純測試）：跳過 CoInitialize")
+        return False
+    pythoncom.CoInitialize()
+    return True
 
 
 class _AntennaSim(Simulator):
@@ -81,6 +97,7 @@ class _AntennaSim(Simulator):
     # ── 協定 ──
     def open(self) -> None:
         self._killed = False
+        com_init()
         self._sim.open()
 
     def simulate(self, bits) -> SimResult:

@@ -54,12 +54,13 @@ emforge/
                   reference.py（說明檔 md＋json；程序清單＝MCP tools）
                   mcp_server.py（M15：這台的 MCP server——tools＝Instrument 程序一對一、resources device://*、bearer 中介層、
                   與 worker 同行程 daemon thread；**唯一** import mcp／uvicorn／starlette 處、且只在函式內，optional extra `emforge[mcp]`）
+                  mcp_client.py（M16：對一台儀器下單 call_device／call_device_async；`device-simulate` 的本體；httpx2／mcp 只在函式內）
   runtime/        core.py reconcile.py schedule.py dispatch.py collect.py notarize.py
   strategies/     blind.py top_k_flip.py（內建；使用者同名檔蓋過）
-  adapters/antenna/  _bind.py sim.py measure.py profiles.py（唯一碰 torch／antenna 的地方）
+  adapters/antenna/  _bind.py sim.py measure.py profiles.py（唯一碰 torch／antenna 的地方；sim.open() 在非主執行緒先 pythoncom.CoInitialize——MCP tool 跑 worker thread）
   legacy/antenna_import.py  舊 NAS 資料匯入（torch lazy）
   cli/            __init__（接線）base setup loops（run／worker [--serve]）show verdict control
-                  device（fleet [--mcp-config]／device-state／device-describe／device-estop／device-serve）
+                  device（fleet [--mcp-config]／device-state／device-describe／device-estop／device-serve／device-simulate）
 ```
 
 守門測試（`tests/test_smoke.py`）：核心（`adapters/`、`legacy/` 以外）零 `torch/antenna/scipy/matplotlib/pandas/win32com` import；單檔 ≤ 400 行；單函式 ≤ 60 行；禁 `utils/misc/helpers/common/dedust` 檔名；
@@ -234,7 +235,7 @@ def propose(ctx):
 
 | 命令 | 做什麼 | exit |
 |---|---|---|
-| `init --root R [--depot D] [--profile P]` | 佈局前綴與 strategies.yaml 範本進 depot；registry.py／strategies/ 在本機 root（不覆寫） | 0 |
+| `init --root R [--depot D] [--profile P]` | 佈局前綴與 strategies.yaml 範本進 depot；registry.py／strategies/／limits.json（儀器上限範本，M16）在本機 root（不覆寫） | 0 |
 | `version`／`doctor --root R [--depot D] [--hfss]` | 版本戳／體檢（root 探針、`depot.selfcheck()`：可寫／O_EXCL／時鐘偏移、磁碟、ansysedt） | 0；doctor 阻擋 4 |
 | `check-strategy --root R --profile P --strategy S [--budget --seed --tick --params]` | 本行程試跑 propose | 0／1 |
 | `run --root R --profile P [--once] [--in-process]` | runtime 實例 | 0；對帳不符 2；鎖被占 3 |
@@ -253,6 +254,7 @@ def propose(ctx):
 | `import-legacy --root OLD --out R [--depot D] --stores g1,g2 [--profile auto --map s=p --include-errors --verify --dry-run --force --no-rad]` | 舊資料匯入（舊樹＝本機路徑只讀；輸出經 depot） | 0；verify 不符 2 |
 | `fleet --root R [--mcp-config]` | 機隊儀表板（每台狀態字典＋offline 推導＋全機 ESTOP 提示）；`--mcp-config` 吐 `.mcp.json` 片段（`emforge-<tag>`：url＝各台狀態字典的 `url`、header `Authorization: Bearer ${EMFORGE_DEVICE_TOKEN}`） | 0 |
 | `device-serve <tag> --root R [--host H --port N --work-root W]` | 只起這台的 MCP server、**不撿佇列**（單筆試量、或這台暫時不當 worker）；阻塞到 Ctrl-C | 0；非 loopback 無 token 1 |
+| `device-simulate --url U --profile P --bits B\|@file [--confirm T --by WHO --timeout-s S]` | 經 MCP 對一台儀器跑一筆（兩段式：先印 token，再帶 `--confirm`）；token 讀 `EMFORGE_DEVICE_TOKEN`；結果印 JSON、不入 db | 0；tool 錯誤（`device_busy:…` 等）1 |
 | `device-state <tag>`／`device-describe <tag> [--json]` | 一台的狀態字典／說明檔（open 成功後才有） | 0；尚無 1 |
 | `device-estop engage [--tag T \| --local] --by WHO --reason R` | 按急停（全機／單機／本機層）；儀器 open／simulate 硬擋、正在跑的那筆 abort、worker 不撿 | 0；缺 --reason 1 |
 | `device-estop clear [--tag T \| --local] --confirm` | **唯一**解除急停的路徑（MCP 沒有） | 0；沒 --confirm 2 |
@@ -339,6 +341,10 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 21. 急停的三層都是「檔存在即真」，**沒有簽章**：任何能寫 depot 的人都能 engage／clear（clear 走 CLI 只是流程約束，不是權限）。正在跑的那筆被殺是 `abort_if` 每 `estop_poll_s`（5 s）查一次 depot——急停到真的殺掉最多晚 5 s；殺完那筆算 error（attempts+1），三次急停剛好落在同一筆會把它三振成毒樣本。
 22. 儀器租約（`Instrument.acquire`）是**行程內**的鎖（同機只能一個 HFSS 使用者、MCP 與 worker 同一行程），不在 depot——換機器看不到；跨機協調仍靠 queue 的 claim。`status.json["fleet"]`／`fleet` 的 `offline` 只是「心跳年齡 > 90 s」，儀器行程死掉與 NAS 斷線分不出來。
 23. `check_preconditions` 每次 `open()` 都跑 `doctor.health`（含 `tasklist`，~0.1 s）與 `depot.selfcheck()`（建一個探針檔）；重開頻繁（保險絲冷卻）時會多幾次 NAS 往返。「開過一次後 ansysedt 在跑不算阻擋」假設殘留的 ansysedt 是自己的——同機有人手開 HFSS 就抓不到。
+24. **MCP token 是一把鑰匙開整個機隊**：`EMFORGE_DEVICE_TOKEN` 三台共享、無身分（`by` 是自報）、無到期；外洩＝任何人能對每台開 HFSS 跑任何 profile（受 `allowed_profiles`／兩段式 confirm 限制，但 confirm token 也是同一把 secret 算的）。傳輸是明文 HTTP（區網＋防火牆 `remoteip=LocalSubnet` 是唯一屏障）。
+25. MCP 走 **stateless＋JSON response**：每個請求獨立，沒有 session、沒有 SSE 推送；重放同一個 `device_simulate(confirm=…)` 由 token 單次使用擋，但 `device_abort`／`device_estop` 沒有 nonce——重放就再按一次（冪等，無害）。
+26. 同步 tool 跑 SDK 的 anyio thread pool（預設 40 個 worker thread）：`device_simulate` 佔一條 100–250 s，`device_state` 照回；但同時來 40 個阻塞呼叫就全塞（儀器租約只讓一個 simulate 進，其餘立刻 `device_busy`，所以實際只會塞一條）。uvicorn 在 daemon thread：worker 主迴圈死掉行程結束，MCP 也跟著沒了（設計如此——沒有 worker 的 MCP 用 `device-serve`）。
+27. `pythoncom.CoInitialize()` 只在 `open()` 叫、從不 `CoUninitialize`：SDK 的 thread pool 執行緒重用，同一條 thread 多次 open 重複 CoInitialize（無害，回 S_FALSE）；HFSS COM 物件跨執行緒（開在 thread A、下一筆在 thread B）是否成立**未在正式機驗證**——`simulate_once` 一筆一開一關（同一條 thread 內）刻意避開這個問題。
 
 ## 13. 與 architecture.md 的偏差
 
@@ -362,10 +368,15 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | worker 直接開 Simulator | worker 經 `device.Instrument`（狀態機／租約／急停三層／前置檢查／說明檔／`simulate_once`） | Ricky 2026-09-05：參考 MHS「讓 HFSS 那裡更專注於模擬」、三台各自是 MCP server（M15）；儀器層寫在 Depot 上，不用二次搬家 |
 | 狀態字典 `devices/<tag>.json` | `devices/<tag>/{state.json, reference.md, reference.json, log.jsonl, adhoc/}` | 一台一目錄：機隊列舉＝`dir_names`，說明檔／日誌／ad-hoc 結果不混進狀態列表 |
 | 鎖被破後原 runtime 繼續 tick（§12-16） | 心跳比對 owner → `lock_lost` → 下一圈停（回 3） | M13 順手收掉 |
+| MCP auth 用 SDK `token_verifier`＋`AuthSettings` | ASGI bearer 中介層 `BearerGate`（`hmac.compare_digest`）；`build_server(inst)` 不吃 secret，bearer 在 HTTP 層 | SDK 那條是 OAuth 資源伺服器模型（要 issuer_url／resource_server_url、掛 /.well-known）；共享密鑰不是 OAuth；中介層 15 行、可用 ASGITransport 免 socket 測 |
+| `Limits` 值來源未定（M13） | `<root>/limits.json`（本機檔、`init` 留範本、沒有＝預設、壞 JSON 拒起）；來源進說明檔 | 每台自己的上限（磁碟／允許 profile 不同）；本機檔＝NAS 斷線也讀得到 |
+| 兩段式 token 被拒就燒掉（M13） | 驗證與消費分開：真的跑了才 `consume_confirm` | token 同窗同值，燒掉＝十分鐘內不能重試（M15 測試抓到） |
 
 ## 14. 未驗證與待決
 
 - 三台正式機的切換（`deploy.md`）尚未執行：`smoke` 同機 bit 級對 `smp073_d_040` 是「同一儀器」的實證，還沒跑。
+- 儀器層／MCP 的正式機驗收（`deploy.md` §6：fleet 看到 216 → `device-simulate` 現任王同機 bit 級 → 忙碌拒絕 → 急停／解除 → 從 MCP 停續 worker）尚未執行；
+  MCP 全部測試都是 in-memory（SDK Client＋ASGITransport），**真 socket＋真 HFSS＋非主執行緒 COM** 三件事都要在 216 上第一次見真章（§12-27）。
 - `import-legacy --verify` 對真實 NAS 樹（六萬筆）尚未跑：本機只跑過合成迷你樹。
 - `worker_ver` 拼進 antenna sha；`doctor --hfss` 的 COM 連線探測；`notarize_min_score`；SM 排序策略（舊 smpool）移植成 `strategies/sm_rank.py`；`deliver`。
 - 架構 §12 的三條 `❓`（策略層無實作證據、弱模型化未對照、重訓＝跟上分布）——這份實作沒有改變它們的狀態。

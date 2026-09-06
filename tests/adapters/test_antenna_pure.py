@@ -79,6 +79,27 @@ def test_importing_adapter_does_not_import_antenna_or_torch():
     assert out.stdout.strip() == "False False"
 
 
+# ── COM apartment（M16） ────────────────────────────────────────────────────
+def test_open_calls_coinitialize_only_off_main_thread_and_skips_without_pythoncom(root, monkeypatch):
+    """MCP 的 tool 跑在 SDK 的 worker thread：COM 要先 CoInitialize（主執行緒由行程初始化、不重叫）；沒 pythoncom 照開。"""
+    import threading
+    import types
+    calls = []
+    monkeypatch.setitem(sys.modules, "pythoncom", types.SimpleNamespace(CoInitialize=lambda: calls.append(threading.current_thread().name)))
+    s = sim.DualPortSim(workdir=str(root), profile=_dual(), old_cls=_StubOld)
+    s.open()
+    assert calls == [], "主執行緒不叫"
+    t = threading.Thread(target=s.open, name="mcp-worker")
+    t.start()
+    t.join()
+    assert calls == ["mcp-worker"] and s._sim.calls.count("open") == 2
+    monkeypatch.setitem(sys.modules, "pythoncom", None)          # import pythoncom → ImportError
+    t = threading.Thread(target=s.open)
+    t.start()
+    t.join()
+    assert s._sim.calls.count("open") == 3, "沒 pythoncom（非 Windows／純測試）照開"
+
+
 # ── sim 包裝 ────────────────────────────────────────────────────────────────
 def test_stack_order_follows_profile_labels_f32_shape(root):
     s = sim.DualPortSim(workdir=str(root), profile=_dual(), old_cls=_StubOld)

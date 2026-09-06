@@ -1,12 +1,13 @@
 """emforge/device/limits.py — MHS 第 2–4 層：硬限制（`Limits`）、前置檢查（重用 `worker/gate.check`＋`doctor.health`）、
 兩段式確認（`confirm_token`／`confirm_ok`：sha1(secret|op|key|10 分鐘窗)[:8]，單次使用）。
 
-限制是機制不含政策：值由 profile／doctor 現有常數與部署設定來（M16 進 deploy.md）。
+限制是機制不含政策：值由 profile／doctor 現有常數與部署設定 `<root>/limits.json`（本機檔，`load_limits`；M16）來。
 """
 import hashlib
+import json
 from dataclasses import asdict, dataclass
 
-from .. import doctor, profiles
+from .. import doctor, paths, profiles
 from ..depot import open_depot
 from ..worker.gate import check as gate_check
 
@@ -33,6 +34,24 @@ class Limits:
     def from_dict(cls, d: dict) -> "Limits":
         known = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in (d or {}).items() if k in known})
+
+
+#? `emforge init` 寫的範本＝預設值全列（欄位與 Limits 一致，test_limits 釘）；每台改自己的。
+LIMITS_TEMPLATE = Limits().to_dict()
+
+
+def load_limits(root) -> tuple:
+    """`<root>/limits.json` → (Limits, 來源)；沒有＝(預設, "default")；壞 JSON 指名檔案拋 ValueError（不默默放掉上限）。"""
+    p = paths.limits_json(root)
+    if not p.exists():
+        return Limits(), "default"
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{p}：limits.json 不是合法 JSON（{e}）") from None
+    if not isinstance(d, dict):
+        raise ValueError(f"{p}：limits.json 頂層要是物件")
+    return Limits.from_dict(d), str(p)
 
 
 def check_preconditions(profile, *, limits: Limits, depot, root, health: dict | None = None) -> list:

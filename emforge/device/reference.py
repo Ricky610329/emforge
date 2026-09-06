@@ -33,6 +33,7 @@ def render(inst) -> tuple:
     prof = [_profile_row(p) for p in profiles.all_profiles() if not allowed or p.name in allowed]
     d = {"tag": inst.tag, "worker_ver": inst.state.worker_ver, "state": inst.state.state, "pid": inst.state.pid,
          "url": inst.state.url, "generated_at": now_iso(), "profiles": prof, "limits": inst.limits.to_dict(),
+         "limits_source": inst.limits_source,
          "health": doctor.health(inst.root, depot=inst.depot), "median_time_s": inst.median_time_s(),
          "estop": inst.estop_engaged(), "procedures": [dict(p) for p in PROCEDURES],
          "keys": {"state": paths.device_state(inst.tag), "log": paths.device_log(inst.tag),
@@ -55,7 +56,8 @@ def _markdown(d: dict) -> str:
     for p in d["profiles"]:
         lines.append(f"| `{p['name']}` | `{p['profile_hash']}` | {p['geom_ver']} | {p['shape']} | {p['labels']} | "
                      f"{p['n_points']} | {p['timeout_s']} | {'是' if p['retired'] else ''} |")
-    lines += ["", "## 限制（Limits）", ""] + [f"- `{k}`：{v}" for k, v in d["limits"].items()]
+    lines += ["", "## 限制（Limits）", "", f"- 來源：`{d.get('limits_source', 'default')}`（`<root>/limits.json`；沒有＝預設）"]
+    lines += [f"- `{k}`：{v}" for k, v in d["limits"].items()]
     lines += ["", "## 體檢", "",
               f"- 系統碟剩餘 {h['free_gb']:.1f} GB（工作目錄 {h['work_root']}）；ansysedt 在跑：{h['ansysedt_running']}",
               f"- depot `{h['depot_spec']}`：{'OK' if not h['depot_problems'] else '；'.join(h['depot_problems'])}",

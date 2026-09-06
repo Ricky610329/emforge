@@ -427,3 +427,53 @@ def test_device_serve_cli_serves_instrument_without_picking_queue(fake, monkeypa
     assert ev[0] == "device_start" and ev[-1] == "device_stop"
     monkeypatch.delenv("EMFORGE_DEVICE_TOKEN")
     assert _main("device-serve", "216", "--root", fake, "--host", "0.0.0.0", "--work-root", fake / "work") == 1, "非 loopback 無 token 拒起"
+
+
+# ── M16：正式機準備 ──────────────────────────────────────────────────────────
+def test_device_simulate_cli_calls_tool_with_bearer_and_prints_token_hint(fake, monkeypatch, capsys):
+    from emforge.cli import device as dev
+    seen = {}
+
+    def fake_call(url, tool, args, *, token=None, timeout_s=None):
+        seen.update(url=url, tool=tool, args=args, token=token)
+        return {"needs_confirm": True, "token": "abcd1234", "record_id": "0" * 16, "preview": {"profile": args["profile"]}}
+
+    monkeypatch.setattr(dev.mcp_client, "call_device", fake_call)
+    monkeypatch.setenv("EMFORGE_DEVICE_TOKEN", "s3cret")
+    bits = "01" * 32
+    assert _main("device-simulate", "--url", "http://10.0.0.216:8765/mcp", "--profile", "fake_f1", "--bits", bits, "--by", "ricky") == 0
+    out = capsys.readouterr().out
+    assert "abcd1234" in out and "--confirm" in out
+    assert seen == {"url": "http://10.0.0.216:8765/mcp", "tool": "device_simulate", "token": "s3cret",
+                    "args": {"profile": "fake_f1", "bits": bits, "by": "ricky"}}
+    f = fake / "bits.txt"
+    f.write_text(bits[:32] + "\n" + bits[32:] + "\n", encoding="utf-8")
+    assert _main("device-simulate", "--url", "http://10.0.0.216:8765/mcp", "--profile", "fake_f1", "--bits", f"@{f}",
+                 "--confirm", "abcd1234") == 0
+    assert seen["args"]["confirm"] == "abcd1234" and seen["args"]["bits"].replace("\n", "") == bits
+    monkeypatch.setattr(dev.mcp_client, "call_device", lambda *a, **k: (_ for _ in ()).throw(dev.mcp_client.DeviceCallFailed("device_busy: x")))
+    assert _main("device-simulate", "--url", "http://10.0.0.216:8765/mcp", "--profile", "fake_f1", "--bits", bits) == 1
+    assert "device_busy" in capsys.readouterr().err
+
+
+def test_init_writes_limits_template_and_describe_shows_limits_source(root, capsys, monkeypatch):
+    import json
+    from emforge.device.instrument import Instrument
+    monkeypatch.setattr(doctor, "ansysedt_running", lambda: False)
+    assert _main("init", "--root", root, "--profile", "fake_f1") == 0
+    lim = paths.limits_json(root)
+    assert lim.exists() and json.loads(lim.read_text(encoding="utf-8"))["max_sample_s"] > 0
+    lim.write_text(json.dumps({"max_sample_s": 1234}), encoding="utf-8")
+    assert _main("init", "--root", root) == 0 and json.loads(lim.read_text(encoding="utf-8")) == {"max_sample_s": 1234}, "不覆寫"
+    testing.make_fake_root(root)
+    inst = Instrument(root, "216", depot=root, work_root=root / "work", sleep=lambda s: None, worker_ver="emforge=test",
+                      sim_factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p))
+    inst.start()
+    inst.bind(P, inst.work.make("s1"), store="s1")
+    inst.open()
+    inst.close()
+    inst.stop()
+    capsys.readouterr()
+    assert _main("device-describe", "216", "--root", root) == 0
+    out = capsys.readouterr().out
+    assert "1234" in out and "limits.json" in out

@@ -25,7 +25,7 @@ from ..model import now_iso, record_id
 from ..worker.guard import guarded_call, open_with_retries
 from ..worker.workdir import WorkDir, default_work_root
 from . import estop, reference
-from .limits import Limits, check_preconditions, confirm_token, confirm_valid
+from .limits import Limits, check_preconditions, confirm_token, confirm_valid, load_limits
 from .states import DeviceState, write_state
 
 HISTORY_MAX = 50
@@ -56,7 +56,8 @@ class Instrument:
         self.root, self.tag = Path(root), tag
         self.depot = open_depot(depot) if depot is not None else FileDepot(self.root)
         self._factory = sim_factory or (lambda workdir, profile: profiles.make_simulator(profile, workdir))
-        self.limits = limits or Limits()
+        #? limits 沒給就讀 <root>/limits.json（部署設定，M16）；給了＝呼叫端政策（測試／嵌入）。來源進說明檔。
+        self.limits, self.limits_source = (limits, "explicit") if limits is not None else load_limits(self.root)
         self.work = WorkDir(work_root or default_work_root())
         self.heartbeat_s, self._sleep, self._clock = float(heartbeat_s), sleep, clock
         self._secret = secret or os.environ.get("EMFORGE_DEVICE_TOKEN") or os.urandom(16).hex()

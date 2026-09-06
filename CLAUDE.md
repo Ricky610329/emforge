@@ -24,6 +24,8 @@
 - **核心零領域依賴**：`emforge/` 除 `adapters/`、`legacy/` 外不得 import `torch/antenna/scipy/matplotlib/pandas/win32com`（靜態測試擋）。
   天線域只透過 `emforge/adapters/antenna/` 綁舊 repo（`EMFORGE_ANTENNA_REPO`），量測尺是 vendored numpy 版＋parity 測試。
 - **worker 不認得天線**：只呼叫 `sim.simulate(bits)` 寫原始響應；measure/score 在 runtime `collect`。
+- **`mcp`／`uvicorn`／`starlette`／`httpx2` 只在 `device/mcp_server.py`、`device/mcp_client.py` 的函式內 import**（optional extra `emforge[mcp]`；
+  `tests/test_smoke.py` 釘死）：沒裝的機器照常跑 worker／runtime／CLI。MCP tools 名單的唯一真相＝`device/reference.PROCEDURES`；急停解除永遠不給 MCP。
 - **策略只 `propose`**：去重、派工、評分、公證都是 runtime 服務；`kind=repeat` 只有 `runtime/notarize.py` 與 `cli smoke` 能設。
 - **榜只能經 `promote`/`rescore` 寫**；ledger 檔帶 checksum，手改會被抓。
 

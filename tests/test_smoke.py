@@ -33,9 +33,8 @@ DEPOT_ONLY_MODULES = (
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
     "runtime/schedule.py",
     "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py",
-    "device/__init__.py", "device/limits.py", "device/states.py", "device/reference.py", "device/mcp_server.py",
+    "device/__init__.py", "device/states.py", "device/reference.py", "device/mcp_server.py", "device/mcp_client.py",
     "cli/__init__.py", "cli/__main__.py", "cli/control.py", "cli/show.py", "cli/verdict.py", "cli/loops.py",
-    "cli/device.py",
     "strategies/__init__.py", "strategies/blind.py", "strategies/top_k_flip.py",
 )
 #? DEPOT_ONLY_PARTIAL：可以用本機路徑（pathlib）——但只給「程式碼／設定根」（registry.py、strategies/、策略 workdir、
@@ -47,8 +46,10 @@ DEPOT_ONLY_PARTIAL = {
     "worker/loop.py": "本機 registry.py 與工作目錄根",
     "worker/guard.py": "看門狗（不碰檔）",
     "device/estop.py": "第三層急停是本機檔 <root>/ESTOP（NAS 斷線也要擋得住）",
+    "device/limits.py": "部署設定 <root>/limits.json 是本機檔（每台自己的上限，不經 depot）",
     "device/instrument.py": "root＝本機程式碼根（前置檢查、急停本機層）；本機工作目錄 WorkDir",
     "cli/base.py": "--root 是本機路徑",
+    "cli/device.py": "device-simulate 的 `--bits @file` 讀本機檔（使用者給的 pattern 檔）",
     "cli/setup.py": "init 寫本機 registry.py／strategies/；import-legacy 的舊樹是本機路徑",
     "testing.py": "假根建本機 registry.py",
     "_version.py": "git describe 看本機 repo",
@@ -70,7 +71,7 @@ FS_IMPORTS = {"pathlib", "shutil", "glob", "tempfile"}
 #? optional extra（`emforge[mcp]`）：這些套件只准在下面的模組、而且只准在**函式內** import——核心 import 期零 mcp，
 #  沒裝 mcp 的機器（開發機、runtime 機）照常跑 worker／runtime／CLI。
 OPTIONAL_EXTRA_IMPORTS = {"mcp", "uvicorn", "starlette", "httpx2", "anyio"}
-OPTIONAL_EXTRA_MODULES = {"device/mcp_server.py"}
+OPTIONAL_EXTRA_MODULES = {"device/mcp_server.py", "device/mcp_client.py"}
 #? `os.path` 也算（getmtime／exists 都在裡面）。
 FS_OS_ATTRS = {"path", "replace", "utime", "open", "unlink", "remove", "rename", "makedirs", "scandir",
                "listdir", "mkdir", "stat", "fsync"}

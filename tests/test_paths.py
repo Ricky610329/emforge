@@ -83,6 +83,7 @@ def test_local_snapshot_is_paths_under_root():
         "user_strategies_dir": "strategies",
         "strategy_workdir": "runtime_state/p/strategies/k",
         "estop_local": "ESTOP",
+        "limits_json": "limits.json",
     }
 
 

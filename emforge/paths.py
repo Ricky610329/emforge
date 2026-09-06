@@ -299,6 +299,11 @@ def estop_local(root) -> Path:
     return Path(root) / "ESTOP"
 
 
+def limits_json(root) -> Path:
+    """儀器 `Limits` 的部署設定（M16）：每台自己的上限（allowed_profiles／max_sample_s／min_free_gb…），本機檔、不經 depot；沒有＝預設。"""
+    return Path(root) / "limits.json"
+
+
 # ── 整體 ────────────────────────────────────────────────────────────────────
 def layout_prefixes() -> tuple:
     """`emforge init` 要 `ensure_prefixes` 的前綴（不含 per-profile 子前綴，那些第一次用到才建）。"""
@@ -356,4 +361,5 @@ def local_snapshot(root, *, profile: str, strategy: str) -> dict:
         "user_strategies_dir": user_strategies_dir(root),
         "strategy_workdir": strategy_workdir(root, profile, strategy),
         "estop_local": estop_local(root),
+        "limits_json": limits_json(root),
     }

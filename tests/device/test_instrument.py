@@ -197,6 +197,19 @@ def test_simulate_once_precondition_failure_raises_not_error_result(root):
     inst.stop()
 
 
+def test_instrument_reads_limits_from_root_file_when_not_given(root):
+    paths.limits_json(root).parent.mkdir(parents=True, exist_ok=True)
+    paths.limits_json(root).write_text('{"allowed_profiles": ["other_p"]}', encoding="utf-8")
+    inst = make_inst(root)
+    assert inst.limits.allowed_profiles == ("other_p",) and inst.limits_source.endswith("limits.json")
+    inst.start()
+    inst.bind(P, inst.work.make("s1"), store="s1")
+    with pytest.raises(I.PreconditionFailed, match="allowed"):
+        inst.open()
+    inst.stop()
+    assert make_inst(root, limits=Limits()).limits_source == "explicit"
+
+
 def test_announce_url_lands_in_state_dict(inst):
     inst.start()
     inst.announce_url("http://127.0.0.1:8765/mcp")

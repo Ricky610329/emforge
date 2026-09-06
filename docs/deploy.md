@@ -5,7 +5,7 @@
 
 ## 0. 開發機先做
 
-1. `EMFORGE_ANTENNA_REPO` 指向 Antenna clone；`python -m pytest`（274 綠，含 adapter parity 500 筆逐位元）。
+1. `EMFORGE_ANTENNA_REPO` 指向 Antenna clone；`python -m pytest` 全綠（含 adapter parity 500 筆逐位元；MCP 測試需 `pip install -e .[mcp]`，沒裝會 skip）。
 2. 在本文釘住舊 repo 的 commit（`ANTENNA_PIN = <sha>`），三台切換前都 `git pull` 到同一個。
 3. 假根端到端：`emforge init --root <tmp> --profile fake_f1`（registry.py 改成 `from emforge.testing import register_fakes; register_fakes()`）→ 一個終端 `emforge run --root <tmp> --profile fake_f1`、另一個 `emforge worker --root <tmp> --machine-tag dev`；跑 20 tick、中途 taskkill runtime 再起 → `emforge events`／`report` 看得懂、`work/` 空。
 
@@ -46,6 +46,24 @@ emforge watch --root %EMFORGE_ROOT% --stores <smoke store>
 （舊 records 註記同機噪音地板 0.000）；跨機 `|Δm_k| ≤ 0.75`；`time_s` 100–250 s；C 槽剩餘不變。
 **回滾**：`emforge stop --worker --machine-tag 216` → 刪舊 `jobs_state/STOP` → 桌面重啟 `python -m script.dedust worker`。舊佇列、舊資料全未動。
 
+## 2b. 儀器層與 MCP（M13–M16；同一台做完 §2 再做）
+
+**安裝** optional extra：`pip install -e C:\Users\<u>\Documents\GitHub\emforge[mcp]`（mcp 2.1、uvicorn、httpx2；**沒裝也能跑** worker／runtime／CLI）。
+**token**（三台＋開發機同一個；共享密鑰＝bearer＝兩段式 confirm 的 secret）：
+```
+python -c "import secrets; print(secrets.token_urlsafe(24))"        # 開發機產一個
+setx EMFORGE_DEVICE_TOKEN <token>                                    # 每台各設（不走旗標、別進 shell 歷史；換 token 三台一起換）
+setx EMFORGE_MCP_HOST 0.0.0.0                                        # 不設＝127.0.0.1（只有本機連得到、不需 token）
+setx EMFORGE_MCP_PORT 8765
+netsh advfirewall firewall add rule name="emforge-mcp" dir=in action=allow protocol=TCP localport=8765 remoteip=LocalSubnet
+```
+非 loopback 綁定沒 token → `--serve`／`device-serve` **拒起**（exit 1）。token 外洩＝整個機隊都能被開 HFSS（見 implementation.md §12-24）。
+**上限**：`emforge init` 已在 `%EMFORGE_ROOT%\limits.json` 留範本（本機檔；每台自己的 `allowed_profiles`／`max_sample_s`／`min_free_gb`）；改完重啟 worker 生效，`device-describe <tag>` 印來源。
+**啟動**：`scripts\start_worker.cmd --serve`（＝pull → doctor → `emforge worker --serve`；MCP 在同一行程 daemon thread；`devices/<tag>/state.json` 的 `url` 會填上）。
+只服務、不撿佇列：`emforge device-serve <tag> --root %EMFORGE_ROOT%`。
+**開發機接上**：`emforge fleet --root %EMFORGE_ROOT% --mcp-config > .mcp.json`（header 用 `${EMFORGE_DEVICE_TOKEN}` 佔位，Claude Code 讀環境變數）；
+命令列試量：`emforge device-simulate --url http://<ip>:8765/mcp --profile P --bits @king.txt`（兩段式：先印 token，再帶 `--confirm`）。
+
 ## 3. runtime 一夜
 
 停舊 `grind_loop`（`tmp/grind_loop.STOP`，否則它繼續往舊佇列丟 job）。開發機：
@@ -64,6 +82,25 @@ emforge run --root %EMFORGE_ROOT% --profile dual_p01_db075     # detach（start 
 
 本文記三台 sha、doctor 輸出、smoke 數值；舊 `jobs.json` 封存；`/nas-backup` 增列 `emforge/`。
 
+## 6. 儀器層／MCP 驗收（216 先；每步照抄，任一步不過就停在該步）
+
+前提：§2 的 smoke 已過、§2b 已設 token／host／port、`start_worker.cmd --serve` 已起、開發機也設了同一個 `EMFORGE_DEVICE_TOKEN`。
+
+1. **機隊看得到**：`emforge fleet --root %EMFORGE_ROOT%` → `216 idle`、`url` 非空（`--mcp-config` 印得出 `http://<216 ip>:8765/mcp`）、estop 空。
+2. **說明檔**：`emforge device-describe 216 --root %EMFORGE_ROOT%` → profile 表含 `dual_p01_db075`、限制來源 `…\limits.json`、體檢「阻擋：無」。
+3. **同機 bit 級（同一儀器的實證）**：現任王的 bits 存檔 → 經 MCP 跑一筆 → 與 db 那筆逐位元相等：
+   ```
+   python -c "from emforge.db import Database; r=Database(r'%EMFORGE_ROOT%').view('dual_p01_db075').top(1)[0]; print(r.id); open('king.txt','w').write(''.join('1' if b else '0' for b in r.bits.reshape(-1)))"
+   emforge device-simulate --url http://<216 ip>:8765/mcp --profile dual_p01_db075 --bits @king.txt --by ricky      # 印 token 與預覽（record_id 應＝上面印的 id）
+   emforge device-simulate --url http://<216 ip>:8765/mcp --profile dual_p01_db075 --bits @king.txt --by ricky --confirm <token>   # 100–250 s
+   ```
+   驗收：結果 `status=done`；`devices/216/adhoc/<stamp>-<id>.json` 的 `response` 與 db 那筆 `np.array_equal`（同機噪音地板 0.000）；`time_s` 100–250；C 槽剩餘不變；**db 沒多一筆**（`emforge report` 筆數不變）。
+4. **忙碌拒絕**：worker 正在跑批時再下 `device-simulate … --confirm` → stderr `device_busy: …`、exit 1；批照跑、同一 token 稍後還能用。
+5. **急停**：`emforge device-estop engage --root %EMFORGE_ROOT% --tag 216 --by ricky --reason 驗收` → `queue/log/216.jsonl` 出現 `job_yield reason=estop_engaged`（正在跑的那筆 ≤ 5 s 內被殺、記 error）、`fleet` 顯示 estop `device`、`device-simulate` 回 `estop_engaged`。
+6. **解除只能 CLI**：Claude Code 對 216 叫 `device_estop`（engage）可以、找不到任何 clear tool；`emforge device-estop clear --root %EMFORGE_ROOT% --tag 216 --confirm` → `fleet` 回 idle、worker 下一輪重新撿、`devices/216/log.jsonl` 有 `estop_cleared`。
+7. **從 MCP 停／續 worker**：Claude Code 接上 `.mcp.json` 後叫 `device_stop_worker`（兩段式）→ `queue/STOP.216` 出現、worker 跑完當前 job 收工（`worker_stop reason=stop_file`）；`device_resume_worker` 刪檔；`start_worker.cmd --serve` 重啟。
+8. **記錄**：三台 sha、token 輪替日期、每台 `limits.json`、第 3 步的 `np.array_equal` 結果與 `time_s` 進 §5；218、37 各重複 1–3。
+
 ## start_worker.cmd
 
-`scripts/start_worker.cmd`：`git pull --ff-only` → `emforge doctor` → `emforge worker`。**要拉就一定重啟、要重啟就一定拉**（I-10 的制度性解法）。
+`scripts/start_worker.cmd [--serve …]`：`git pull --ff-only` → `emforge doctor` → `emforge worker`（參數原樣透傳；`--serve` 同行程起 MCP）。**要拉就一定重啟、要重啟就一定拉**（I-10 的制度性解法）。
