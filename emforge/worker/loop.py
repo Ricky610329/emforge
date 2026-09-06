@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .. import _version, events, paths, profiles
 from ..batches import Batch
+from ..depot import FileDepot, open_depot
 from ..queue import Queue
 from .batch import run_batch
 from .fuse import Fuse
@@ -31,27 +32,29 @@ class _Opts:
     retry_passes: int = 2
 
 
-def worker_loop(root, machine_tag: str, *, poll_s: float = 30.0, once: bool = False, work_root=None,
+def worker_loop(root, machine_tag: str, *, depot=None, poll_s: float = 30.0, once: bool = False, work_root=None,
                 sleep=time.sleep, sim_factory=None, background_prio: int = 9, max_fail: int = 5,
                 cooldown_s: float = 600.0, max_blowout: int = 3, retry_passes: int = 2) -> int:
     """回 0＝正常收工。`once=True`：跑完第一個真正執行的 job（或佇列空）就回。
+    `root`＝本機程式碼根（registry.py）；`depot`＝共享協調狀態（預設 FileDepot(root)）。
     `sim_factory(workdir, profile)` 可注入（測試）；預設 `profiles.make_simulator`。"""
     root = Path(root)
+    depot = open_depot(depot) if depot is not None else FileDepot(root)
     opts = _Opts(background_prio, max_fail, cooldown_s, max_blowout, retry_passes)
     work = WorkDir(work_root or default_work_root())
     log_key = paths.worker_log(machine_tag)
 
     def log(event, /, **fields):
-        events.emit(root, log_key, event, **fields)
+        events.emit(depot, log_key, event, **fields)
 
     profiles.load_user_registry(root)
     ver = worker_version()
-    print(f"emforge worker {ver} machine={machine_tag} root={root}", flush=True)
+    print(f"emforge worker {ver} machine={machine_tag} root={root} depot={depot.spec}", flush=True)
     swept = work.sweep_all()
     if swept:
         print(f"啟動清掃：{len(swept)} 個殘留工作目錄已刪（{work.root}）", flush=True)
     log("worker_start", worker_ver=ver, machine=machine_tag)
-    q = Queue(root)
+    q = Queue(depot)
     while True:
         if q.stop_requested(machine_tag):
             log("worker_stop", reason="stop_file")
@@ -64,15 +67,15 @@ def worker_loop(root, machine_tag: str, *, poll_s: float = 30.0, once: bool = Fa
             sleep(poll_s)
             continue
         log("job_claimed", store=job.store, prio=job.prio)
-        ran = _handle(q, root, job, work, log, ver, machine_tag, sim_factory, sleep, opts)
+        ran = _handle(q, job, work, log, ver, machine_tag, sim_factory, sleep, opts)
         if once and ran:
             log("worker_stop", reason="once")
             return 0
 
 
-def _handle(q, root, job, work, log, ver, machine_tag, sim_factory, sleep, opts: _Opts) -> bool:
+def _handle(q, job, work, log, ver, machine_tag, sim_factory, sleep, opts: _Opts) -> bool:
     """守門 → run_batch → 終態。回 True＝真的跑了 run_batch（done／fail／yield）。"""
-    verdict = gate(job, root)
+    verdict = gate(job, q.depot)
     if not verdict.ok:
         log("gate_rejected", store=job.store, reason=verdict.reason)
         q.mark_fail(job.store, machine_tag, verdict.reason)
@@ -83,11 +86,11 @@ def _handle(q, root, job, work, log, ver, machine_tag, sim_factory, sleep, opts:
     else:
         factory = lambda wd: profiles.make_simulator(profile, wd)   # noqa: E731
     try:
-        outcome = run_batch(q, Batch(root, job.store), job, profile, factory, machine_tag, ver, work=work,
+        outcome = run_batch(q, Batch(q.depot, job.store), job, profile, factory, machine_tag, ver, work=work,
                             fuse=Fuse(opts.max_fail, opts.cooldown_s, opts.max_blowout), retry_passes=opts.retry_passes,
                             background_prio=opts.background_prio, sleep=sleep, log=log)
         if outcome == "done":
-            res = Batch(root, job.store).results()
+            res = Batch(q.depot, job.store).results()
             errs = sorted(i for i, r in res.items() if r.get("status") != "done")
             q.mark_done(job.store, machine_tag, n_done=len(res) - len(errs), n_error=len(errs), error_ids=errs)
             log("job_done", store=job.store, n_done=len(res) - len(errs), n_error=len(errs))

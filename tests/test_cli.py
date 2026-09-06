@@ -274,6 +274,47 @@ def test_abandon_cli(fake, capsys):
     assert _main("abandon", store, "--root", fake, "--profile", "fake_f1", "--by", "ricky") == 1
 
 
+# ── depot（M12d） ───────────────────────────────────────────────────────────
+def test_depot_flag_and_env_select_backend(fake, monkeypatch):
+    """M12d：`--depot` > `EMFORGE_DEPOT` > `FileDepot(root)`；`--root` 仍是本機程式碼／設定根。"""
+    import argparse
+    from emforge.cli.base import depot_of
+    from emforge.depot import FileDepot, MemoryDepot, open_depot
+    monkeypatch.delenv("EMFORGE_DEPOT", raising=False)
+    d = depot_of(argparse.Namespace(depot=None), fake)
+    assert isinstance(d, FileDepot) and d.root == fake
+    monkeypatch.setenv("EMFORGE_DEPOT", "memory://cli-env")
+    assert depot_of(argparse.Namespace(depot=None), fake).spec == "memory://cli-env"
+    assert isinstance(depot_of(argparse.Namespace(depot="memory://cli-flag"), fake), MemoryDepot)
+    monkeypatch.delenv("EMFORGE_DEPOT")
+    assert _main("init", "--root", fake, "--depot", "memory://cli-init", "--profile", "fake_f1") == 0
+    assert open_depot("memory://cli-init").exists(paths.strategies_yaml("fake_f1"))
+    assert paths.registry_py(fake).exists() and paths.user_strategies_dir(fake).is_dir(), "本機程式碼仍在 root"
+
+
+def test_run_with_memory_depot_forces_in_process(fake, capsys):
+    """M12d：`memory://` 子行程看不到 → run 自動改 in-process 並印一行；磁碟上零狀態。"""
+    from emforge.depot import open_depot
+    assert _main("init", "--root", fake, "--depot", "memory://cli-run", "--profile", "fake_f1") == 0
+    assert _main("run", "--root", fake, "--depot", "memory://cli-run", "--profile", "fake_f1", "--once") == 0
+    assert "in-process" in capsys.readouterr().out
+    assert open_depot("memory://cli-run").get_json(paths.status_json("fake_f1"))["tick"] == 1
+    assert not (fake / paths.status_json("fake_f1")).exists()
+    assert _main("status", "--root", fake, "--depot", "memory://cli-run", "--profile", "fake_f1") == 0
+    assert '"tick": 1' in capsys.readouterr().out
+
+
+def test_doctor_prints_selfcheck_and_clock_skew(fake, capsys, monkeypatch):
+    """M12d：doctor 印 `depot.selfcheck()`；時鐘偏移是阻擋條件（租約全靠伺服器側 modified_at vs 本機 now）。"""
+    from emforge.depot import file as fdep
+    monkeypatch.setattr(doctor, "ansysedt_running", lambda: False)
+    assert _main("doctor", "--root", fake) == 0
+    assert "depot" in capsys.readouterr().out
+    monkeypatch.setattr(fdep, "_probe_mtime", lambda path: time.time() + 3600)
+    assert _main("doctor", "--root", fake) == 4
+    assert "時鐘偏移" in capsys.readouterr().out
+
+
 # ── doctor ──────────────────────────────────────────────────────────────────
 def test_doctor_reports_versions_and_refuses_when_ansysedt_running(fake, capsys, monkeypatch):
     monkeypatch.setattr(doctor, "ansysedt_running", lambda: False)

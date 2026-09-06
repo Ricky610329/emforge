@@ -84,6 +84,37 @@ def test_restart_mid_batch_resumes_without_duplicate_records(root):
     assert rt2.state["tick"] == 3
 
 
+def test_full_loop_on_memory_depot(root, capsys):
+    """M12d：整條迴圈（init→run→worker→collect→notarize→promote→report）在 `memory://` 上跑通——
+    磁碟上只有本機程式碼（registry.py、策略 workdir），db／queue／batches／ledger 一個都不落地。"""
+    from emforge.depot import MemoryDepot
+    from tests.runtime.conftest import YAML
+    depot = MemoryDepot()
+    testing.make_fake_root(root, depot=depot)
+    depot.put_bytes(paths.strategies_yaml("fake_f1"), YAML.encode("utf-8"))
+    rt = Runtime(root, "fake_f1", depot=depot, sleep=lambda s: None, propose_fn=strategy.propose_in_process)
+    rt.acquire_lock()
+    try:
+        rt.tick()
+        testing.run_all_jobs(root, depot=depot)
+        rt.tick()
+        testing.run_all_jobs(root, depot=depot)
+        rt.tick()
+    finally:
+        rt.release_lock()
+    pend = ledger.Pending(depot, "fake_f1").list()
+    ev = [e["event"] for e in depot.read_log(paths.events_jsonl("fake_f1"))]
+    assert pend and "notarize_pass" in ev and "record_added" in ev
+    cand = pend[0]["id"]
+    assert cli.main(["promote", cand, "--root", str(root), "--depot", depot.spec, "--profile", "fake_f1", "--by", "ricky"]) == 0
+    assert ledger.Ledger(depot, "fake_f1", "fake_v1").best()["id"] == cand
+    assert cli.main(["report", "--root", str(root), "--depot", depot.spec, "--profile", "fake_f1"]) == 0
+    assert "blind" in capsys.readouterr().out
+    for local_only_absent in ("db", "queue", "batches", "ledger"):
+        assert not (root / local_only_absent).exists(), f"{local_only_absent} 不該落地"
+    assert paths.registry_py(root).exists()
+
+
 def test_core_e2e_never_imports_torch(root):
     testing.make_fake_root(root)
     write_yaml(root, "profile: fake_f1\nstrategies:\n  - {name: blind, prio: 9, batch: 2}\n")

@@ -1,31 +1,25 @@
-"""emforge/cli/control.py — 操作 runtime／佇列：requeue／resume／stop／smoke。
+"""emforge/cli/control.py — 操作 runtime／佇列：requeue／resume／stop／smoke／abandon。
 
 resume 走 `control.json`（runtime 下個 tick 消費），不直接改 state.json——runtime 每 tick 會覆寫它。
+所有狀態經 `Depot`（`depot_of`）；`Runtime(..., readonly=True)` 給 smoke／abandon 用（review-4）。
 """
-from pathlib import Path
-
-from .. import events, fs, paths
+from .. import events, paths
 from ..queue import LiveClaim, Queue
 from ..runtime.core import Runtime
 from ..runtime.notarize import smoke_dispatch
-from .base import EXIT_LIVE_CLAIM, EXIT_OK, add_root, err, root_of
-
-
-def _p(root, key: str) -> Path:
-    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
-    return Path(root) / key
+from .base import EXIT_LIVE_CLAIM, EXIT_OK, add_root, depot_of, err, root_of
 
 
 def cmd_requeue(args) -> int:
-    root = root_of(args)
-    q = Queue(root)
+    depot = depot_of(args, root_of(args))
+    q = Queue(depot)
     try:
         q.requeue(args.store)
     except LiveClaim as e:
         err(str(e))
         return EXIT_LIVE_CLAIM
     job = next(j for j in q.list() if j.store == args.store)
-    events.emit(root, paths.events_jsonl(job.sim_profile), "batch_requeued", store=args.store, by=args.by)
+    events.emit(depot, paths.events_jsonl(job.sim_profile), "batch_requeued", store=args.store, by=args.by)
     print(f"requeued {args.store}（claim／done／fail 一起清；進度在結果檔，會續跑）")
     return EXIT_OK
 
@@ -39,8 +33,9 @@ def _add_requeue(sub) -> None:
 
 
 def cmd_resume(args) -> int:
-    p = _p(root_of(args), paths.control_json(args.profile))
-    ctl = fs.read_json(p, default=None) or {}
+    depot = depot_of(args, root_of(args))
+    key = paths.control_json(args.profile)
+    ctl = depot.get_json(key) or {}
     if args.strategy:
         ctl.setdefault("resume_strategies", [])
         if args.strategy not in ctl["resume_strategies"]:
@@ -48,9 +43,9 @@ def cmd_resume(args) -> int:
     else:
         ctl["resume_profile"] = True
     ctl["by"] = args.by
-    fs.atomic_write_json(p, ctl)
+    depot.put_json(key, ctl)
     what = f"策略 {args.strategy}" if args.strategy else "profile"
-    print(f"已寫 {p}；runtime 下個 tick 消費（{what} 恢復）")
+    print(f"已寫 {depot.spec}/{key}；runtime 下個 tick 消費（{what} 恢復）")
     return EXIT_OK
 
 
@@ -64,14 +59,17 @@ def _add_resume(sub) -> None:
 
 
 def cmd_stop(args) -> int:
-    root = root_of(args)
+    depot = depot_of(args, root_of(args))
     if args.worker:
-        q = Queue(root)
+        q = Queue(depot)
         (q.clear_stop if args.clear else q.request_stop)(args.machine_tag)
         target = f"worker{' ' + args.machine_tag if args.machine_tag else '（全機）'}"
     elif args.profile:
-        p = _p(root, paths.runtime_stop(args.profile))
-        (fs.release if args.clear else fs.touch)(p)
+        key = paths.runtime_stop(args.profile)
+        if args.clear:
+            depot.delete(key)
+        else:
+            depot.put_bytes(key, b"")
         target = f"runtime {args.profile}"
     else:
         raise ValueError("stop 需要 --profile 或 --worker")
@@ -90,7 +88,8 @@ def _add_stop(sub) -> None:
 
 
 def cmd_smoke(args) -> int:
-    rt = Runtime(root_of(args), args.profile, readonly=True)   # 不拿鎖、不寫 state.json（review-4）
+    root = root_of(args)
+    rt = Runtime(root, args.profile, depot=depot_of(args, root), readonly=True)   # 不拿鎖、不寫 state.json（review-4）
     stores = smoke_dispatch(rt, args.id, n=args.n, machine=args.machine, by=args.by)
     for s in stores:
         print(f"dispatched {s}（kind=repeat, strategy=cli:smoke, machine={args.machine or '任一'}）")
@@ -110,7 +109,8 @@ def _add_smoke(sub) -> None:
 
 def cmd_abandon(args) -> int:
     from ..runtime.collect import abandon
-    rt = Runtime(root_of(args), args.profile, readonly=True)
+    root = root_of(args)
+    rt = Runtime(root, args.profile, depot=depot_of(args, root), readonly=True)
     out = abandon(rt, args.store, by=args.by)
     print(f"abandoned {args.store}：收了 {out['n_collected']} 筆（含 error）、{out['n_missing']} 筆從沒跑；inflight 移除、佇列標 done")
     return EXIT_OK

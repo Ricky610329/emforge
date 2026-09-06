@@ -32,6 +32,8 @@ setx EMFORGE_ANTENNA_REPO C:\Users\<u>\Documents\GitHub\Antenna
 setx EMFORGE_ROOT "T:\碩二_鄒穎麒's\antenna\emforge"
 setx MPLBACKEND Agg
 ```
+`EMFORGE_DEPOT` **不設**＝`FileDepot(EMFORGE_ROOT)`＝NAS 上這棵樹（M12 後的預設；設了才是別的後端，如 `file://D:\emforge_state`）。
+`doctor` 會多印一行 `depot`（可寫／O_EXCL／時鐘偏移 >30 s 阻擋）。
 **停舊 worker**：舊 repo `jobs_state/STOP` → `jobs-ls` 確認本機無 claim → `tasklist | findstr ansysedt` 為空。
 **體檢**：`emforge doctor --root %EMFORGE_ROOT%` 必須 0（root 探針、磁碟 ≥ 20 GB、無 ansysedt）。
 **smoke**（同一儀器的實證）：

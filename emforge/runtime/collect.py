@@ -9,19 +9,12 @@
 #  也算新收（交給 notarize），不能靜默漏掉破榜設計。
 量測與評分只在這裡發生（策略／worker 都不算分，D1）。
 """
-from pathlib import Path
-
 import numpy as np
 
-from .. import fs, paths, specs
+from .. import paths, specs
 from ..batches import Batch
 from ..model import KIND_SAMPLE, STATUS_DONE, STATUS_ERROR, Record, now_iso
 from ..queue import DEFAULT_STALE_S
-
-
-def _p(root, key: str) -> Path:
-    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
-    return Path(root) / key
 
 
 def collect(rt) -> list:
@@ -34,7 +27,7 @@ def collect(rt) -> list:
 
 def _collect_one(rt, inf: dict) -> list:
     store = inf["store"]
-    batch = Batch(rt.root, store)
+    batch = Batch(rt.depot, store)
     qstate = rt.queue.state(store)
     terminal = qstate == "done"
     collected = set(inf["collected"])
@@ -64,9 +57,9 @@ def _collect_one(rt, inf: dict) -> list:
 
 
 def _persist_inflight(rt, inf: dict) -> None:
-    p = _p(rt.root, paths.inflight_file(rt.profile_name, inf["store"]))
-    if p.exists():                              # 被 abandon 拿掉的不復活
-        fs.atomic_write_json(p, inf)
+    key = paths.inflight_file(rt.profile_name, inf["store"])
+    if rt.depot.exists(key):                    # 被 abandon 拿掉的不復活
+        rt.depot.put_json(key, inf)
 
 
 def _to_record(rt, inf: dict, rid: str, res: dict, patterns: dict):
@@ -107,8 +100,8 @@ def _finalize(rt, inf: dict, collected: set) -> None:
     store = inf["store"]
     if not set(inf["ids"]) <= collected:
         return                                  # worker 標 done 但檔還沒讀齊（下個 tick 再收）
-    n_done, n_error = _counts(Batch(rt.root, store))
-    fs.release(_p(rt.root, paths.inflight_file(rt.profile_name, store)))
+    n_done, n_error = _counts(Batch(rt.depot, store))
+    rt.depot.delete(paths.inflight_file(rt.profile_name, store))
     rt.event("batch_done", store=store, n_done=n_done, n_error=n_error)
     total = n_done + n_error
     if inf["kind"] == KIND_SAMPLE and total:
@@ -121,14 +114,13 @@ def _finalize(rt, inf: dict, collected: set) -> None:
 def abandon(rt, store: str, *, by: str) -> dict:
     """人宣告放棄一批（fail 沒人接、或不想再等）：殘留結果（含 error）收進 db、移除 inflight、佇列標 done（別台不再接管）。
     有新鮮 claim（有人正在跑）→ 拒。"""
-    p = _p(rt.root, paths.inflight_file(rt.profile_name, store))
-    inf = fs.read_json(p, default=None)
+    key = paths.inflight_file(rt.profile_name, store)
+    inf = rt.depot.get_json(key)
     if inf is None:
         raise ValueError(f"{store} 不在 {rt.profile_name} 的 inflight")
-    claim = _p(rt.root, paths.claim_file(store))
-    if rt.queue.state(store) == "claimed" and not fs.is_stale(claim, DEFAULT_STALE_S):
+    if rt.queue.state(store) == "claimed" and not rt.depot.is_stale(paths.claim_file(store), DEFAULT_STALE_S):
         raise ValueError(f"{store} 有新鮮 claim（{rt.queue.claim_owner(store)} 正在跑）——先 stop 那台")
-    batch = Batch(rt.root, store)
+    batch = Batch(rt.depot, store)
     collected = set(inf["collected"])
     results = batch.results(known_ids=collected)
     patterns = batch.patterns() if results else {}
@@ -137,7 +129,7 @@ def abandon(rt, store: str, *, by: str) -> dict:
         collected.add(rid)
         if rec is not None and rt.db.add(rec):
             rt.event("record_added", id=rid, store=store, score=rec.score, kind=rec.kind)
-    fs.release(p)
+    rt.depot.delete(key)
     n_done, n_error = _counts(batch)
     rt.queue.mark_done(store, f"abandon:{by}", n_done=n_done, n_error=n_error,
                        error_ids=sorted(i for i, r in batch.results().items() if r.get("status") != STATUS_DONE))

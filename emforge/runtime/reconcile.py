@@ -3,14 +3,7 @@
 #! 回歸 I-14（2026-07-13）：在未落地的狀態上又疊了三層工作。不一致就停下印差異，不繼續。
 只看本 profile、origin=runtime 的 job；別的實例、cli:smoke 之類不歸這個 runtime 管。
 """
-from pathlib import Path
-
 from .. import paths
-
-
-def _p(root, key: str) -> Path:
-    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
-    return Path(root) / key
 
 
 def reconcile(rt) -> list:
@@ -21,7 +14,7 @@ def reconcile(rt) -> list:
     for store in sorted(inflight):
         if store not in jobs:
             problems.append(f"inflight_without_job: {store}")
-        if not (_p(rt.root, paths.batch_manifest(store)).exists() and _p(rt.root, paths.batch_patterns(store)).exists()):
+        if not (rt.depot.exists(paths.batch_manifest(store)) and rt.depot.exists(paths.batch_patterns(store))):
             problems.append(f"inflight_without_batch: {store}")
     for store, job in sorted(jobs.items()):
         if job.sim_profile != rt.profile_name or job.origin != "runtime" or store in inflight:

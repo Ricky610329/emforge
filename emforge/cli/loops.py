@@ -3,12 +3,18 @@ from .. import strategy
 from ..netid import local_tag
 from ..runtime.core import Runtime, RuntimeLocked
 from ..worker import worker_loop
-from .base import EXIT_LOCKED, add_root, err, root_of
+from .base import EXIT_LOCKED, add_root, depot_of, err, root_of
 
 
 def cmd_run(args) -> int:
-    propose_fn = strategy.propose_in_process if args.in_process else None
-    rt = Runtime(root_of(args), args.profile, propose_fn=propose_fn)
+    root = root_of(args)
+    depot = depot_of(args, root)
+    in_process = args.in_process
+    if depot.spec.startswith("memory://") and not in_process:
+        print(f"depot {depot.spec} 只存在本行程：策略改 in-process 跑（子行程看不到 memory://）", flush=True)
+        in_process = True
+    propose_fn = strategy.propose_in_process if in_process else None
+    rt = Runtime(root, args.profile, depot=depot, propose_fn=propose_fn)
     try:
         return rt.run(once=args.once)
     except RuntimeLocked as e:
@@ -26,8 +32,9 @@ def _add_run(sub) -> None:
 
 
 def cmd_worker(args) -> int:
-    return worker_loop(root_of(args), args.machine_tag or local_tag(), poll_s=args.poll_s, once=args.once,
-                       work_root=args.work_root, background_prio=args.bg_prio, max_fail=args.max_fail,
+    root = root_of(args)
+    return worker_loop(root, args.machine_tag or local_tag(), depot=depot_of(args, root), poll_s=args.poll_s,
+                       once=args.once, work_root=args.work_root, background_prio=args.bg_prio, max_fail=args.max_fail,
                        cooldown_s=args.cooldown_s, max_blowout=args.max_blowout, retry_passes=args.retry_passes)
 
 

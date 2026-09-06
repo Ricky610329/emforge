@@ -17,11 +17,7 @@ from .. import fs, model, paths, specs
 from .. import profiles as core
 from ..adapters.antenna import profiles as aprof
 from ..db import Database
-
-
-def _p(root, key: str) -> Path:
-    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
-    return Path(root) / key
+from ..depot import open_depot
 
 CONTROL_KEYS = {"timeout", "keep_project"}          # 舊白名單裡不進模擬器的鍵，不影響映射
 REPEAT_KINDS = {"repeat", "notarize"}
@@ -217,10 +213,10 @@ def _signature(old: Path, store: str) -> dict:
     return {"results_mtime": fs.mtime(old / store / "results.json"), "n_pt": len(list((old / store).glob("*.pt")))}
 
 
-def _import_store(old: Path, out_root: Path, db: Database, rep: StoreReport, resolver: dict, opts: _Opts) -> None:
+def _import_store(old: Path, db: Database, rep: StoreReport, resolver: dict, opts: _Opts) -> None:
     prof = core.get_profile(rep.profile)
-    imported_path = _p(out_root, paths.db_imported(prof.name))
-    imported = fs.read_json(imported_path, default={})
+    imported_key = paths.db_imported(prof.name)
+    imported = db.depot.get_json(imported_key) or {}
     sig = _signature(old, rep.store)
     rep.n_pt = sig["n_pt"]
     prev = imported.get(rep.store)
@@ -236,7 +232,7 @@ def _import_store(old: Path, out_root: Path, db: Database, rep: StoreReport, res
             rep.n_records += 1
     imported[rep.store] = {**sig, "n_records": rep.n_records, "n_errors": rep.n_errors, "n_join_failed": rep.n_join_failed,
                            "n_verify_fail": rep.n_verify_fail, "imported_at": model.now_iso()}
-    fs.atomic_write_json(imported_path, imported)
+    db.depot.put_json(imported_key, imported)
 
 
 def _harvest_records(old: Path, rep: StoreReport, prof) -> list:
@@ -282,11 +278,12 @@ def _manifest_records(old: Path, rep: StoreReport, prof, man: list, resolver: di
 
 
 # ── 入口 ────────────────────────────────────────────────────────────────────
-def import_legacy(old_root, out_root, *, stores: list, profile: str = "auto", overrides: dict | None = None,
+def import_legacy(old_root, out_depot, *, stores: list, profile: str = "auto", overrides: dict | None = None,
                   include_errors: bool = False, verify: bool = False, dry_run: bool = False, force: bool = False,
                   no_rad: bool = False, out=print) -> tuple:
-    """回 (reports, rc)：rc 0；有 verify 不符 → 2。第一遍算映射與親代解析表，第二遍匯入。"""
-    old, out_root = Path(old_root), Path(out_root)
+    """回 (reports, rc)：rc 0；有 verify 不符 → 2。第一遍算映射與親代解析表，第二遍匯入。
+    `old_root`＝舊 NAS 樹（本機路徑、只讀）；`out_depot`＝emforge 共享狀態（Depot／spec／路徑皆可）。"""
+    old, depot = Path(old_root), open_depot(out_depot)
     aprof.register_all()
     opts = _Opts(include_errors, verify, dry_run, force, no_rad)
     plan, legacy_ids = [], {}
@@ -305,13 +302,13 @@ def import_legacy(old_root, out_root, *, stores: list, profile: str = "auto", ov
             if bits is not None:
                 legacy_ids.setdefault(m["id"], set()).add(model.record_id(bits, prof_name))
     resolver = {lid: next(iter(rids)) for lid, rids in legacy_ids.items() if len(rids) == 1}
-    db = Database(out_root)
+    db = Database(depot)
     rc = 0
     for rep in plan:
         if rep.profile is None:
             out(f"✗ {rep.store}: {rep.reason}")
             continue
-        _import_store(old, out_root, db, rep, resolver, opts)
+        _import_store(old, db, rep, resolver, opts)
         if rep.n_verify_fail:
             rc = 2
         flag = "skip" if rep.skipped else ("dry" if dry_run else "ok")

@@ -58,7 +58,7 @@ def _propose(rt, sc, seed: int, tick: int):
     timeout_s = sc.propose_timeout_s or rt.config.runtime.propose_timeout_s
     try:
         return rt._propose(rt.root, rt.profile, sc.name, budget=sc.batch, seed=seed, tick=tick, params=sc.params,
-                           timeout_s=timeout_s)
+                           timeout_s=timeout_s, depot=rt.depot)
     except strategy.StrategyTimeout as e:
         rt.event("strategy_timeout", name=sc.name, tick=tick, timeout_s=timeout_s)
         _failed(rt, sc, f"StrategyTimeout: {e}")

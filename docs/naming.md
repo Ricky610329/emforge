@@ -9,14 +9,15 @@
 |---|---|---|
 | 模組 | `snake_case` 單數名詞、扁平；檔名說出它做什麼 | `db.py`, `fs.py`, `worker/gate.py`, `worker/fuse.py` |
 | **禁用檔名** | `utils` `util` `misc` `helpers` `common` `tools` `stuff` `dedust` | — |
-| 類別 | `CapWords`；契約型別名照架構文件 | `Profile` `Spec` `Proposal` `Context` `Record` `Job` `Database` `View` `Ledger` `Pending` `Queue` `Runtime` `SimResult` |
+| 類別 | `CapWords`；契約型別名照架構文件 | `Profile` `Spec` `Proposal` `Context` `Record` `Job` `Database` `View` `Ledger` `Pending` `Queue` `Runtime` `SimResult`；後端 `Depot` `FileDepot` `MemoryDepot`（不叫 Store：`store` 已是「一批」的名字） |
 | 假件 | `Fake*`（不叫 `Mock*`），住 `emforge/testing.py` | `FakeSimulator` |
 | 函式 | 動詞開頭 `snake_case`；判斷式 `is_`/`has_`；私有 `_` 前綴 | `record_id()`, `try_claim()`, `is_stale()` |
 | 常數 | `UPPER_SNAKE`；字串值本身小寫 snake | `STATUS_DONE = "done"`, `KIND_REPEAT = "repeat"`, `ARM_BLIND = "blind"` |
 | 例外 | `CapWords` 名詞結尾，不加 `Exception`/`Error` 後綴 | `LockTimeout` `GeomVerMismatch` `StrategyFailure` `StrategyTimeout` `AdapterFailure` `StoreExists` `CrossProfileRefused` `AntennaUnavailable`；`ProposalError`（← 唯一例外：與 ValueError 對稱） |
 | CLI 子命令 ↔ 函式 | kebab-case ↔ `cmd_<snake>` | `import-legacy` ↔ `cmd_import_legacy` |
 | CLI 旗標 ↔ 屬性 | kebab ↔ `args.<snake>` | `--max-inflight` ↔ `args.max_inflight` |
-| 環境變數 | `EMFORGE_` 前綴 | `EMFORGE_ROOT` `EMFORGE_ANTENNA_REPO` `EMFORGE_MACHINE` `EMFORGE_WORK` |
+| 環境變數 | `EMFORGE_` 前綴 | `EMFORGE_ROOT`（本機程式碼／設定根）`EMFORGE_DEPOT`（共享狀態後端 spec：`file://…`／`memory://…`）`EMFORGE_ANTENNA_REPO` `EMFORGE_MACHINE` `EMFORGE_WORK` |
+| Depot key | POSIX 相對字串、只能來自 `paths.py`；前綴以 `/` 結尾；末段 `.` 開頭或含 `.broken.`＝後端內部、不列 | `db/fake_f1/_index.jsonl`, `queue/state/`（前綴） |
 | 單位 | 後綴 `_s`／`_min`；無單位的量不加 | `timeout_s`, `stale_s`, `noise_floor` |
 | 時間戳 | 欄位名 `at`，ISO 8601 本地時間 `YYYY-MM-DDTHH:MM:SS` | `"at": "2026-09-01T14:03:22"` |
 | JSON 鍵 | 小寫 snake，**＝dataclass 欄位名**（跨邊界不改名） | `sim_profile` `profile_hash` `worker_ver` `time_s` |
@@ -42,7 +43,10 @@
 | profile_hash | `sha1(canonical_json([simulator, geom_ver, kwargs, measure]))[:12]` | |
 | 事件 | `<主詞>_<動詞或狀態>` 小寫 snake；白名單在 `events.py` | `batch_dispatched`, `strategy_paused`, `profile_tamper` |
 
-## 磁碟佈局（`EMFORGE_ROOT` 下；每一項都有 `paths.py` 的函式）
+## Depot key 佈局（`paths.py` 的 key；`FileDepot(root)` 把它貼在 `EMFORGE_ROOT` 下＝下面這棵樹）
+
+`paths.py` 分三節：**key 函式**（回字串，如 `record_file(profile, id, store)`）、**前綴函式**（回尾 `/`，只給 `list`／`newest`／`ensure_prefixes`）、
+**本機路徑**（吃 `root` 回 `Path`：`registry_py`、`user_strategies_dir`、`strategy_workdir`）。協調狀態只經 `Depot`（doc／log／lease／列舉四種語義，見 `implementation.md` §3）。
 
 ```
 <root>/
@@ -59,6 +63,7 @@
 ```
 
 - `_` 前綴的檔＝可重建快取（`_index.jsonl`、`_imported.json`）。
+- `registry.py`、`strategies/`、`runtime_state/<p>/strategies/`（策略 workdir）是**本機路徑**，不經 Depot；其餘全部是 Depot key。
 - worker 本機工作目錄：`<EMFORGE_WORK>/<store>/`，啟動時整個清。
 
 ## 測試

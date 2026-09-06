@@ -1,6 +1,7 @@
-"""emforge/doctor.py — 機器體檢：版本、根目錄可寫與 O_EXCL、系統碟空間、HFSS 行程、舊 repo 綁定。
+"""emforge/doctor.py — 機器體檢：版本、本機 root 可寫、`Depot.selfcheck`（可寫／O_EXCL／時鐘偏移）、系統碟空間、HFSS 行程、舊 repo 綁定。
 
 正式機部署腳本 `pull → doctor → worker` 綁在一起（I-10：只 pull 不重啟）。回非零就不准起 worker。
+這個檔刻意留在本機層：C 槽、ansysedt 行程、root 探針都是這台機器的事，不是共享狀態。
 """
 import os
 import platform
@@ -47,8 +48,8 @@ def _free_gb(path: Path) -> float:
     return shutil.disk_usage(p).free / 1e9
 
 
-def run(root, *, hfss: bool = False, out=print) -> int:
-    """印體檢表；回 0 可起 worker，4 有阻擋條件。"""
+def run(root, *, depot=None, hfss: bool = False, out=print) -> int:
+    """印體檢表；回 0 可起 worker，4 有阻擋條件。`depot` 給就多印 `selfcheck()`（時鐘偏移＝阻擋：租約全靠它）。"""
     rc = 0
     out(f"emforge     {_version.describe()}")
     out(f"python      {sys.version.split()[0]}  {sys.executable}")
@@ -58,6 +59,11 @@ def run(root, *, hfss: bool = False, out=print) -> int:
     out(f"root 探針   {msg}")
     if not ok:
         rc = 4
+    if depot is not None:
+        problems = depot.selfcheck()
+        out(f"depot       {depot.spec}  " + ("OK" if not problems else "✗ " + "；".join(problems)))
+        if problems:
+            rc = 4
     work = default_work_root()
     free = _free_gb(work)
     flag = "" if free >= WARN_FREE_GB else ("  ⚠ 低於 20 GB" if free >= MIN_FREE_GB else "  ✗ 低於 5 GB，拒起（I-1）")

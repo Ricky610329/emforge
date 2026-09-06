@@ -1,7 +1,7 @@
 # 實作文檔（依程式碼寫；code 與本文不一致時以 code 與 tests/ 為準）
 
 > 讀者：要動手改／接手的人。設計的「為什麼」在 `architecture.md`；本文只講「現在是怎麼做的」。
-> 版本：emforge 0.1.0，274 條測試全綠（2026-09-01）。事故編號 `I-N` 見 `incidents.md`。
+> 版本：emforge 0.1.0，274 條測試全綠（2026-09-01）；M12（2026-09-06）基礎設施解耦後 ~400 條。事故編號 `I-N` 見 `incidents.md`。
 
 ---
 
@@ -26,15 +26,21 @@
 emforge/
   __init__.py     __version__；不 import 子模組
   _version.py     describe() → "emforge=<sha7>[+dirty]"（worker_ver、runtime_ver 的成分）
-  paths.py        磁碟命名唯一真相源（所有檔名／目錄名／store 名／保留字／is_valid_name）
-  fs.py           協調原語：atomic_write_*、read_json、append_jsonl（單寫者）、try_claim/read_claim/release、is_stale、Lock、sweep_dirs
-  events.py       EVENTS 白名單 ＋ emit(path, event, /, **fields)
+  paths.py        命名唯一真相源：共享狀態回 **Depot key**（POSIX 相對字串／尾 `/` 前綴）；本機程式碼路徑（registry_py／
+                  user_strategies_dir／strategy_workdir）回 Path；store 名／保留字／is_valid_name
+  depot/          **Depot 介面**（M12）：base.py（doc／log／lease／列舉四種語義＋衍生 put_json／get_json／require_*／newest／
+                  is_stale／lock）、file.py（FileDepot：key→root/key，逐位元＝今天的佈局）、memory.py（MemoryDepot：測試／單行程）、
+                  uri.py（open_depot("file://…"|"memory://…")）。契約測試 tests/depot/test_contract.py 對每個後端同套跑
+  fs.py           FileDepot 的檔案系統原語（atomic_write_*、read_bytes/read_json、try_claim/read_claim/release、mtime、append_jsonl）
+                  ＋ sweep_dirs（本機工作目錄）。協調狀態的呼叫端**不直接用**；鎖＝Depot.lock（fs.Lock 已退場）
+  events.py       EVENTS 白名單 ＋ emit(depot, key, event, /, **fields)
   model.py        契約 dataclass：Profile／Spec／Proposal／Context／Record／Job／SimResult／Simulator；record_id；pack_bits
   db.py           Database（一筆一檔 .npz、_index.jsonl 增量、寫綁 profile）＋ View（唯讀）
   specs.py        measure／spec 註冊表（append-only）；measure()／score()
   profiles.py     profile 註冊表；load_simulator_class／check_geom_ver／check_labels／make_simulator／is_retired／load_user_registry
   strategy.py     strategies.yaml、resolve／load／check_compatible、validate_proposals、make_context、propose_in_process／in_subprocess
-  queue.py        Queue：jobs.json 持鎖、pick（認領／接管）、mark_done／mark_fail／requeue／release、watch、STOP
+  queue.py        Queue(depot)：jobs.json 持 Depot.lock、pick（租約 claim／接管：break_if_stale 沒破到就讓、.fail 用 delete() 仲裁）、
+                  mark_done／mark_fail／requeue／release(store, tag)（只放自己的）、watch、STOP（空 doc）
   batches.py      Batch：manifest.json／patterns.npz／results/<id>.json
   ledger.py       Ledger（checksum；promote 唯一寫路徑）、Pending、rescore
   report.py       每策略報表、p_beats_blind、K_MIN 閘、跨 profile 拒、worker_ver 警告
@@ -49,37 +55,48 @@ emforge/
   cli/            __init__（接線）base setup loops show verdict control
 ```
 
-守門測試（`tests/test_smoke.py`）：核心（`adapters/`、`legacy/` 以外）零 `torch/antenna/scipy/matplotlib/pandas/win32com` import；單檔 ≤ 400 行；單函式 ≤ 60 行；禁 `utils/misc/helpers/common/dedust` 檔名。
+守門測試（`tests/test_smoke.py`）：核心（`adapters/`、`legacy/` 以外）零 `torch/antenna/scipy/matplotlib/pandas/win32com` import；單檔 ≤ 400 行；單函式 ≤ 60 行；禁 `utils/misc/helpers/common/dedust` 檔名；
+**Depot 守門**：核心每個模組必須在 `DEPOT_ONLY`（不 import pathlib／shutil／glob／emforge.fs、不 os.path／os.replace…、不 open(）／`DEPOT_ONLY_PARTIAL`（可用本機路徑，附理由）／`LOCAL_LAYER`（後端本體與本機層，附理由）三張清單之一。
 
-## 3. 磁碟佈局與檔案格式
+**兩個根**（M12）：`--root`／`EMFORGE_ROOT`＝本機程式碼／設定根（registry.py、strategies/、策略 workdir、worker 工作目錄）；
+`--depot`／`EMFORGE_DEPOT`＝共享協調狀態後端 spec（`file://<path>`／`memory://<name>`；未來 `s3://`、`sql://`），不給＝`FileDepot(root)`＝下面這棵樹、一個 byte 都不差。
+`Runtime(root, profile, *, depot=None)`、`worker_loop(root, tag, *, depot=None)`、`Queue(depot)`、`Database(depot)`、`Batch(depot, store)`、`Ledger(depot, p, spec)` 都吃 `Depot | str | Path`。
+
+## 3. 磁碟佈局與檔案格式（＝`FileDepot` 的 key 佈局）
+
+每個 key 的**語義**（doc＝整份原子替換／log＝單寫者 append／lease＝互斥認領＋心跳＋過期破除／marker＝存在即真／local＝本機路徑、不經 Depot）與**寫者**標在右欄。
 
 ```
 <root>/                                    EMFORGE_ROOT（NAS）；測試永不碰，用 tmp_path
-├── registry.py                            使用者註冊表；runtime 與 worker 啟動都 runpy 它（雙邊同源）
-├── strategies/<name>.py                   使用者策略（優先於內建）
-├── db/<profile>/<id>-<store>.npz          Record：bits(packbits u8) shape response(f32 或空) has_response meta(json 字串)
-├── db/<profile>/_index.jsonl              一行一檔：{stem, store, worker_ver, id, sim_profile, status, score, strategy, arm, parent, tick, kind}
-├── db/<profile>/RETIRED                   retire 標記 {by, at}
-├── db/<profile>/_imported.json            legacy 匯入簽名 {store: {results_mtime, n_pt, n_records, …}}
-├── ledger/<profile>/<spec>.json           {profile, spec, best:{id,score,at,by,note,force}|null, history:[…], _checksum}
-├── queue/jobs.json  jobs.lock             [Job…]；讀改寫全程 Lock
-├── queue/state/<store>.claim|.done|.fail  claim {machine, at, prior_fail}；done {machine, at, n_done, n_error, error_ids}；fail {machines, last, at}
-├── queue/STOP  queue/STOP.<tag>           worker 收工（job 之間生效）
-├── queue/log/<tag>.jsonl                  各 worker 單寫者事件
-├── batches/<store>/manifest.json          {store, sim_profile, profile_hash, strategy, tick, seed, prio, kind, items:[{id,parent,arm,note}]}
-├── batches/<store>/patterns.npz           ids(<U16) packed(n, ceil(HW/8)) shape
-├── batches/<store>/results/<id>.json      {id, status, response, time_s, extra, machine, worker_ver, profile_hash, at, attempts} | {…, status:"error", error}
+├── registry.py                            local  使用者註冊表；runtime 與 worker 啟動都 runpy 它（雙邊同源）
+├── strategies/<name>.py                   local  使用者策略（優先於內建）
+├── db/<profile>/<id>-<store>.npz          doc    runtime／匯入器  Record：bits(packbits u8) shape response(f32 或空) has_response meta(json 字串)；永不覆寫
+├── db/<profile>/_index.jsonl              log    同上（一 profile 一寫者）  一行一檔：{stem, store, worker_ver, id, sim_profile, status, score, strategy, arm, parent, tick, kind}；refresh 壓實用 rewrite_log
+├── db/<profile>/RETIRED                   marker CLI retire  {by, at}
+├── db/<profile>/_imported.json            doc    匯入器  legacy 匯入簽名 {store: {results_mtime, n_pt, n_records, …}}
+├── ledger/<profile>/<spec>.json           doc    CLI promote／rescore  {profile, spec, best:{id,score,at,by,note,force}|null, history:[…], _checksum}
+├── queue/jobs.json                        doc    任何加 job 者，全程持 jobs.lock  [Job…]
+├── queue/jobs.lock                        lease  Depot.lock（owner=host:pid；stale 180 s 破）
+├── queue/state/<store>.claim              lease  worker  {owner, at, prior_fail}；心跳＝每筆 touch；壞（無主 >60 s）／陳（老且批無進度）可接管
+├── queue/state/<store>.done|.fail         doc    worker  done {machine, at, n_done, n_error, error_ids}；fail {machines, last, at}（接管用 delete() 仲裁）
+├── queue/STOP  queue/STOP.<tag>           marker CLI  worker 收工（job 之間生效）；空 doc
+├── queue/log/<tag>.jsonl                  log    該台 worker  單寫者事件
+├── batches/<store>/manifest.json          doc    runtime  {store, sim_profile, profile_hash, strategy, tick, seed, prio, kind, items:[{id,parent,arm,note}]}；patterns 先、manifest 最後
+├── batches/<store>/patterns.npz           doc    runtime  ids(<U16) packed(n, ceil(HW/8)) shape
+├── batches/<store>/results/<id>.json      doc    持 claim 的 worker  {id, status, response, time_s, extra, machine, worker_ver, profile_hash, at, attempts} | {…, status:"error", error}；newest()＝進度心跳
 └── runtime_state/<profile>/
-    ├── lock                               單例鎖（心跳＝每 tick touch；stale = max(600 s, 5×tick_s)）
-    ├── strategies.yaml                    見 §5；mtime 變才重讀；無效沿用上次
-    ├── state.json                         {tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{id:{stores,tick,score}}, seed_base}
-    ├── status.json                        每 tick 導出（人讀）
-    ├── events.jsonl  pending.jsonl        單寫者（CLI 的 promoted／retired／rescored／batch_requeued 也 append，低頻）
-    ├── control.json                       CLI → runtime（resume）；tick 開頭消費並刪
-    ├── STOP                               runtime 收工（tick 之間）
-    ├── inflight/<store>.json              {store, strategy, tick, seed, kind, prio, ids, items:{id:{parent,arm,note}}, collected, at}
-    └── strategies/<name>/                 策略 workdir（runtime 永不讀）；_proposals.npz 是子行程交接檔
+    ├── lock                               lease  該 profile 的 runtime  {owner=tag:pid:rand, pid, machine, at}；背景 30 s touch；stale = max(600 s, 5×tick_s)；release 只刪自己的
+    ├── strategies.yaml                    doc    人／init  見 §5；**內容 sha1** 變才重讀（不看 mtime）；無效沿用上次
+    ├── state.json                         doc    runtime  {tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{id:{stores,tick,score}}, seed_base}
+    ├── status.json                        doc    runtime  每 tick 導出（人讀）
+    ├── events.jsonl  pending.jsonl        log    runtime（CLI 的 promoted／retired／rescored／batch_requeued 也 append，低頻例外 §12-7）
+    ├── control.json                       doc    CLI → runtime（resume）；tick 開頭消費並 delete
+    ├── STOP                               marker CLI  runtime 收工（tick 之間）；空 doc
+    ├── inflight/<store>.json              doc    runtime（abandon 可刪）  {store, strategy, tick, seed, kind, prio, ids, items:{id:{parent,arm,note}}, collected, at}；list 到但 get 回 None 就跳過
+    └── strategies/<name>/                 local  策略 workdir（runtime 永不讀）；_proposals.npz 是同機子行程交接檔
 ```
+
+`FileDepot` 之外的檔名：`.<name>.<pid>.<rand>.tmp`（原子寫入中）、`.selfcheck.*`（doctor 探針）、`<name>.broken.<pid>.<rand>`（破鎖證據）——都是後端內部，`list` 不列。
 
 Record 檔名 `<id>-<store>.npz`，id＝`sha1(packbits(bits)+sim_profile)[:16]`；同 id 不同 store（公證重測）是不同檔；同名永不覆寫（`Database.add` 回 False）。
 
@@ -105,13 +122,13 @@ measure fn: fn(response, labels, targets) -> dict[str, number]；targets 由註�
 
 ```
 state.tick += 1 → save_state     #! tick 號一加就落地：中途死掉重啟不重播同號（review-3）
-→ heartbeat（touch lock）→ apply_control（control.json：resume）→ reload_config（yaml mtime）
+→ heartbeat（touch lock；鎖被破後 touch 是 no-op、不重建）→ apply_control（control.json：resume）→ reload_config（yaml **內容 sha1**）
 → new = collect()                # 增量收結果、量測、評分、入庫、收尾 inflight、錯誤率
 → notarize_step(new) → save_state   # 完成中的公證 → pending；新破榜候選 → 重測 ×repeat_n；登記後立刻落地
 → fleet_quiet()? 事件 fleet_quiet：schedule()   # 有 inflight 且 quiet_s 內整個機隊沒產出 → 只等
 → save_state → write_status
 ```
-`run(once)`：acquire_lock → 背景心跳執行緒（每 `heartbeat_s`=30 s touch 鎖；一個 tick 超過 stale 門檻也不會被第二個實例破鎖，review-7）
+`run(once)`：acquire_lock（`Depot.claim`；stale → `break_if_stale`，沒破到＝別人先破，重試 claim 決勝負）→ 背景心跳執行緒（每 `heartbeat_s`=30 s touch 鎖；一個 tick 超過 stale 門檻也不會被第二個實例破鎖，review-7）
 → runtime_start → `db.refresh`（索引 append 前死掉的檔補回去，事件 index_repaired）→ `reconcile()` 不一致 → 事件 reconcile_mismatch、**return 2**（I-14）
 → 迴圈：STOP 檔 → runtime_stop；tick；sleep(tick_s)。
 `Runtime(readonly=True)`（CLI smoke／abandon 用）：不拿鎖、`save_state` 拋——別用舊快照覆寫跑著的 runtime（review-4）。
@@ -167,7 +184,7 @@ strategies:
 
 ## 6. worker
 
-`worker_loop`：載入 registry.py → 印 worker_ver → 清 `<EMFORGE_WORK>/`（I-1）→ worker_start → 迴圈：STOP（job 之間）→ `Queue.pick(tag)` → `gate` → `run_batch` → mark_done／mark_fail。守門不過＝那批 `.fail`、worker 繼續；`once=True` 跑完第一個真正執行的 job 就回。
+`worker_loop(root, tag, *, depot=None)`：載入本機 registry.py → 印 worker_ver ＋ depot spec → 清 `<EMFORGE_WORK>/`（I-1）→ worker_start → 迴圈：STOP（job 之間）→ `Queue(depot).pick(tag)` → `gate(job, depot)` → `run_batch` → mark_done／mark_fail。守門不過＝那批 `.fail`、worker 繼續；`once=True` 跑完第一個真正執行的 job 就回。
 **故障邊界**（review-6）：gate 之後的任何例外（FsBusy／PermissionError／FileNotFoundError…）→ 那批 `.fail` 記 `worker_exception:…`、claim 釋放、工作目錄清掉、**worker 繼續**下一個 job；`fs.release` 對 sharing violation 退避重試；接管 `.fail` 時檔已被別台搶走＝輸了競賽、跳過。
 
 `gate`（順序固定、不建構不 open）：profile 註冊且未退役 → job.profile_hash == 註冊表 → 載入類別、geom_ver（模擬器宣告 None＝單邊跳過）→ labels。
@@ -177,7 +194,9 @@ strategies:
 天線 adapter：看門狗 `kill()` 過的模擬器在 except 路徑**不**呼叫舊 `end()`（舊 end 內部會自己 reopen、無守門會卡，review-9）；交給 `_restart`。
 worker **不**量測、不評分、不寫 db。
 
-`Queue.pick`：prio 升冪；done 跳過；`.fail` 名單含我 → 跳過，否則接管（刪 fail、清殘留 claim、prior_fail 帶進新 claim）；釘機 tag 完全相等；claim 存在：無主（空／半截）且 >60 s → 清；自己的 → 續跑；別人的且（批有進度 <stale_s 或 claim 新鮮）→ 跳過，否則接管；`try_claim`。
+`Queue.pick`（M12c 順序）：prio 升冪；done／釘機不符跳過；`.fail` 名單含我 → 跳過；claim 判定：自己的 → 續跑；別人的且（批有進度 <stale_s 或 claim 新鮮）→ 讓；無主（空／半截）未過 60 s → 讓；
+→ 有 `.fail` 就 `delete()`（回 False＝別台先接走 → 讓）→ 陳 claim `break_if_stale`（回 False＝別台先破 → 讓）→ `claim`（O_EXCL 仲裁；prior_fail 帶進新 claim）。
+**新鮮 claim 在任何路徑都不會被動到**；破鎖不是仲裁（Windows 兩個 rename 可都成功，見 `depot/file.py`），claim 才是。
 
 ## 7. 寫一個策略
 
@@ -193,10 +212,12 @@ def propose(ctx):
 
 ## 8. CLI
 
+每個吃 `--root` 的命令也吃 `--depot <spec>`（或 `EMFORGE_DEPOT`）；不給＝`FileDepot(root)`。`run --depot memory://…` 自動改 in-process（子行程看不到）。
+
 | 命令 | 做什麼 | exit |
 |---|---|---|
-| `init --root R [--profile P]` | 建佈局、registry.py／strategies.yaml 範本（不覆寫） | 0 |
-| `version`／`doctor --root R [--hfss]` | 版本戳／體檢（root 探針、磁碟、ansysedt） | 0；doctor 阻擋 4 |
+| `init --root R [--depot D] [--profile P]` | 佈局前綴與 strategies.yaml 範本進 depot；registry.py／strategies/ 在本機 root（不覆寫） | 0 |
+| `version`／`doctor --root R [--depot D] [--hfss]` | 版本戳／體檢（root 探針、`depot.selfcheck()`：可寫／O_EXCL／時鐘偏移、磁碟、ansysedt） | 0；doctor 阻擋 4 |
 | `check-strategy --root R --profile P --strategy S [--budget --seed --tick --params]` | 本行程試跑 propose | 0／1 |
 | `run --root R --profile P [--once] [--in-process]` | runtime 實例 | 0；對帳不符 2；鎖被占 3 |
 | `worker --root R [--machine-tag T --poll-s --once --work-root --bg-prio --max-fail --cooldown-s --max-blowout --retry-passes]` | 正式機 worker | 0 |
@@ -211,7 +232,7 @@ def propose(ctx):
 | `resume --root R --profile P [--strategy S] --by WHO` | 寫 control.json | 0 |
 | `stop --root R (--profile P | --worker [--machine-tag T]) [--clear]` | STOP 檔 | 0 |
 | `smoke <id> --root R --profile P --by WHO [--machine T --n N]` | 對已量 id 派重測（切機驗同一儀器） | 0 |
-| `import-legacy --root OLD --out R --stores g1,g2 [--profile auto --map s=p --include-errors --verify --dry-run --force --no-rad]` | 舊資料匯入 | 0；verify 不符 2 |
+| `import-legacy --root OLD --out R [--depot D] --stores g1,g2 [--profile auto --map s=p --include-errors --verify --dry-run --force --no-rad]` | 舊資料匯入（舊樹＝本機路徑只讀；輸出經 depot） | 0；verify 不符 2 |
 
 任何未預期例外 → stderr `emforge: <Type>: <msg>`、exit 1。
 
@@ -271,7 +292,7 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 
 ## 12. 已知失效模式（給獨立稽核的 brief 用）
 
-1. stale-claim 接管與 fleet_quiet 都靠 **mtime**：各機時鐘不同步會誤判（doctor 只報不修）。
+1. stale-claim 接管、runtime 鎖、fleet_quiet 都靠 **`modified_at`（伺服器側）vs 本機 `now()`**：各機時鐘不同步會誤判——`doctor` 的 `depot.selfcheck()` 量偏移 >30 s 就阻擋，不修正。
 2. `noise_floor／k_min／quiet_s／max_error_rate／strategy_error_limit` 全是佔位數字，沒有任何一個經過本域以外的校準。
 3. 冷啟動：資料庫空、榜空 → 每個「新最好」都觸發公證重測，前幾 tick 重測比例偏高（`notarize_min_score` 尚未實作）。
 4. single 的 geom_ver 是**單邊**宣告（舊 single_port.py 無 GEOM_VER，Ricky 決定不動舊 repo）：single 幾何若換代不會被抓。
@@ -286,8 +307,11 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 13. 策略層（N 個策略並行）沒有實測資料：所有「多樣性從策略池湧現」都是推論（architecture.md §12）。
 14. `fail` 非終態的代價：一批被所有機器判死後會**永遠 inflight**（策略被 max_inflight 卡住、notarize 除外），直到人 `abandon`——status.json 的 `queue_state=fail` 是唯一提示，沒有自動逾時。
 15. `abandon` 與跑著的 runtime 的 collect 有一個很小的競賽窗（runtime 記憶體裡的 inflight 在 abandon 刪檔後不會再寫回，但同一 tick 內兩邊可能各 add 同一筆——db.add 冪等，只是事件可能各發一次）。
-16. 心跳執行緒與主迴圈共用 `fs.touch`；NAS 短暫斷線時心跳靜默失敗（吞例外），鎖可能在斷線超過 stale 門檻時被第二個實例破掉——與 review-7 前相比只是視窗變小、不是消失。
+16. 心跳執行緒與主迴圈共用 `Depot.touch`；NAS 短暫斷線時心跳靜默失敗（吞例外），鎖可能在斷線超過 stale 門檻時被第二個實例破掉——與 review-7 前相比只是視窗變小、不是消失。被破後原實例的 touch 是 no-op（不重建鎖）、release 只刪自己的，但它**還會繼續 tick** 直到自己發現（目前沒有「鎖丟了就停」的檢查）。
 17. `promote --spec` 的分數重算用 `Record.measure`（量測凍結）；spec 若換了 measure 名（＝換儀器）`rescore` 會拒，但 promote 不會——它只認 spec 名有沒有註冊。
+18. `FileDepot.break_if_stale` 不是仲裁：Windows 上兩個並發 rename 可以都成功（契約測試實抓）；破鎖後一律接 `claim`，claim 才決勝負。mtime 身分檢查把誤搬的新鎖放回去，但「放回」在第三方剛好又 claim 到的微秒窗會失敗（留 `.broken.*` 證據、回 False）。
+19. `list` 可最終一致的後端（S3）：`db.refresh` 對「列舉回空而索引非空」不壓實；`inflight()` 對「列到但讀不到」跳過；`Batch.results` 同。其餘列舉呼叫端（`report`、`profiles()`）還沒逐一審過。
+20. `memory://` depot 只存在本行程：`run` 自動 in-process；`worker --depot memory://…` 會什麼都撿不到（另一個行程的 runtime 看不見）——只給測試與單行程 demo。
 
 ## 13. 與 architecture.md 的偏差
 
@@ -306,6 +330,8 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | `deliver`／keep_project | 未實作；Job 保留 `origin`／未知欄位 | Ricky：之後實作方要模擬檔時再整理 |
 | §4「store 終態 → 移出 inflight」 | 只有 `done` 是終態；`fail` 留 inflight 等接管，人 `abandon` 才收尾 | 2026-09-05 審查 review-2：名單外的機器會接管 |
 | §4 心跳＝tick 時 touch | 背景執行緒每 30 s | review-7：一個 tick 可能超過 stale 門檻 |
+| §2／§7 假設共享檔案系統（NAS）；O_EXCL＋rename 是協調原語 | 抽成 `Depot` 介面（doc／log／lease／列舉）；`FileDepot` 逐位元＝原佈局；`--root`（本機程式碼）與 `--depot`（共享狀態）分工 | Ricky 2026-09-05：不倚賴特定渠道、支援多種部署（日月光）；「算法、基礎設施都解耦」 |
+| 破鎖＝rename 恰一人成功 | 破鎖可能多人 True、claim 仲裁 | M12a 契約測試抓到 Windows 並發 rename 可都成功 |
 
 ## 14. 未驗證與待決
 

@@ -147,6 +147,65 @@ def test_yaml_missing_at_start_raises(root):
         make_rt(root)
 
 
+# ── M12d：Depot 化 ───────────────────────────────────────────────────────────
+def test_heartbeat_after_lock_broken_does_not_recreate_lock(rt_root, rt):
+    """M12d：鎖被別人破掉（或人清掉）後，心跳不能重建一個空鎖擋人——`Depot.touch` 缺即 no-op、不建檔。"""
+    rt.acquire_lock()
+    key = paths.runtime_lock("fake_f1")
+    assert rt.depot.delete(key)
+    rt.heartbeat()
+    assert not rt.depot.exists(key), "心跳沒有重建鎖"
+    r2 = make_rt(rt_root)
+    r2.acquire_lock()                                     # 第二個實例拿得到
+    rt.release_lock()                                     # 第一個實例收工：只刪自己的（owner 不符）→ 不動 r2 的
+    assert rt.depot.owner(key)["pid"] == os.getpid() and rt.depot.exists(key), "r2 的鎖完好"
+    r2.release_lock()
+    assert not rt.depot.exists(key)
+
+
+def test_inflight_skips_doc_deleted_between_list_and_get(rt, monkeypatch):
+    """M12d：列舉可最終一致——列到了但 get 回 None（剛被 collect／abandon 拿掉）直接跳過，不塞 None 進去炸下游。"""
+    rt.acquire_lock()
+    rt.tick()
+    rt.release_lock()
+    keys = rt.depot.list(paths.inflight_dir("fake_f1"))
+    assert keys
+    real = rt.depot.get_json
+    monkeypatch.setattr(rt.depot, "get_json", lambda key: None if key == keys[0] else real(key))
+    assert len(rt.inflight()) == len(keys) - 1 and all(i is not None for i in rt.inflight())
+
+
+def test_yaml_reload_triggers_on_content_change_without_mtime(rt_root, rt):
+    """M12d：重載比內容 sha1，不看 mtime（S3 沒有可信 mtime；copy 工具也常保留舊 mtime）。
+    內容變、mtime 不動 → 重讀；mtime 動、內容不動 → 不重讀（不發第二次 config_reloaded）。"""
+    rt.acquire_lock()
+    key = paths.strategies_yaml("fake_f1")
+    m0 = rt.depot.modified_at(key)
+    rt.depot.put_bytes(key, b"profile: fake_f1\nstrategies:\n  - {name: blind, prio: 9, batch: 2}\n")
+    rt.depot.set_modified_at(key, m0)
+    rt.reload_config()
+    assert [s.name for s in rt.config.strategies] == ["blind"]
+    rt.depot.set_modified_at(key, m0 + 100)
+    rt.reload_config()
+    ev = [e["event"] for e in rt.depot.read_log(paths.events_jsonl("fake_f1"))]
+    assert ev.count("config_reloaded") == 1
+
+
+def test_runtime_on_memory_depot_keeps_disk_free_of_state(root):
+    """M12d：`Runtime(root, p, depot=MemoryDepot)`——root 只剩本機程式碼（registry.py／策略 workdir），狀態全在 depot。"""
+    from emforge import testing
+    from emforge.depot import MemoryDepot
+    from tests.runtime.conftest import YAML
+    depot = MemoryDepot()
+    testing.make_fake_root(root, depot=depot)
+    depot.put_bytes(paths.strategies_yaml("fake_f1"), YAML.encode("utf-8"))
+    r = core.Runtime(root, "fake_f1", depot=depot, sleep=lambda s: None, propose_fn=strategy.propose_in_process)
+    assert r.run(once=True) == 0
+    assert depot.get_json(paths.status_json("fake_f1"))["tick"] == 1 and depot.list(paths.queue_dir())
+    assert not (root / "db").exists() and not (root / "queue").exists() and not (root / "batches").exists()
+    assert not (root / paths.status_json("fake_f1")).exists()
+
+
 def test_quiet_fleet_waits(rt_root, rt):
     rt.acquire_lock()
     rt.tick()                                   # blind 派了一批

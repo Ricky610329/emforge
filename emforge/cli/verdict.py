@@ -1,20 +1,21 @@
 """emforge/cli/verdict.py — 人／AI 的裁決：promote（換王）／retire（凍結 profile）／rescore（換評估器建新榜）。
 
-這是**唯一**能寫榜的路徑；runtime 只寫 pending（迴圈不加冕）。
+這是**唯一**能寫榜的路徑；runtime 只寫 pending（迴圈不加冕）。榜／db／事件都經 `Depot`；registry.py 仍從本機 root 載。
 """
 from .. import events, ledger, paths, profiles, specs
 from ..db import Database
-from .base import EXIT_EXISTS, EXIT_LOCKED, EXIT_OK, EXIT_TAMPER, add_root, err, root_of
+from .base import EXIT_EXISTS, EXIT_LOCKED, EXIT_OK, EXIT_TAMPER, add_root, depot_of, err, root_of
 
 
 def cmd_promote(args) -> int:
     root = root_of(args)
+    depot = depot_of(args, root)
     profiles.load_user_registry(root)
     profile = profiles.get_profile(args.profile)
     spec = args.spec or profile.spec
     try:
-        best = ledger.Ledger(root, profile.name, spec).promote(
-            args.id, by=args.by, db=Database(root), pending=ledger.Pending(root, profile.name),
+        best = ledger.Ledger(depot, profile.name, spec).promote(
+            args.id, by=args.by, db=Database(depot), pending=ledger.Pending(depot, profile.name),
             force=args.force, note=args.note)
     except ledger.NotPending as e:
         err(str(e))
@@ -22,7 +23,7 @@ def cmd_promote(args) -> int:
     except ledger.LedgerTamper as e:
         err(str(e))
         return EXIT_TAMPER
-    events.emit(root, paths.events_jsonl(profile.name), "promoted", id=args.id, spec=spec, by=args.by, note=args.note,
+    events.emit(depot, paths.events_jsonl(profile.name), "promoted", id=args.id, spec=spec, by=args.by, note=args.note,
                 score=best["score"], force=best["force"])
     print(f"promoted {args.id} → 榜 {profile.name}/{spec} score={best['score']} by={args.by}")
     return EXIT_OK
@@ -41,10 +42,10 @@ def _add_promote(sub) -> None:
 
 
 def cmd_retire(args) -> int:
-    root = root_of(args)
-    marker = profiles.retire(root, args.profile, by=args.by)
-    events.emit(root, paths.events_jsonl(args.profile), "retired", profile=args.profile, by=args.by)
-    print(f"retired {args.profile}：拒收新工作，資料凍結保留（{marker}）")
+    depot = depot_of(args, root_of(args))
+    marker = profiles.retire(depot, args.profile, by=args.by)
+    events.emit(depot, paths.events_jsonl(args.profile), "retired", profile=args.profile, by=args.by)
+    print(f"retired {args.profile}：拒收新工作，資料凍結保留（{depot.spec}/{marker}）")
     return EXIT_OK
 
 
@@ -58,15 +59,16 @@ def _add_retire(sub) -> None:
 
 def cmd_rescore(args) -> int:
     root = root_of(args)
+    depot = depot_of(args, root)
     profiles.load_user_registry(root)
     profile = profiles.get_profile(args.profile)
     spec = specs.get_spec(args.spec)
     try:
-        out = ledger.rescore(root, profile, spec, Database(root), by=args.by, force=args.force)
+        out = ledger.rescore(depot, profile, spec, Database(depot), by=args.by, force=args.force)
     except ledger.LedgerExists as e:
         err(str(e))
         return EXIT_EXISTS
-    events.emit(root, paths.events_jsonl(profile.name), "rescored", spec=spec.name, n=out["n"], by=args.by)
+    events.emit(depot, paths.events_jsonl(profile.name), "rescored", spec=spec.name, n=out["n"], by=args.by)
     best = out["best"] or {}
     print(f"rescored {profile.name}/{spec.name}: n={out['n']} best={best.get('id')} score={best.get('score')}")
     return EXIT_OK

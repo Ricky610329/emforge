@@ -1,19 +1,17 @@
-"""emforge/cli/show.py — 唯讀：status／events／pending／jobs／watch／report。AI 層與人讀狀態的入口。"""
+"""emforge/cli/show.py — 唯讀：status／events／pending／jobs／watch／report。AI 層與人讀狀態的入口。所有狀態經 `Depot`。"""
 import json
-from pathlib import Path
 
-from .. import fs, ledger, paths, report
+from .. import ledger, paths, report
 from ..queue import Queue
-from .base import EXIT_OK, EXIT_REFUSED, add_root, err, root_of
+from .base import EXIT_OK, EXIT_REFUSED, add_root, depot_of, err, root_of
 
 
-def _p(root, key: str) -> Path:
-    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
-    return Path(root) / key
+def _depot(args):
+    return depot_of(args, root_of(args))
 
 
 def cmd_status(args) -> int:
-    st = fs.read_json(_p(root_of(args), paths.status_json(args.profile)), default=None)
+    st = _depot(args).get_json(paths.status_json(args.profile))
     print(json.dumps(st, ensure_ascii=False, indent=1) if st else f"尚無 status（profile {args.profile} 的 runtime 還沒跑過）")
     return EXIT_OK
 
@@ -26,7 +24,7 @@ def _add_status(sub) -> None:
 
 
 def cmd_events(args) -> int:
-    ev = fs.read_jsonl(_p(root_of(args), paths.events_jsonl(args.profile)))
+    ev = _depot(args).read_log(paths.events_jsonl(args.profile))
     if args.event:
         ev = [e for e in ev if e.get("event") == args.event]
     for e in ev[-args.last:] if args.last else ev:
@@ -45,7 +43,7 @@ def _add_events(sub) -> None:
 
 
 def cmd_pending(args) -> int:
-    entries = ledger.Pending(root_of(args), args.profile).list()
+    entries = ledger.Pending(_depot(args), args.profile).list()
     if not entries:
         print("（無待審）")
     for e in entries:
@@ -61,7 +59,7 @@ def _add_pending(sub) -> None:
 
 
 def cmd_jobs(args) -> int:
-    q = Queue(root_of(args))
+    q = Queue(_depot(args))
     for j in q.list():
         st = q.state(j.store)
         if st == "done" and not args.all:
@@ -82,8 +80,8 @@ def _add_jobs(sub) -> None:
 def cmd_watch(args) -> int:
     stores = [x for x in args.stores.split(",") if x]
     timeout_s = None if args.timeout_min is None else args.timeout_min * 60.0
-    return Queue(root_of(args)).watch(stores, poll_s=args.poll_s, fail_grace_s=args.fail_grace_min * 60.0,
-                                      timeout_s=timeout_s)
+    return Queue(_depot(args)).watch(stores, poll_s=args.poll_s, fail_grace_s=args.fail_grace_min * 60.0,
+                                     timeout_s=timeout_s)
 
 
 def _add_watch(sub) -> None:
@@ -98,7 +96,7 @@ def _add_watch(sub) -> None:
 
 def cmd_report(args) -> int:
     try:
-        print(report.report(root_of(args), args.profile, cross_profile=args.cross_profile, k_min=args.k_min))
+        print(report.report(_depot(args), args.profile, cross_profile=args.cross_profile, k_min=args.k_min))
     except report.CrossProfileRefused as e:
         err(str(e))
         return EXIT_REFUSED

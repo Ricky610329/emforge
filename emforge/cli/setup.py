@@ -1,12 +1,13 @@
-"""emforge/cli/setup.py — 準備與體檢：version／init／check-strategy／doctor／import-legacy。"""
+"""emforge/cli/setup.py — 準備與體檢：version／init／check-strategy／doctor／import-legacy。
+
+init 分兩邊：共享狀態（佈局前綴、strategies.yaml 範本）進 `Depot`；registry.py 與 strategies/ 是本機程式碼、留在 root。
+"""
 import json
 import os
-from pathlib import Path
 
 from .. import __version__, doctor, paths, profiles, strategy
 from .._version import describe
-from ..depot import open_depot
-from .base import EXIT_OK, add_root, root_of
+from .base import EXIT_OK, add_root, depot_of, root_of
 
 REGISTRY_TEMPLATE = '''"""<root>/registry.py — 這個根目錄的模擬庫／評估器註冊表（append-only；改內容＝換名字）。
 runtime 與 worker 啟動都會執行這個檔，所以兩邊看到同一套 profile／spec。
@@ -30,11 +31,6 @@ strategies:
 """
 
 
-def _p(root, key: str) -> Path:
-    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
-    return Path(root) / key
-
-
 def cmd_version(args) -> int:
     print(f"emforge {__version__} ({describe()})")
     return EXIT_OK
@@ -46,19 +42,23 @@ def _add_version(sub) -> None:
 
 def cmd_init(args) -> int:
     root = root_of(args)
-    open_depot(root).ensure_prefixes(paths.layout_prefixes())
+    depot = depot_of(args, root)
+    depot.ensure_prefixes(paths.layout_prefixes())
     paths.user_strategies_dir(root).mkdir(parents=True, exist_ok=True)   # 本機程式碼目錄，不經 depot
-    targets = [(paths.registry_py(root), REGISTRY_TEMPLATE)]
+    reg = paths.registry_py(root)
+    if reg.exists():
+        print(f"已存在，不覆寫：{reg}")
+    else:
+        reg.write_text(REGISTRY_TEMPLATE, encoding="utf-8")
+        print(f"建立：{reg}")
     if args.profile:
-        targets.append((_p(root, paths.strategies_yaml(args.profile)), YAML_TEMPLATE.format(profile=args.profile)))
-    for path, text in targets:
-        if path.exists():
-            print(f"已存在，不覆寫：{path}")
+        key = paths.strategies_yaml(args.profile)
+        if depot.exists(key):
+            print(f"已存在，不覆寫：{depot.spec}/{key}")
         else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-            print(f"建立：{path}")
-    print(f"root 佈局就緒：{root}")
+            depot.put_bytes(key, YAML_TEMPLATE.format(profile=args.profile).encode("utf-8"))
+            print(f"建立：{depot.spec}/{key}")
+    print(f"root 佈局就緒：{root}（depot {depot.spec}）")
     return EXIT_OK
 
 
@@ -74,7 +74,7 @@ def cmd_check_strategy(args) -> int:
     profiles.load_user_registry(root)
     profile = profiles.get_profile(args.profile)
     props = strategy.propose_in_process(root, profile, args.strategy, budget=args.budget, seed=args.seed,
-                                        tick=args.tick, params=json.loads(args.params))
+                                        tick=args.tick, params=json.loads(args.params), depot=depot_of(args, root))
     print(f"{args.strategy}: {len(props)} 筆提案（budget {args.budget}, seed {args.seed}, tick {args.tick}）")
     return EXIT_OK
 
@@ -92,7 +92,8 @@ def _add_check_strategy(sub) -> None:
 
 
 def cmd_doctor(args) -> int:
-    return doctor.run(root_of(args), hfss=args.hfss)
+    root = root_of(args)
+    return doctor.run(root, depot=depot_of(args, root), hfss=args.hfss)
 
 
 def _add_doctor(sub) -> None:
@@ -108,7 +109,8 @@ def cmd_import_legacy(args) -> int:
     if not out_root:
         raise ValueError("需要 --out 或環境變數 EMFORGE_ROOT")
     overrides = dict(kv.split("=", 1) for kv in (args.map or []))
-    _, rc = import_legacy(args.root, out_root, stores=[s for s in args.stores.split(",") if s], profile=args.profile,
+    _, rc = import_legacy(args.root, depot_of(args, out_root), stores=[s for s in args.stores.split(",") if s],
+                          profile=args.profile,
                           overrides=overrides, include_errors=args.include_errors, verify=args.verify,
                           dry_run=args.dry_run, force=args.force, no_rad=args.no_rad)
     return rc
@@ -118,6 +120,7 @@ def _add_import_legacy(sub) -> None:
     s = sub.add_parser("import-legacy", help="舊 NAS（DATASET_PATH）資料匯入 db/<profile>/（只讀舊樹；--verify 對回舊尺）")
     s.add_argument("--root", required=True, help="舊 DATASET_PATH 或本機鏡像")
     s.add_argument("--out", help="emforge 根目錄（預設 EMFORGE_ROOT）")
+    s.add_argument("--depot", help="輸出的共享狀態後端 spec（預設 EMFORGE_DEPOT，再預設＝--out）")
     s.add_argument("--stores", required=True, help="逗號分隔 glob，如 dedust_*,handoff_*,harvest_*")
     s.add_argument("--profile", default="auto", help="auto 或只匯入映射到這個 profile 的 store")
     s.add_argument("--map", action="append", help="store=profile 強制映射（可重複）")

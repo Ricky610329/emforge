@@ -5,18 +5,11 @@
 去重＝資料庫已量成功的 id ∪ 所有 inflight 的 id ∪ 批內重複；**沒有旁路參數**（D7）。
 唯一例外是 kind=repeat（公證重測：同 id 就是要再量），只有 runtime/notarize.py 會這樣呼叫。
 """
-from pathlib import Path
-
 import numpy as np
 
-from .. import fs, paths
+from .. import paths
 from ..batches import Batch
 from ..model import KIND_REPEAT, KIND_SAMPLE, KINDS, Job, now_iso, record_id
-
-
-def _p(root, key: str) -> Path:
-    """M12b 墊片：`paths` 已回 depot key，這個模組還沒遷——先貼回本機路徑。M12c／M12d 遷完刪掉。"""
-    return Path(root) / key
 
 
 class StoreExists(Exception):
@@ -33,7 +26,7 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
         raise ValueError("sample 批的 store 名由 runtime 決定；repeat 批必須指定 store")
     profile = rt.profile
     store = store or paths.store_name(profile.name, strategy_name, tick)
-    if _p(rt.root, paths.inflight_file(profile.name, store)).exists() or Batch(rt.root, store).exists():
+    if rt.depot.exists(paths.inflight_file(profile.name, store)) or Batch(rt.depot, store).exists():
         raise StoreExists(f"store {store} 已存在（inflight 或批）——tick 號重播？什麼都沒寫")
     keep, dropped = _dedup(rt, proposals, kind)
     rt.event("proposals_validated", name=strategy_name, tick=tick, n_in=len(proposals), n_dup=dropped, n_out=len(keep))
@@ -41,13 +34,13 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
         return None
     ids = [record_id(p.pattern, profile.name) for p in keep]
     items = {rid: {"parent": p.parent, "arm": p.arm, "note": dict(p.note)} for rid, p in zip(ids, keep)}
-    fs.atomic_write_json(_p(rt.root, paths.inflight_file(profile.name, store)),
-                         {"store": store, "strategy": strategy_name, "tick": tick, "seed": seed, "kind": kind,
-                          "prio": prio, "ids": ids, "items": items, "collected": [], "at": now_iso()})
+    rt.depot.put_json(paths.inflight_file(profile.name, store),
+                      {"store": store, "strategy": strategy_name, "tick": tick, "seed": seed, "kind": kind,
+                       "prio": prio, "ids": ids, "items": items, "collected": [], "at": now_iso()})
     manifest = {"store": store, "sim_profile": profile.name, "profile_hash": profile.profile_hash,
                 "strategy": strategy_name, "tick": tick, "seed": seed, "prio": prio, "kind": kind,
                 "items": [{"id": rid, **items[rid]} for rid in ids]}
-    Batch(rt.root, store).write(manifest, np.stack([p.pattern for p in keep]), ids)
+    Batch(rt.depot, store).write(manifest, np.stack([p.pattern for p in keep]), ids)
     rt.queue.add(Job(store=store, sim_profile=profile.name, profile_hash=profile.profile_hash, prio=prio,
                      n=len(ids), machine=machine, origin=origin, by=origin))
     rt.event("batch_dispatched", store=store, strategy=strategy_name, n=len(ids), prio=prio, tick=tick, seed=seed,

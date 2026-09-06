@@ -24,12 +24,40 @@ MAX_FUNCTION_LINES = 60
 #? 檔名要說出它做什麼——這幾個名字說的是「我不知道放哪」。
 BANNED_MODULE_STEMS = {"utils", "util", "misc", "helpers", "common", "dedust", "tools", "stuff"}
 
-#? 已抽象化的模組：共享狀態只准經 `Depot`（M12b）。M12c 加 queue、M12d 加 runtime／worker／cli——
-#  所以這是一張**清單**，擴充就是往這裡加一個檔名。
-DEPOT_ONLY_MODULES = ("db.py", "batches.py", "ledger.py", "events.py", "report.py", "profiles.py", "queue.py")
-#? `strategy.py` 半套：策略碼與 registry.py 要用本機路徑 importlib／runpy 載入（程式碼不抽象），
-#  但它一樣不准碰 fs 原語或自己 open(。
-DEPOT_ONLY_PARTIAL = ("strategy.py",)
+#? Depot 守門（M12）：核心每個模組都要在下面**三張清單之一**（test_every_core_module_is_classified_for_depot_gate）。
+#  DEPOT_ONLY：共享狀態只准經 `Depot`——不 import pathlib／shutil／glob／emforge.fs、不用 os.path／os.replace…、不 open(。
+#  換後端＝實作一個 `Depot`；只要有一個模組偷偷開檔，那個保證就是假的。
+DEPOT_ONLY_MODULES = (
+    "__init__.py", "__main__.py", "specs.py", "netid.py", "events.py", "profiles.py",
+    "db.py", "batches.py", "ledger.py", "queue.py", "report.py",
+    "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
+    "runtime/schedule.py",
+    "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py",
+    "cli/__init__.py", "cli/__main__.py", "cli/control.py", "cli/show.py", "cli/verdict.py", "cli/loops.py",
+    "strategies/__init__.py", "strategies/blind.py", "strategies/top_k_flip.py",
+)
+#? DEPOT_ONLY_PARTIAL：可以用本機路徑（pathlib）——但只給「程式碼／設定根」（registry.py、strategies/、策略 workdir、
+#  本機工作目錄）；一樣不准 import emforge.fs 或自己 open(。值＝為什麼需要本機路徑。
+DEPOT_ONLY_PARTIAL = {
+    "model.py": "canonical_json 的 _json_default 要認得 Path（序列化用，不碰檔）",
+    "strategy.py": "策略碼與 registry.py 用本機路徑 importlib／runpy 載入；_proposals.npz 是同機子行程交接",
+    "runtime/core.py": "root＝本機程式碼根（registry.py／策略 workdir）",
+    "worker/loop.py": "本機 registry.py 與工作目錄根",
+    "worker/guard.py": "看門狗（不碰檔）",
+    "cli/base.py": "--root 是本機路徑",
+    "cli/setup.py": "init 寫本機 registry.py／strategies/；import-legacy 的舊樹是本機路徑",
+    "testing.py": "假根建本機 registry.py",
+    "_version.py": "git describe 看本機 repo",
+}
+#? LOCAL_LAYER：本機層／後端本體，本來就認得檔案系統。值＝理由；新增模組不准隨手放這裡。
+LOCAL_LAYER = {
+    "paths.py": "磁碟名／本機路徑的唯一來源（回 key 與 Path 兩種）",
+    "fs.py": "FileDepot 的實作原語＋本機工作目錄清掃",
+    "depot/__init__.py": "後端本體", "depot/base.py": "後端本體", "depot/file.py": "後端本體",
+    "depot/memory.py": "後端本體", "depot/uri.py": "後端本體",
+    "doctor.py": "本機體檢：root 探針、C 槽、ansysedt 行程",
+    "worker/workdir.py": "本機工作目錄生命週期（I-1 是本機碟事故）",
+}
 FS_IMPORTS = {"pathlib", "shutil", "glob", "tempfile"}
 #? `os.path` 也算（getmtime／exists 都在裡面）。
 FS_OS_ATTRS = {"path", "replace", "utime", "open", "unlink", "remove", "rename", "makedirs", "scandir",
@@ -129,14 +157,25 @@ def _fs_offenders(path, *, full: bool):
 
 
 def test_coordination_modules_touch_state_only_via_depot():
-    """M12b 的紅線：已抽象化的模組不准 import pathlib／shutil／glob／emforge.fs，不准 os.path／os.replace…／open(。
-    換後端＝實作一個 `Depot`；只要有一個模組偷偷開檔，那個保證就是假的。"""
+    """M12 的紅線：DEPOT_ONLY 模組不准 import pathlib／shutil／glob／emforge.fs，不准 os.path／os.replace…／open(；
+    PARTIAL 模組可用本機路徑但不准 emforge.fs／open(。換後端＝實作一個 `Depot`；只要有一個模組偷偷開檔，那個保證就是假的。"""
     offenders = []
     for name in DEPOT_ONLY_MODULES:
         offenders += _fs_offenders(PKG / name, full=True)
     for name in DEPOT_ONLY_PARTIAL:
         offenders += _fs_offenders(PKG / name, full=False)
     assert not offenders, "共享狀態只准經 Depot：\n" + "\n".join(offenders)
+
+
+def test_every_core_module_is_classified_for_depot_gate():
+    """新模組必須自己表態：DEPOT_ONLY／PARTIAL（附理由）／LOCAL_LAYER（附理由）三選一，不能默默漏掉守門。"""
+    listed = set(DEPOT_ONLY_MODULES) | set(DEPOT_ONLY_PARTIAL) | set(LOCAL_LAYER)
+    actual = {p.relative_to(PKG).as_posix() for p in _core_modules()}
+    missing, stale = sorted(actual - listed), sorted(listed - actual)
+    assert not missing, f"這些模組沒被歸類（DEPOT_ONLY／PARTIAL／LOCAL_LAYER）：{missing}"
+    assert not stale, f"清單裡有不存在的模組：{stale}"
+    overlap = [n for n in listed if sum(n in c for c in (DEPOT_ONLY_MODULES, DEPOT_ONLY_PARTIAL, LOCAL_LAYER)) > 1]
+    assert not overlap, f"一個模組只能在一張清單：{overlap}"
 
 
 def test_cli_version_returns_zero(capsys):

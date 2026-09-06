@@ -11,7 +11,9 @@
 ## 四條硬規則
 
 1. **TDD**：先寫紅測試 → 實作 → 綠。回歸測試 docstring 首行寫 `回歸 I-N（日期）：防止…`（I-N 見 `docs/incidents.md`）。
-2. **命名照 `docs/naming.md`**；磁碟上的每個檔名／目錄名只能來自 `emforge/paths.py`，不准在別處拼字串。
+2. **命名照 `docs/naming.md`**；每個 Depot key（＝磁碟上的檔名／目錄名）只能來自 `emforge/paths.py`，不准在別處拼字串；
+   **協調狀態只經 `Depot`**（`emforge/depot/`）——核心模組不 import `pathlib`／`emforge.fs`、不 `open(`（`tests/test_smoke.py` 三張清單釘死；
+   本機路徑只有 registry.py／strategies/／策略 workdir／worker 工作目錄）。換後端＝實作 `Depot`＋過 `tests/depot/test_contract.py`。
 3. **一里程碑一 commit**：`python -m pytest` 全綠 + `python -m pyflakes emforge tests` 無 undefined name 才 commit。
    訊息 `type: 摘要`（繁中；type ∈ feat/fix/test/docs/chore/refactor）。**不 push**，除非 Ricky 要求。
 4. **可維護性**（`tests/test_smoke.py` 釘死）：單檔 ≤ 400 行、單函式 ≤ 60 行——超過就拆，不調上限；

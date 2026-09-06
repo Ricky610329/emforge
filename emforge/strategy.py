@@ -17,6 +17,7 @@ import yaml
 
 from . import db as dbm
 from . import paths, profiles
+from .depot import open_depot
 from .model import Context, Profile, Proposal, ProposalError
 
 SHIPPED_DIR = Path(__file__).resolve().parent / "strategies"
@@ -179,8 +180,9 @@ def validate_proposals(raw, profile: Profile, budget: int) -> list:
 
 # ── Context 與 propose ──────────────────────────────────────────────────────
 def make_context(root, profile: Profile, strategy_name: str, *, budget: int, seed: int, tick: int,
-                 params: dict | None) -> Context:
-    view = dbm.Database(root).view(profile.name, strategy=strategy_name)
+                 params: dict | None, depot=None) -> Context:
+    """`root`＝本機（策略 workdir）；`depot`＝共享資料庫（預設 FileDepot(root)）。"""
+    view = dbm.Database(depot if depot is not None else root).view(profile.name, strategy=strategy_name)
     workdir = paths.strategy_workdir(root, profile.name, strategy_name)
     workdir.mkdir(parents=True, exist_ok=True)
     return Context(db=view, profile=profile, budget=int(budget), rng=np.random.default_rng(int(seed)),
@@ -188,12 +190,12 @@ def make_context(root, profile: Profile, strategy_name: str, *, budget: int, see
 
 
 def propose_in_process(root, profile: Profile, name: str, *, budget: int, seed: int, tick: int, params: dict | None,
-                       timeout_s: float | None = None) -> list:
+                       timeout_s: float | None = None, depot=None) -> list:
     """載入 → 相容 → 建 ctx → propose → 驗證。子行程與 `check-strategy` 用；runtime 預設用子行程版。
     `timeout_s` 只為與 propose_in_subprocess 同簽名（可互換注入），這裡不生效。"""
     mod = load_strategy(resolve_strategy_path(root, name))
     check_compatible(mod, profile.name)
-    ctx = make_context(root, profile, name, budget=budget, seed=seed, tick=tick, params=params)
+    ctx = make_context(root, profile, name, budget=budget, seed=seed, tick=tick, params=params, depot=depot)
     return validate_proposals(mod.propose(ctx), profile, budget)
 
 
@@ -215,8 +217,9 @@ def _read_proposals(path: Path) -> list:
 
 
 def propose_in_subprocess(root, profile: Profile, name: str, *, budget: int, seed: int, tick: int,
-                          params: dict | None, timeout_s: float) -> list:
-    """在子行程跑 propose；逾時殺掉（StrategyTimeout）、非零退出包成 StrategyFailure（父行程永遠活著，I-4）。"""
+                          params: dict | None, timeout_s: float, depot=None) -> list:
+    """在子行程跑 propose；逾時殺掉（StrategyTimeout）、非零退出包成 StrategyFailure（父行程永遠活著，I-4）。
+    `depot` 以 spec 字串（`--depot`）交給子行程重開；`memory://` 子行程看不到——呼叫端（CLI run）要改用 in-process。"""
     workdir = paths.strategy_workdir(root, profile.name, name)
     workdir.mkdir(parents=True, exist_ok=True)
     out = workdir / "_proposals.npz"
@@ -224,6 +227,8 @@ def propose_in_subprocess(root, profile: Profile, name: str, *, budget: int, see
     cmd = [sys.executable, "-X", "utf8", "-m", "emforge.strategy", "--root", str(root), "--profile", profile.name,
            "--strategy", name, "--budget", str(budget), "--seed", str(seed), "--tick", str(tick),
            "--params", json.dumps(params or {}, ensure_ascii=False), "--out", str(out)]
+    if depot is not None:
+        cmd += ["--depot", open_depot(depot).spec]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s)
     except subprocess.TimeoutExpired:
@@ -243,12 +248,13 @@ def main(argv=None) -> int:
         ap.add_argument(flag, required=True)
     for flag in ("--budget", "--seed", "--tick"):
         ap.add_argument(flag, required=True, type=int)
+    ap.add_argument("--depot", help="共享狀態後端 spec（file://…／memory://…）；預設 root")
     a = ap.parse_args(argv)
     root = Path(a.root)
     profiles.load_user_registry(root)
     profile = profiles.get_profile(a.profile)
     props = propose_in_process(root, profile, a.strategy, budget=a.budget, seed=a.seed, tick=a.tick,
-                               params=json.loads(a.params))
+                               params=json.loads(a.params), depot=open_depot(a.depot) if a.depot else None)
     _write_proposals(Path(a.out), props, profile.shape)
     return 0
 
