@@ -25,7 +25,7 @@ from ..model import now_iso, record_id
 from ..worker.guard import guarded_call, open_with_retries
 from ..worker.workdir import WorkDir, default_work_root
 from . import estop, reference
-from .limits import Limits, check_preconditions, confirm_ok, confirm_token
+from .limits import Limits, check_preconditions, confirm_token, confirm_valid
 from .states import DeviceState, write_state
 
 HISTORY_MAX = 50
@@ -136,6 +136,22 @@ class Instrument:
             self._owner = None
             self._set(owner=None)
             return True
+
+    def announce_url(self, url: str | None) -> None:
+        """MCP server 起來後把端點寫進狀態字典（`fleet --mcp-config` 讀它）。"""
+        self._set(url=url)
+
+    # ── 兩段式確認（simulate_once／MCP 的 stop_worker 等共用） ─────────────
+    def issue_confirm(self, op: str, key: str) -> str:
+        return confirm_token(self._secret, op, key, self._clock(), self.limits.confirm_window_s)
+
+    def check_confirm(self, op: str, key: str, token: str | None) -> bool:
+        """只驗不消費：操作真的開始再 `consume_confirm`——被拒（busy／急停）不燒 token（同窗同值，燒了＝十分鐘內不能重試）。"""
+        return confirm_valid(self._secret, op, key, token or "", used=self._used_tokens, now=self._clock(),
+                             window_s=self.limits.confirm_window_s)
+
+    def consume_confirm(self, token: str) -> None:
+        self._used_tokens.add(token)
 
     # ── 急停 ────────────────────────────────────────────────────────────────
     def estop_engaged(self) -> dict | None:
@@ -251,29 +267,31 @@ class Instrument:
         rid = record_id(bits, profile.name)
         op_key = f"{profile.name}/{rid}"
         if confirm is None:
-            return {"needs_confirm": True, "token": confirm_token(self._secret, "simulate", op_key, self._clock(),
-                                                                   self.limits.confirm_window_s),
+            return {"needs_confirm": True, "token": self.issue_confirm("simulate", op_key),
                     "record_id": rid, "preview": {"profile": profile.name, "shape": list(profile.shape),
                                                   "n_on": int(bits.sum()), "timeout_s": profile.timeout_s,
                                                   "estimated_s": self.median_time_s()}}
-        if not confirm_ok(self._secret, "simulate", op_key, confirm, used=self._used_tokens, now=self._clock(),
-                          window_s=self.limits.confirm_window_s):
+        if not self.check_confirm("simulate", op_key, confirm):
             raise ConfirmRejected(f"token {confirm!r} 不對、過期或用過（先不帶 confirm 拿新 token）")
+        self._check_estop()                      # 急停：不燒 token、不搶租約
         owner = f"mcp:{by}"
         if not self.acquire(owner):
             raise DeviceBusy(f"儀器 {self.tag} 被 {self._owner} 持有")
         stamp = time.strftime("%Y%m%d%H%M%S")
         try:
-            return self._run_adhoc(profile, bits, rid, by=by, stamp=stamp)
+            res = self._run_adhoc(profile, bits, rid, by=by, stamp=stamp)
         finally:
             self.close()
             self.unbind()
             self.work.remove(f"adhoc-{stamp}-{rid[:8]}")
             self.release(owner)
+        self.consume_confirm(confirm)            # 真的跑了才算用掉
+        return res
 
     def _run_adhoc(self, profile, bits, rid: str, *, by: str, stamp: str) -> dict:
         self.bind(profile, self.work.make(f"adhoc-{stamp}-{rid[:8]}"), store=None)
-        open_with_retries(self, sleep=self._sleep)
+        #? 急停／前置檢查不過＝拒絕不是卡住：原樣拋給呼叫端（MCP 轉 estop_engaged／precondition_failed），不重試三次。
+        open_with_retries(self, sleep=self._sleep, fatal=(estop.EstopEngaged, PreconditionFailed))
         base = result_base(rid, attempts=1, machine=self.tag, worker_ver=self.state.worker_ver,
                            profile_hash=profile.profile_hash)
         t0 = time.time()

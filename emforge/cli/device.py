@@ -1,14 +1,19 @@
-"""emforge/cli/device.py — 儀器層 CLI（M14）：fleet／device-state／device-describe／device-estop。
+"""emforge/cli/device.py — 儀器層 CLI（M14／M15）：fleet／device-state／device-describe／device-estop／device-serve。
 
-`fleet`＝機隊儀表板（狀態字典＋讀者推導的 offline；`--mcp-config` 吐 `.mcp.json` 片段，url 由 M15 填）。
+`fleet`＝機隊儀表板（狀態字典＋讀者推導的 offline；`--mcp-config` 吐 `.mcp.json` 片段：url 來自各台狀態字典的 `url`、
+header 用 `${EMFORGE_DEVICE_TOKEN}` 佔位）。`device-serve <tag>`＝不撿佇列、只服務 MCP 的獨立版（worker 平常用 `worker --serve`）。
 `device-estop clear` 是**唯一**解除急停的路徑（要 `--confirm`）；MCP 只有 engage。
 """
 import json
 
 from .. import paths
-from ..device import estop
+from ..device import estop, mcp_server
 from ..device.states import read_fleet
+from ..worker.loop import make_instrument
 from .base import EXIT_ERROR, EXIT_OK, EXIT_REFUSED, add_root, depot_of, err, root_of
+from .loops import add_serve_flags, device_token
+
+MCP_CONFIG_HEADERS = {"Authorization": "Bearer ${EMFORGE_DEVICE_TOKEN}"}
 
 
 def _depot(args):
@@ -19,7 +24,8 @@ def cmd_fleet(args) -> int:
     depot = _depot(args)
     fleet = read_fleet(depot)
     if args.mcp_config:
-        cfg = {"mcpServers": {f"emforge-{d['tag']}": {"type": "http", "url": d.get("url") or ""} for d in fleet}}
+        cfg = {"mcpServers": {f"emforge-{d['tag']}": {"type": "http", "url": d.get("url") or "", "headers": dict(MCP_CONFIG_HEADERS)}
+                              for d in fleet}}
         print(json.dumps(cfg, ensure_ascii=False, indent=1))
         return EXIT_OK
     if not fleet:
@@ -110,5 +116,29 @@ def _add_device_estop(sub) -> None:
     s.set_defaults(fn=cmd_device_estop)
 
 
+def cmd_device_serve(args) -> int:
+    """只服務 MCP、不撿佇列（人／AI 單筆試量、或這台暫時不當 worker）。阻塞到 Ctrl-C。"""
+    root = root_of(args)
+    mcp_server.check_bind(args.host, device_token())          # 先拒再起儀器：非 loopback 無 token 不准
+    inst = make_instrument(root, args.tag, depot=depot_of(args, root), work_root=args.work_root)
+    inst.start()
+    try:
+        print(f"device-serve {args.tag}：{mcp_server.endpoint_url(args.host, args.port)}"
+              f"（auth={'bearer' if device_token() else '無（僅 loopback）'}；不撿佇列）", flush=True)
+        mcp_server.serve(inst, host=args.host, port=args.port, secret=device_token())
+    finally:
+        inst.stop()
+    return EXIT_OK
+
+
+def _add_device_serve(sub) -> None:
+    s = sub.add_parser("device-serve", help="只起這台儀器的 MCP server（不撿佇列）；worker 平常用 `worker --serve`")
+    s.add_argument("tag", help="機器 tag（狀態字典 devices/<tag>/）")
+    add_root(s)
+    s.add_argument("--work-root", help="本機工作目錄根（預設 EMFORGE_WORK）")
+    add_serve_flags(s)
+    s.set_defaults(fn=cmd_device_serve)
+
+
 COMMANDS = {"fleet": _add_fleet, "device-state": _add_device_state, "device-describe": _add_device_describe,
-            "device-estop": _add_device_estop}
+            "device-estop": _add_device_estop, "device-serve": _add_device_serve}

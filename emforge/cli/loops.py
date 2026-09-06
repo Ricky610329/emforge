@@ -1,8 +1,11 @@
-"""emforge/cli/loops.py — 長跑行程：run（runtime 實例）／worker（正式機）。"""
+"""emforge/cli/loops.py — 長跑行程：run（runtime 實例）／worker（正式機；`--serve` 同行程再起這台儀器的 MCP server）。"""
+import os
+
 from .. import strategy
+from ..device import mcp_server
 from ..netid import local_tag
 from ..runtime.core import Runtime, RuntimeLocked
-from ..worker.loop import worker_loop
+from ..worker.loop import make_instrument, worker_loop
 from .base import EXIT_LOCKED, add_root, depot_of, err, root_of
 
 
@@ -31,15 +34,41 @@ def _add_run(sub) -> None:
     s.set_defaults(fn=cmd_run)
 
 
+def add_serve_flags(parser) -> None:
+    """`--host`／`--port`（預設 EMFORGE_MCP_HOST／EMFORGE_MCP_PORT）；token 一律讀 EMFORGE_DEVICE_TOKEN，不走旗標（別進 shell 歷史）。"""
+    parser.add_argument("--host", default=os.environ.get("EMFORGE_MCP_HOST", mcp_server.DEFAULT_HOST),
+                        help="MCP 綁定位址（預設 EMFORGE_MCP_HOST 或 127.0.0.1；非 loopback 要 EMFORGE_DEVICE_TOKEN）")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("EMFORGE_MCP_PORT", mcp_server.DEFAULT_PORT)),
+                        help="MCP 埠（預設 EMFORGE_MCP_PORT 或 8765）")
+
+
+def device_token() -> str | None:
+    return os.environ.get("EMFORGE_DEVICE_TOKEN") or None
+
+
 def cmd_worker(args) -> int:
     root = root_of(args)
-    return worker_loop(root, args.machine_tag or local_tag(), depot=depot_of(args, root), poll_s=args.poll_s,
-                       once=args.once, work_root=args.work_root, background_prio=args.bg_prio, max_fail=args.max_fail,
-                       cooldown_s=args.cooldown_s, max_blowout=args.max_blowout, retry_passes=args.retry_passes)
+    depot = depot_of(args, root)
+    tag = args.machine_tag or local_tag()
+    loop_kw = dict(depot=depot, poll_s=args.poll_s, once=args.once, work_root=args.work_root, background_prio=args.bg_prio,
+                   max_fail=args.max_fail, cooldown_s=args.cooldown_s, max_blowout=args.max_blowout,
+                   retry_passes=args.retry_passes)
+    if not args.serve:
+        return worker_loop(root, tag, **loop_kw)
+    #? MCP 與 worker 迴圈共用同一台儀器、同一行程：同機只能一個 HFSS 使用者；租約在行程內仲裁。
+    mcp_server.check_bind(args.host, device_token())          # 先拒再起儀器
+    inst = make_instrument(root, tag, depot=depot, work_root=args.work_root)
+    inst.start()
+    try:
+        _, url = mcp_server.serve_in_thread(inst, host=args.host, port=args.port, secret=device_token())
+        print(f"MCP server：{url}（auth={'bearer' if device_token() else '無（僅 loopback）'}）", flush=True)
+        return worker_loop(root, tag, instrument=inst, **loop_kw)
+    finally:
+        inst.stop()
 
 
 def _add_worker(sub) -> None:
-    s = sub.add_parser("worker", help="在正式機跑 worker（認領 job → 模擬 → 結果檔）")
+    s = sub.add_parser("worker", help="在正式機跑 worker（認領 job → 模擬 → 結果檔）；--serve 同行程再起 MCP server")
     add_root(s)
     s.add_argument("--machine-tag", help="預設 EMFORGE_MACHINE 或 IP 末段")
     s.add_argument("--poll-s", type=float, default=30.0)
@@ -50,6 +79,8 @@ def _add_worker(sub) -> None:
     s.add_argument("--cooldown-s", type=float, default=600.0)
     s.add_argument("--max-blowout", type=int, default=3)
     s.add_argument("--retry-passes", type=int, default=2)
+    s.add_argument("--serve", action="store_true", help="同一行程再起這台儀器的 MCP server（daemon thread）")
+    add_serve_flags(s)
     s.set_defaults(fn=cmd_worker)
 
 

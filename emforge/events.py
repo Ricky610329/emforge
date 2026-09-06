@@ -67,6 +67,9 @@ EVENTS = {
     "lease_refused": ("tag", "owner", "holder"),
     "estop_engaged": ("tag", "scope", "by", "reason"),
     "estop_cleared": ("tag", "scope"),
+    "device_serve": ("tag", "url", "host", "port", "auth"),          # M15：MCP server 起來了
+    "device_stop_worker": ("tag", "by"),                              # M15：經 MCP 建／刪 STOP.<tag>
+    "device_resume_worker": ("tag", "by"),
 }
 
 

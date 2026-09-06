@@ -378,3 +378,52 @@ def test_fleet_device_state_describe_and_estop_cli(fake, capsys, monkeypatch):
     assert paths.estop_local(fake).exists() and estop.engaged(fake, fake, "216")["scope"] == "local"
     assert _main("device-estop", "clear", "--root", fake, "--local", "--confirm") == 0 and not paths.estop_local(fake).exists()
     assert _main("device-estop", "engage", "--root", fake, "--by", "ricky") == 1, "engage 要 --reason"
+
+
+# ── M15：MCP ────────────────────────────────────────────────────────────────
+def test_fleet_mcp_config_has_url_and_bearer_header_placeholder(fake, capsys):
+    import json
+    from emforge.device import states
+    states.write_state(fake, states.DeviceState(tag="216", url="http://10.0.0.216:8765/mcp"))
+    states.write_state(fake, states.DeviceState(tag="218"))
+    assert _main("fleet", "--root", fake, "--mcp-config") == 0
+    cfg = json.loads(capsys.readouterr().out)["mcpServers"]
+    assert cfg["emforge-216"] == {"type": "http", "url": "http://10.0.0.216:8765/mcp",
+                                  "headers": {"Authorization": "Bearer ${EMFORGE_DEVICE_TOKEN}"}}
+    assert cfg["emforge-218"]["url"] == "" and "headers" in cfg["emforge-218"]
+
+
+def test_worker_serve_starts_mcp_thread_sharing_the_loop_instrument(fake, monkeypatch, capsys):
+    from emforge.cli import loops
+    seen = {}
+
+    def fake_serve_in_thread(inst, **kw):
+        seen.update(kw, tag=inst.tag, state=inst.state.state)
+        return None, "http://127.0.0.1:8765/mcp"
+
+    monkeypatch.setattr(loops.mcp_server, "serve_in_thread", fake_serve_in_thread)
+    make_batch(fake, "s1")
+    queue.Queue(fake).add(make_job("s1"))
+    assert _main("worker", "--root", fake, "--machine-tag", "216", "--once", "--work-root", fake / "work",
+                 "--serve", "--host", "127.0.0.1", "--port", "8765") == 0
+    assert seen == {"host": "127.0.0.1", "port": 8765, "secret": None, "tag": "216", "state": "idle"}
+    assert queue.Queue(fake).state("s1") == "done", "MCP 與 worker 迴圈共用同一台儀器，批照跑"
+    ev = [e["event"] for e in fs.read_jsonl(fake / paths.device_log("216"))]
+    assert ev[0] == "device_start" and ev[-1] == "device_stop"
+    assert "mcp" in capsys.readouterr().out.lower()
+
+
+def test_device_serve_cli_serves_instrument_without_picking_queue(fake, monkeypatch):
+    from emforge.cli import device as dev
+    seen = {}
+    monkeypatch.setattr(dev.mcp_server, "serve", lambda inst, **kw: seen.update(kw, tag=inst.tag))
+    monkeypatch.setenv("EMFORGE_DEVICE_TOKEN", "s3cret")
+    make_batch(fake, "s1")
+    queue.Queue(fake).add(make_job("s1"))
+    assert _main("device-serve", "216", "--root", fake, "--host", "0.0.0.0", "--port", "9000", "--work-root", fake / "work") == 0
+    assert seen == {"host": "0.0.0.0", "port": 9000, "secret": "s3cret", "tag": "216"}
+    assert queue.Queue(fake).state("s1") == "queued", "device-serve 不撿佇列"
+    ev = [e["event"] for e in fs.read_jsonl(fake / paths.device_log("216"))]
+    assert ev[0] == "device_start" and ev[-1] == "device_stop"
+    monkeypatch.delenv("EMFORGE_DEVICE_TOKEN")
+    assert _main("device-serve", "216", "--root", fake, "--host", "0.0.0.0", "--work-root", fake / "work") == 1, "非 loopback 無 token 拒起"

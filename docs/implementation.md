@@ -51,12 +51,15 @@ emforge/
   worker/         loop.py gate.py guard.py fuse.py workdir.py batch.py（一檔一職責；batch／loop 經 device，gate／guard／fuse／workdir 是 leaf）
   device/         **儀器層**（M13–M14，MHS 式）：estop.py（急停三層）limits.py（Limits／check_preconditions／confirm token）
                   states.py（DeviceState 唯一真相、write_state／read_fleet）instrument.py（Instrument 狀態機＋租約＋Simulator 直傳＋simulate_once）
-                  reference.py（說明檔 md＋json；程序清單＝M15 MCP tools）
+                  reference.py（說明檔 md＋json；程序清單＝MCP tools）
+                  mcp_server.py（M15：這台的 MCP server——tools＝Instrument 程序一對一、resources device://*、bearer 中介層、
+                  與 worker 同行程 daemon thread；**唯一** import mcp／uvicorn／starlette 處、且只在函式內，optional extra `emforge[mcp]`）
   runtime/        core.py reconcile.py schedule.py dispatch.py collect.py notarize.py
   strategies/     blind.py top_k_flip.py（內建；使用者同名檔蓋過）
   adapters/antenna/  _bind.py sim.py measure.py profiles.py（唯一碰 torch／antenna 的地方）
   legacy/antenna_import.py  舊 NAS 資料匯入（torch lazy）
-  cli/            __init__（接線）base setup loops show verdict control device（fleet／device-state／device-describe／device-estop）
+  cli/            __init__（接線）base setup loops（run／worker [--serve]）show verdict control
+                  device（fleet [--mcp-config]／device-state／device-describe／device-estop／device-serve）
 ```
 
 守門測試（`tests/test_smoke.py`）：核心（`adapters/`、`legacy/` 以外）零 `torch/antenna/scipy/matplotlib/pandas/win32com` import；單檔 ≤ 400 行；單函式 ≤ 60 行；禁 `utils/misc/helpers/common/dedust` 檔名；
@@ -235,7 +238,7 @@ def propose(ctx):
 | `version`／`doctor --root R [--depot D] [--hfss]` | 版本戳／體檢（root 探針、`depot.selfcheck()`：可寫／O_EXCL／時鐘偏移、磁碟、ansysedt） | 0；doctor 阻擋 4 |
 | `check-strategy --root R --profile P --strategy S [--budget --seed --tick --params]` | 本行程試跑 propose | 0／1 |
 | `run --root R --profile P [--once] [--in-process]` | runtime 實例 | 0；對帳不符 2；鎖被占 3 |
-| `worker --root R [--machine-tag T --poll-s --once --work-root --bg-prio --max-fail --cooldown-s --max-blowout --retry-passes]` | 正式機 worker | 0 |
+| `worker --root R [--machine-tag T --poll-s --once --work-root --bg-prio --max-fail --cooldown-s --max-blowout --retry-passes] [--serve --host H --port N]` | 正式機 worker；`--serve`＝同行程再起這台的 MCP server（daemon thread；host／port 預設 `EMFORGE_MCP_HOST`／`EMFORGE_MCP_PORT`，token 讀 `EMFORGE_DEVICE_TOKEN`；非 loopback 無 token 拒起） | 0；拒起 1 |
 | `status／events [--last N --event E]／pending／jobs [--all]` | 讀狀態 | 0 |
 | `watch --root R --stores a,b [--poll-s --fail-grace-min --timeout-min]` | blocking 等終態 | 0 全 done／1 fail／2 逾時 |
 | `report --root R --profile P [--profile Q --cross-profile] [--k-min]` | 每策略報表 | 0；跨 profile 無旗標 2 |
@@ -248,7 +251,8 @@ def propose(ctx):
 | `stop --root R (--profile P | --worker [--machine-tag T]) [--clear]` | STOP 檔 | 0 |
 | `smoke <id> --root R --profile P --by WHO [--machine T --n N]` | 對已量 id 派重測（切機驗同一儀器） | 0 |
 | `import-legacy --root OLD --out R [--depot D] --stores g1,g2 [--profile auto --map s=p --include-errors --verify --dry-run --force --no-rad]` | 舊資料匯入（舊樹＝本機路徑只讀；輸出經 depot） | 0；verify 不符 2 |
-| `fleet --root R [--mcp-config]` | 機隊儀表板（每台狀態字典＋offline 推導＋全機 ESTOP 提示）；`--mcp-config` 吐 `.mcp.json` 片段（url 由 M15 填） | 0 |
+| `fleet --root R [--mcp-config]` | 機隊儀表板（每台狀態字典＋offline 推導＋全機 ESTOP 提示）；`--mcp-config` 吐 `.mcp.json` 片段（`emforge-<tag>`：url＝各台狀態字典的 `url`、header `Authorization: Bearer ${EMFORGE_DEVICE_TOKEN}`） | 0 |
+| `device-serve <tag> --root R [--host H --port N --work-root W]` | 只起這台的 MCP server、**不撿佇列**（單筆試量、或這台暫時不當 worker）；阻塞到 Ctrl-C | 0；非 loopback 無 token 1 |
 | `device-state <tag>`／`device-describe <tag> [--json]` | 一台的狀態字典／說明檔（open 成功後才有） | 0；尚無 1 |
 | `device-estop engage [--tag T \| --local] --by WHO --reason R` | 按急停（全機／單機／本機層）；儀器 open／simulate 硬擋、正在跑的那筆 abort、worker 不撿 | 0；缺 --reason 1 |
 | `device-estop clear [--tag T \| --local] --confirm` | **唯一**解除急停的路徑（MCP 沒有） | 0；沒 --confirm 2 |
@@ -263,7 +267,7 @@ runtime：`runtime_start runtime_stop lock_lost reconcile_mismatch config_reload
 公證：`record_candidate notarize_dispatched notarize_pass notarize_reject`
 榜：`promoted retired rescored ledger_tamper`
 worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample_error job_done job_failed job_yield(reason: claim_taken_over|foreground_job_appeared|estop_engaged|device_busy) gate_rejected sim_restart worker_stop`
-儀器（devices/<tag>/log.jsonl，單寫者＝該台 Instrument）：`device_start device_stop device_fault device_simulate device_abort lease_refused estop_engaged estop_cleared`
+儀器（devices/<tag>/log.jsonl，單寫者＝該台 Instrument）：`device_start device_stop device_fault device_simulate device_abort lease_refused estop_engaged estop_cleared device_serve(url,host,port,auth) device_stop_worker device_resume_worker`（後三個＝M15 MCP）
 
 ## 10. AI 加值層怎麼接
 

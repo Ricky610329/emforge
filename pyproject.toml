@@ -14,6 +14,8 @@ dependencies = ["numpy>=1.26", "pyyaml>=6"]
 [project.optional-dependencies]
 test = ["pytest>=8", "pyflakes>=3"]
 antenna = ["torch", "scipy"]
+# 儀器的 MCP server／客戶端（M15）：只在 emforge/device/mcp_server.py 函式內 import；沒裝也能跑 worker／runtime／CLI。
+mcp = ["mcp>=2.1,<3"]
 
 [project.scripts]
 emforge = "emforge.cli:main"

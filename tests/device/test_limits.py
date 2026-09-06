@@ -42,3 +42,14 @@ def test_confirm_token_is_stable_within_window_and_single_use():
     assert L.confirm_ok("s3cret", "simulate", "fake_f1/abc", prev, used=set(), now=t0) is True, "上一窗還收（窗邊界）"
     old = L.confirm_token("s3cret", "simulate", "fake_f1/abc", now=t0 - 1200)
     assert L.confirm_ok("s3cret", "simulate", "fake_f1/abc", old, used=set(), now=t0) is False, "兩窗前過期"
+
+
+def test_confirm_valid_checks_without_consuming():
+    """M15：驗證與消費分開——操作真的開始才記 used；被拒（busy／急停）不燒 token。"""
+    t0 = 1_700_000_000.0
+    tok = L.confirm_token("s3cret", "simulate", "k", now=t0)
+    used = set()
+    assert L.confirm_valid("s3cret", "simulate", "k", tok, used=used, now=t0) is True and used == set()
+    assert L.confirm_valid("s3cret", "simulate", "k", "00000000", used=used, now=t0) is False
+    used.add(tok)
+    assert L.confirm_valid("s3cret", "simulate", "k", tok, used=used, now=t0) is False

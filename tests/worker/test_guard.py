@@ -67,6 +67,24 @@ def test_open_with_retries_gives_up_after_3_and_kills_between():
     assert ok.opens == 2 and ok.kills == 1
 
 
+def test_open_with_retries_reraises_fatal_types_immediately_without_retry():
+    """M15：急停／前置檢查不過不是「機器卡住」，重試三次沒意義——列進 fatal 的例外原樣、立刻拋。"""
+    class Refused(Exception):
+        pass
+
+    class _Refusing(_Sim):
+        def open(self):
+            self.opens += 1
+            raise Refused("急停")
+
+    sim, slept = _Refusing(), []
+    with pytest.raises(Refused):
+        guard.open_with_retries(sim, attempts=3, timeout_s=5, sleep=slept.append, retry_wait_s=15, fatal=(Refused,))
+    assert sim.opens == 1 and sim.kills == 0 and slept == []
+    with pytest.raises(guard.SimulatorOpenFailed):
+        guard.open_with_retries(_Refusing(), attempts=2, timeout_s=5, sleep=slept.append, retry_wait_s=1)
+
+
 def test_guarded_call_aborts_when_predicate_becomes_true():
     """M13：e-stop 進來時正在跑的那筆要被殺——`abort_if` 每 poll_s 查一次，真了就 on_timeout（kill）→ 拋 Aborted。"""
     flag, kills, estop = threading.Event(), [], []

@@ -16,7 +16,10 @@
 | 例外 | `CapWords` 名詞結尾，不加 `Exception`/`Error` 後綴 | `LockTimeout` `GeomVerMismatch` `StrategyFailure` `StrategyTimeout` `AdapterFailure` `StoreExists` `CrossProfileRefused` `AntennaUnavailable` `EstopEngaged` `DeviceBusy` `PreconditionFailed` `ConfirmRejected` `Aborted`；`ProposalError`（← 唯一例外：與 ValueError 對稱） |
 | CLI 子命令 ↔ 函式 | kebab-case ↔ `cmd_<snake>` | `import-legacy` ↔ `cmd_import_legacy` |
 | CLI 旗標 ↔ 屬性 | kebab ↔ `args.<snake>` | `--max-inflight` ↔ `args.max_inflight` |
-| 環境變數 | `EMFORGE_` 前綴 | `EMFORGE_ROOT`（本機程式碼／設定根）`EMFORGE_DEPOT`（共享狀態後端 spec：`file://…`／`memory://…`）`EMFORGE_ANTENNA_REPO` `EMFORGE_MACHINE` `EMFORGE_WORK` `EMFORGE_DEVICE_TOKEN`（儀器兩段式 confirm 的 secret；M15 也是 MCP 共享 token） |
+| 環境變數 | `EMFORGE_` 前綴 | `EMFORGE_ROOT`（本機程式碼／設定根）`EMFORGE_DEPOT`（共享狀態後端 spec：`file://…`／`memory://…`）`EMFORGE_ANTENNA_REPO` `EMFORGE_MACHINE` `EMFORGE_WORK` `EMFORGE_DEVICE_TOKEN`（儀器兩段式 confirm 的 secret＝MCP 共享 bearer token；不走旗標）`EMFORGE_MCP_HOST`／`EMFORGE_MCP_PORT`（`--serve`／`device-serve` 的預設綁定，127.0.0.1／8765） |
+| MCP tools ↔ 儀器程序 | `device_<動詞或名詞>`＝`Instrument` 方法一對一；清單唯一真相＝`device/reference.PROCEDURES`（說明檔與 server 同源，測試對帳） | `device_state` `device_describe` `device_selfcheck` `device_log`（read-only）`device_simulate` `device_abort` `device_estop` `device_stop_worker` `device_resume_worker`；**沒有** `device_estop_clear` |
+| MCP resources | `device://<名>` | `device://state` `device://reference` `device://reference.json` |
+| MCP 錯誤碼 | `ToolError("<code>: …")`，code 小寫 snake、agent 照碼分支 | `device_busy` `estop_engaged` `precondition_failed` `confirm_rejected` `bad_bits` `unknown_profile` `open_failed` `internal` |
 | 租約 owner | `<來源>:<對象>` | 儀器租約 `queue:<store>`／`mcp:<by>`；runtime 鎖 `<tag>:<pid>:<rand>`；jobs.lock `<host>:<pid>` |
 | 急停 scope | `fleet` \| `device` \| `local`（外層優先回報） | `queue/ESTOP`／`queue/ESTOP.<tag>`／`<root>/ESTOP` |
 | Depot key | POSIX 相對字串、只能來自 `paths.py`；前綴以 `/` 結尾；末段 `.` 開頭或含 `.broken.`＝後端內部、不列 | `db/fake_f1/_index.jsonl`, `queue/state/`（前綴） |

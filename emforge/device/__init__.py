@@ -5,7 +5,8 @@
   states.py      DeviceState（狀態字典欄位唯一真相）＋ write_state／read_state／read_fleet（offline 由讀者推導）
   instrument.py  Instrument：狀態機 idle/opening/ready/busy/estop/fault、租約、Simulator 協定直傳、abort、selfcheck、simulate_once
   reference.py   儀器說明檔（M14）
+  mcp_server.py  這台的 MCP server（M15）：tools＝Instrument 程序一對一、resources、bearer、與 worker 同行程
 
 依賴方向（test_smoke 釘死）：device/* 只可 import worker 的 leaf（guard／gate／workdir）；worker/batch.py、worker/loop.py 才可 import device。
-`mcp` 只在 mcp_server.py（M15）函式內 import。
+`mcp`／`uvicorn`／`starlette` 只在 mcp_server.py 函式內 import（optional extra `emforge[mcp]`）。
 """

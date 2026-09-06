@@ -68,13 +68,16 @@ def guarded_call(fn, timeout_s: float, on_timeout, *, abort_if=None, poll_s: flo
 
 
 def open_with_retries(sim, *, attempts: int = 3, timeout_s: float = 300.0, sleep=time.sleep,
-                      retry_wait_s: float = 15.0) -> None:
-    """開模擬器最多 attempts 次，每次帶看門狗；失敗就 kill、等 retry_wait_s 再試；用盡拋 SimulatorOpenFailed。"""
+                      retry_wait_s: float = 15.0, fatal: tuple = ()) -> None:
+    """開模擬器最多 attempts 次，每次帶看門狗；失敗就 kill、等 retry_wait_s 再試；用盡拋 SimulatorOpenFailed。
+    `fatal`＝不是「機器卡住」的拒絕（急停、前置檢查）：原樣立刻拋、不 kill、不重試。"""
     last = None
     for i in range(attempts):
         try:
             guarded_call(sim.open, timeout_s, sim.kill)
             return
+        except fatal:
+            raise
         except Exception as e:  # noqa: BLE001
             last = e
             try:

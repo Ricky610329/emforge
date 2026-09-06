@@ -67,13 +67,19 @@ def confirm_token(secret: str, op: str, key: str, now: float, window_s: float = 
     return _token(secret, op, key, _window(now, window_s))
 
 
-def confirm_ok(secret: str, op: str, key: str, token: str, *, used: set, now: float,
-               window_s: float = DEFAULT_CONFIRM_WINDOW_S) -> bool:
-    """本窗或上一窗（窗邊界寬限）的 token 才收；收過就記進 `used`（單次使用）。"""
+def confirm_valid(secret: str, op: str, key: str, token: str, *, used: set, now: float,
+                  window_s: float = DEFAULT_CONFIRM_WINDOW_S) -> bool:
+    """只驗不消費：本窗或上一窗（窗邊界寬限）的 token、且沒用過。操作真的開始才 `used.add`——被拒不燒 token。"""
     if not token or token in used:
         return False
     w = _window(now, window_s)
-    if token not in (_token(secret, op, key, w), _token(secret, op, key, w - 1)):
+    return token in (_token(secret, op, key, w), _token(secret, op, key, w - 1))
+
+
+def confirm_ok(secret: str, op: str, key: str, token: str, *, used: set, now: float,
+               window_s: float = DEFAULT_CONFIRM_WINDOW_S) -> bool:
+    """驗證＋消費（記進 `used`，單次使用）。"""
+    if not confirm_valid(secret, op, key, token, used=used, now=now, window_s=window_s):
         return False
     used.add(token)
     return True

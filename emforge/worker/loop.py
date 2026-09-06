@@ -34,6 +34,17 @@ class _Opts:
     retry_passes: int = 2
 
 
+def make_instrument(root, machine_tag: str, *, depot=None, work_root=None, sim_factory=None, sleep=time.sleep,
+                    worker_ver: str | None = None) -> Instrument:
+    """worker 迴圈與 `worker --serve`／`device-serve` 用同一種建法（同機只能一台）。不 start——呼叫端管生命週期。"""
+    root = Path(root)
+    depot = open_depot(depot) if depot is not None else FileDepot(root)
+    profiles.load_user_registry(root)
+    factory = sim_factory or (lambda wd, p: profiles.make_simulator(p, wd))
+    return Instrument(root, machine_tag, depot=depot, sim_factory=factory, worker_ver=worker_ver or worker_version(),
+                      work_root=work_root or default_work_root(), sleep=sleep)
+
+
 def worker_loop(root, machine_tag: str, *, depot=None, poll_s: float = 30.0, once: bool = False, work_root=None,
                 sleep=time.sleep, sim_factory=None, background_prio: int = 9, max_fail: int = 5,
                 cooldown_s: float = 600.0, max_blowout: int = 3, retry_passes: int = 2, instrument=None) -> int:
@@ -58,9 +69,8 @@ def worker_loop(root, machine_tag: str, *, depot=None, poll_s: float = 30.0, onc
         print(f"啟動清掃：{len(swept)} 個殘留工作目錄已刪（{work.root}）", flush=True)
     log("worker_start", worker_ver=ver, machine=machine_tag)
     owned = instrument is None
-    factory = sim_factory or (lambda wd, p: profiles.make_simulator(p, wd))
-    inst = instrument or Instrument(root, machine_tag, depot=depot, sim_factory=factory, worker_ver=ver,
-                                    work_root=work.root, sleep=sleep)
+    inst = instrument or make_instrument(root, machine_tag, depot=depot, work_root=work.root, sim_factory=sim_factory,
+                                         sleep=sleep, worker_ver=ver)
     if owned:
         inst.start()
     try:

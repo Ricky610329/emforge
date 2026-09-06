@@ -168,6 +168,41 @@ def test_simulate_once_refused_when_lease_held_and_rejects_bad_bits(inst):
         inst.simulate_once(P.name, bad, by="ricky")
 
 
+def test_simulate_once_refusal_does_not_burn_token_and_estop_raises_before_lease(inst):
+    """token 綁 10 分鐘窗、同窗內同值：被拒（busy／急停）就燒掉＝十分鐘內不能重試。拒絕在 consume 之前發生。"""
+    inst.start()
+    bits = some_bits(8)
+    tok = inst.simulate_once(P.name, bits, by="ricky")["token"]
+    inst.acquire("queue:s9")
+    with pytest.raises(I.DeviceBusy):
+        inst.simulate_once(P.name, bits, by="ricky", confirm=tok)
+    inst.release("queue:s9")
+    estop.engage(inst.depot, None, by="x", reason="r")
+    with pytest.raises(estop.EstopEngaged):
+        inst.simulate_once(P.name, bits, by="ricky", confirm=tok)
+    assert inst.state.owner is None, "急停在搶租約之前就拒，不留租約"
+    estop.clear(inst.depot, None)
+    assert inst.simulate_once(P.name, bits, by="ricky", confirm=tok)["status"] == "done"
+    with pytest.raises(I.ConfirmRejected):
+        inst.simulate_once(P.name, bits, by="ricky", confirm=tok)
+
+
+def test_simulate_once_precondition_failure_raises_not_error_result(root):
+    inst = make_inst(root, limits=Limits(allowed_profiles=("other_p",)))
+    inst.start()
+    tok = inst.simulate_once(P.name, some_bits(9), by="ricky")["token"]
+    with pytest.raises(I.PreconditionFailed, match="allowed"):
+        inst.simulate_once(P.name, some_bits(9), by="ricky", confirm=tok)
+    assert inst.state.owner is None and inst.state.state == "idle"
+    inst.stop()
+
+
+def test_announce_url_lands_in_state_dict(inst):
+    inst.start()
+    inst.announce_url("http://127.0.0.1:8765/mcp")
+    assert _state(inst)["url"] == "http://127.0.0.1:8765/mcp"
+
+
 def test_heartbeat_refreshes_state_and_follows_estop(root):
     inst = make_inst(root, heartbeat_s=0.02)
     inst.start()

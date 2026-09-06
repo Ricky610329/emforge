@@ -33,7 +33,7 @@ DEPOT_ONLY_MODULES = (
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
     "runtime/schedule.py",
     "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py",
-    "device/__init__.py", "device/limits.py", "device/states.py", "device/reference.py",
+    "device/__init__.py", "device/limits.py", "device/states.py", "device/reference.py", "device/mcp_server.py",
     "cli/__init__.py", "cli/__main__.py", "cli/control.py", "cli/show.py", "cli/verdict.py", "cli/loops.py",
     "cli/device.py",
     "strategies/__init__.py", "strategies/blind.py", "strategies/top_k_flip.py",
@@ -67,6 +67,10 @@ LOCAL_LAYER = {
 WORKER_LEAF = {"worker/gate.py", "worker/guard.py", "worker/fuse.py", "worker/workdir.py"}
 DEVICE_MAY_IMPORT_FROM_WORKER = {"worker.guard", "worker.gate", "worker.workdir"}
 FS_IMPORTS = {"pathlib", "shutil", "glob", "tempfile"}
+#? optional extra（`emforge[mcp]`）：這些套件只准在下面的模組、而且只准在**函式內** import——核心 import 期零 mcp，
+#  沒裝 mcp 的機器（開發機、runtime 機）照常跑 worker／runtime／CLI。
+OPTIONAL_EXTRA_IMPORTS = {"mcp", "uvicorn", "starlette", "httpx2", "anyio"}
+OPTIONAL_EXTRA_MODULES = {"device/mcp_server.py"}
 #? `os.path` 也算（getmtime／exists 都在裡面）。
 FS_OS_ATTRS = {"path", "replace", "utime", "open", "unlink", "remove", "rename", "makedirs", "scandir",
                "listdir", "mkdir", "stat", "fsync"}
@@ -208,6 +212,28 @@ def test_device_layer_dependency_direction():
         if rel in WORKER_LEAF:
             offenders += [f"{rel}: import {r}" for r in sorted(refs) if r == "device" or r.startswith("device.")]
     assert not offenders, "儀器層依賴方向：\n" + "\n".join(offenders)
+
+
+def test_mcp_only_imported_inside_functions_of_mcp_server():
+    """M15：`mcp`／`uvicorn`／`starlette`／`httpx2`／`anyio` 只准出現在 OPTIONAL_EXTRA_MODULES，且只准在函式內 import。"""
+    offenders = []
+    for p in _all_modules():
+        rel = p.relative_to(PKG).as_posix()
+        tree = ast.parse(p.read_text(encoding="utf-8"))
+        inside = {id(n) for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  for n in ast.walk(f) if isinstance(n, (ast.Import, ast.ImportFrom))}
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
+            hit = [n for n in names if n.split(".")[0] in OPTIONAL_EXTRA_IMPORTS]
+            if not hit:
+                continue
+            if rel not in OPTIONAL_EXTRA_MODULES:
+                offenders.append(f"{rel}:L{node.lineno}: import {hit}（只准在 {sorted(OPTIONAL_EXTRA_MODULES)}）")
+            elif id(node) not in inside:
+                offenders.append(f"{rel}:L{node.lineno}: 模組層 import {hit}（要放進函式內）")
+    assert not offenders, "\n".join(offenders)
 
 
 def test_every_core_module_is_classified_for_depot_gate():
