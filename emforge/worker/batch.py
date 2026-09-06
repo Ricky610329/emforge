@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .. import fs
+from ..model import now_iso
 from .fuse import Fuse
 from .guard import SimulatorOpenFailed, WatchdogTimeout, guarded_call, open_with_retries
 from .workdir import WorkDir
@@ -114,7 +114,7 @@ def _run_pass(run: _Run, patterns: dict, todo: list, rpass: int) -> str:
 
 def _simulate_one(run: _Run, rid: str, bits, attempts: int) -> dict:
     base = {"id": rid, "attempts": attempts, "machine": run.machine_tag, "worker_ver": run.worker_ver,
-            "profile_hash": run.job.profile_hash, "at": fs.now_iso()}
+            "profile_hash": run.job.profile_hash, "at": now_iso()}
     t0 = time.time()
     try:
         out = guarded_call(lambda: run.sim.simulate(bits), run.timeout_s, run.sim.kill)
@@ -135,7 +135,7 @@ def _yield_reason(run: _Run) -> str | None:
     if run.queue.claim_owner(run.job.store) != run.machine_tag:
         return "claim_taken_over"
     if run.job.prio >= run.background_prio and run.queue.has_unclaimed_foreground(run.background_prio):
-        run.queue.release(run.job.store)
+        run.queue.release(run.job.store, run.machine_tag)
         return "foreground_job_appeared"
     return None
 

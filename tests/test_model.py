@@ -154,3 +154,15 @@ def test_profile_proposal_job_have_no_keep_project_field():
     for cls in (model.Profile, model.Proposal, model.Job, model.Record, model.Spec):
         names = {f.name for f in dataclasses.fields(cls)}
         assert not any("keep" in n for n in names), cls.__name__
+
+
+# ── 小工具（自 fs 搬來） ─────────────────────────────────────────────────────
+def test_now_iso_format():
+    s = model.now_iso()
+    assert len(s) == 19 and s[10] == "T" and s[4] == s[7] == "-" and s[13] == s[16] == ":"
+
+
+def test_sha1_hex_deterministic_and_order_sensitive():
+    assert model.sha1_hex(b"a", b"b") == model.sha1_hex(b"a", b"b")
+    assert model.sha1_hex(b"a", b"b") != model.sha1_hex(b"b", b"a")
+    assert len(model.sha1_hex(b"")) == 40

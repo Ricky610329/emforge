@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .. import fs, paths
 from ..ledger import Ledger, LedgerTamper
-from ..model import KIND_REPEAT, KIND_SAMPLE, STATUS_DONE, Proposal
+from ..model import KIND_REPEAT, KIND_SAMPLE, STATUS_DONE, Proposal, now_iso
 from .dispatch import dispatch
 
 
@@ -43,7 +43,7 @@ def _complete_ongoing(rt, nz: dict, cfg) -> None:
         if spread <= cfg.noise_floor:
             fs.append_jsonl(_p(rt.root, paths.pending_jsonl(rt.profile_name)),
                             {"id": rid, "tick": rt.state["tick"], "scores": scores, "conservative": conservative,
-                             "spread": spread, "stores": info["stores"], "at": fs.now_iso(), "status": "待審（迴圈不加冕）"})
+                             "spread": spread, "stores": info["stores"], "at": now_iso(), "status": "待審（迴圈不加冕）"})
             rt.event("notarize_pass", id=rid, scores=scores, conservative=conservative, spread=spread)
         else:
             rt.event("notarize_reject", id=rid, scores=scores, spread=spread, noise_floor=cfg.noise_floor)

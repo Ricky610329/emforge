@@ -75,6 +75,19 @@ class Depot(ABC):
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             raise FsCorrupt(f"{self.spec}/{key}: {e}") from e
 
+    def require_bytes(self, key: str) -> bytes:
+        """「取不到就是錯」的讀法：缺 → FileNotFoundError（呼叫端把它當「這個 key 本來就該在」）。"""
+        data = self.get_bytes(key)
+        if data is None:
+            raise FileNotFoundError(f"{self.spec}/{key}")
+        return data
+
+    def require_json(self, key: str):
+        doc = self.get_json(key)
+        if doc is None:
+            raise FileNotFoundError(f"{self.spec}/{key}")
+        return doc
+
     # ── 列舉／時間 ───────────────────────────────────────────────────────────
     @abstractmethod
     def list(self, prefix: str) -> list[str]:

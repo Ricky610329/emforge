@@ -66,9 +66,7 @@ class Ledger:
         return self.depot.exists(self.key)
 
     def read(self) -> dict:
-        doc = self.depot.get_json(self.key)
-        if doc is None:
-            raise FileNotFoundError(self.where)
+        doc = self.depot.require_json(self.key)
         if doc.get("_checksum") != _checksum(doc):
             raise LedgerTamper(f"{self.where} checksum 不符——榜檔被手改？榜只能經 promote／rescore 寫")
         return doc

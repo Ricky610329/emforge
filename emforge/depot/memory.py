@@ -71,8 +71,8 @@ class MemoryDepot(Depot):
             if not k.startswith(prefix):
                 continue
             head, sep, _ = k[len(prefix):].partition("/")
-            if head.startswith("."):
-                continue
+            if head.startswith(".") or ".broken." in head:
+                continue  # 與 FileDepot 同一條規則：後端內部名（tmp／探針／破鎖證據）不是 key
             out.add(prefix + head + ("/" if sep else ""))
         return sorted(out)
 

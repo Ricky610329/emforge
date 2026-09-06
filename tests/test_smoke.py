@@ -26,7 +26,7 @@ BANNED_MODULE_STEMS = {"utils", "util", "misc", "helpers", "common", "dedust", "
 
 #? 已抽象化的模組：共享狀態只准經 `Depot`（M12b）。M12c 加 queue、M12d 加 runtime／worker／cli——
 #  所以這是一張**清單**，擴充就是往這裡加一個檔名。
-DEPOT_ONLY_MODULES = ("db.py", "batches.py", "ledger.py", "events.py", "report.py", "profiles.py")
+DEPOT_ONLY_MODULES = ("db.py", "batches.py", "ledger.py", "events.py", "report.py", "profiles.py", "queue.py")
 #? `strategy.py` 半套：策略碼與 registry.py 要用本機路徑 importlib／runpy 載入（程式碼不抽象），
 #  但它一樣不准碰 fs 原語或自己 open(。
 DEPOT_ONLY_PARTIAL = ("strategy.py",)

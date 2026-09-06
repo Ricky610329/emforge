@@ -77,6 +77,20 @@ def test_put_json_keeps_old_doc_when_serialization_fails(depot):
     assert depot.get_json("k.json") == {"ok": 1}
 
 
+def test_require_bytes_raises_filenotfound_when_missing(depot):
+    with pytest.raises(FileNotFoundError):
+        depot.require_bytes("r/none")
+    depot.put_bytes("r/x", b"1")
+    assert depot.require_bytes("r/x") == b"1"
+
+
+def test_require_json_raises_filenotfound_when_missing(depot):
+    with pytest.raises(FileNotFoundError):
+        depot.require_json("r/none.json")
+    depot.put_json("r/x.json", {"a": 1})
+    assert depot.require_json("r/x.json") == {"a": 1}
+
+
 def test_exists_and_delete_true_only_for_the_call_that_removed(depot):
     assert not depot.exists("e/x") and depot.delete("e/x") is False
     depot.put_bytes("e/x", b"1")
@@ -94,6 +108,13 @@ def test_list_returns_direct_children_and_marks_subprefixes_with_slash(depot):
     depot.put_bytes("other/w.json", b"4")
     assert depot.list("a/") == ["a/b/", "a/x.json"]
     assert depot.list("a/b/") == ["a/b/y.json", "a/b/z.json"]
+
+
+def test_list_hides_broken_evidence_names(depot):
+    """破鎖證據檔（`<name>.broken.<pid>.<rand>`）是後端內部名——兩個後端都不當 key 列出來。"""
+    depot.put_bytes("q/x.claim", b"1")
+    depot.put_bytes("q/x.claim.broken.1.ab", b"dead")
+    assert depot.list("q/") == ["q/x.claim"]
 
 
 def test_list_reflects_put_and_delete_and_hides_dot_keys(depot):

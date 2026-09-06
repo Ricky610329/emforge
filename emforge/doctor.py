@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import _version, fs, netid
+from . import _version, fs, model, netid
 from .worker.workdir import default_work_root
 
 MIN_FREE_GB = 5.0
@@ -32,7 +32,7 @@ def probe_root(root) -> tuple:
     """try_claim 一個探針檔再刪——驗可寫與 O_EXCL。回 (ok, 說明)。"""
     probe = Path(root) / f".doctor_probe_{os.getpid()}"
     try:
-        if not fs.try_claim(probe, {"at": fs.now_iso()}):
+        if not fs.try_claim(probe, {"at": model.now_iso()}):
             return False, "探針檔已存在（上次 doctor 沒清？）"
         fs.release(probe)
         return True, "可寫、O_EXCL 正常"

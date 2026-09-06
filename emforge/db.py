@@ -37,10 +37,7 @@ def _save_npz(depot, key: str, rec: Record) -> None:
 
 
 def _load_npz(depot, key: str) -> Record:
-    data = depot.get_bytes(key)
-    if data is None:
-        raise FileNotFoundError(f"{depot.spec}/{key}")
-    with np.load(io.BytesIO(data), allow_pickle=False) as z:
+    with np.load(io.BytesIO(depot.require_bytes(key)), allow_pickle=False) as z:
         meta = json.loads(str(z["meta"]))
         shape = tuple(int(x) for x in z["shape"])
         bits = unpack_bits(z["bits"], shape)
@@ -96,7 +93,8 @@ class Database:
             lines[stem] = line
             added += 1
         vanished = set(lines) - on_disk
-        if vanished:
+        #? 列舉可最終一致：整個目錄「看起來」空了而索引非空，比較可能是後端短暫看不到、不是有人刪光全史——不壓實。
+        if vanished and on_disk:
             for stem in vanished:
                 del lines[stem]
             self.depot.rewrite_log(index_key, list(lines.values()))

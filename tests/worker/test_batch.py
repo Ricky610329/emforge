@@ -4,14 +4,13 @@
 防什麼：I-1（工作目錄）、I-10（版本戳）、I-12（可續跑）、看門狗、保險絲、讓位、worker 不碰量測。
 """
 import inspect
-import os
 import shutil
 import time
 from pathlib import Path
 
 import numpy as np
 
-from emforge import fs, paths, testing
+from emforge import paths, testing
 from emforge.worker import batch as wb
 from emforge.worker.fuse import Fuse
 from emforge.worker.workdir import WorkDir
@@ -144,8 +143,8 @@ def test_yields_when_claim_taken_over(root, claimed):
     def steal():
         calls["n"] += 1
         if calls["n"] == 1:
-            fs.release(root / paths.claim_file(job.store))
-            fs.try_claim(root / paths.claim_file(job.store), {"machine": "218", "at": "x"})
+            q.depot.release(paths.claim_file(job.store))
+            q.depot.claim(paths.claim_file(job.store), {"owner": "218", "at": "x"})
 
     _HookSim.hook = steal
     try:
@@ -202,10 +201,9 @@ def test_pass0_skips_poison_samples_with_attempts_at_max(root, claimed):
 def test_run_batch_touches_claim_after_each_sample(root, claimed):
     """review（砍掉的 queue.py:165）配套：worker 每筆後 touch claim，claim mtime 才是真的心跳。"""
     q, b, job, ids = claimed
-    old = time.time() - 3600
-    os.utime(root / paths.claim_file(job.store), (old, old))
+    q.depot.set_modified_at(paths.claim_file(job.store), time.time() - 3600)
     _run(root, claimed)
-    assert time.time() - fs.mtime(root / paths.claim_file(job.store)) < 5
+    assert time.time() - q.depot.modified_at(paths.claim_file(job.store)) < 5
 
 
 def test_worker_knows_no_measure_or_score(root, claimed):

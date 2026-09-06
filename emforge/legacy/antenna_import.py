@@ -235,7 +235,7 @@ def _import_store(old: Path, out_root: Path, db: Database, rep: StoreReport, res
         if db.add(rec):
             rep.n_records += 1
     imported[rep.store] = {**sig, "n_records": rep.n_records, "n_errors": rep.n_errors, "n_join_failed": rep.n_join_failed,
-                           "n_verify_fail": rep.n_verify_fail, "imported_at": fs.now_iso()}
+                           "n_verify_fail": rep.n_verify_fail, "imported_at": model.now_iso()}
     fs.atomic_write_json(imported_path, imported)
 
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""tests/test_fs.py — `emforge/fs.py`：檔案系統協調原語（原子寫入、認領、陳舊判定、鎖）。
+"""tests/test_fs.py — `emforge/fs.py`：檔案系統原語（原子寫入、認領、陳舊判定、jsonl、清掃）。
 
-這是 O-3（協調層假設 O_EXCL 近似原子 + mtime 可信）的唯一落點；換儲存後端只動 fs.py。
+這是 O-3（協調層假設 O_EXCL 近似原子 + mtime 可信）的落點；鎖的測試在 tests/depot/test_contract.py（`Depot.lock`）。
 全部在 tmp_path 跑；SMB 真實行為靠正式機 `emforge doctor --probe-fs` 驗。
 """
 import os
@@ -161,95 +161,6 @@ def test_newest_mtime_over_dir(root):
     assert fs.newest_mtime(d, "a*") == 1_000_000
 
 
-# ── 鎖 ──────────────────────────────────────────────────────────────────────
-def test_lock_serializes_counter_8_threads(root):
-    """回歸 I-3（2026-07-22／07-24）：多方同時讀-改-寫 jobs.json 壞檔。持鎖後 8 執行緒累加不丟。"""
-    lk, data = root / "q" / "jobs.lock", root / "q" / "counter.json"
-    fs.atomic_write_json(data, {"n": 0})
-
-    def bump():
-        for _ in range(25):
-            with fs.Lock(lk, timeout_s=30):
-                d = fs.read_json(data)
-                d["n"] += 1
-                fs.atomic_write_json(data, d)
-
-    ts = [threading.Thread(target=bump) for _ in range(8)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    assert fs.read_json(data)["n"] == 200
-    assert not lk.exists(), "鎖釋放乾淨"
-
-
-def test_lock_breaks_stale_by_rename_not_remove(root):
-    """陳鎖（持鎖者已死）自動破——用 rename 而不是 remove：兩個破鎖者不會刪到對方剛建好的新鎖。"""
-    lk = root / "l.lock"
-    lk.parent.mkdir(parents=True, exist_ok=True)
-    fs.try_claim(lk, {"pid": 1})
-    os.utime(lk, (time.time() - 1000, time.time() - 1000))
-    with fs.Lock(lk, stale_s=180, timeout_s=1) as held:
-        assert lk.exists() and held is not None
-        broken = [x.name for x in root.iterdir() if ".broken." in x.name]
-        assert len(broken) == 1, "陳鎖被改名保留當證據，不是刪掉"
-    assert not lk.exists()
-
-
-def test_two_breakers_only_one_wins(root):
-    lk = root / "l2.lock"
-    lk.parent.mkdir(parents=True, exist_ok=True)
-    fs.try_claim(lk, {"pid": 1})
-    os.utime(lk, (time.time() - 1000, time.time() - 1000))
-    inside, peak, lock_ = [0], [0], threading.Lock()
-    go = threading.Barrier(2)
-
-    def worker():
-        go.wait()
-        with fs.Lock(lk, stale_s=180, timeout_s=10):
-            with lock_:
-                inside[0] += 1
-                peak[0] = max(peak[0], inside[0])
-            time.sleep(0.05)
-            with lock_:
-                inside[0] -= 1
-
-    ts = [threading.Thread(target=worker) for _ in range(2)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    assert peak[0] == 1, "兩人從未同時持鎖"
-    assert len([x for x in root.iterdir() if ".broken." in x.name]) == 1, "只有一個破鎖者成功"
-    assert not lk.exists()
-
-
-def test_lock_timeout_raises_locktimeout_not_systemexit(root):
-    """函式庫層永不 SystemExit（舊 `_jobs_lock_acquire` 是反例）；逾時是可捕捉的例外。"""
-    lk = root / "fresh.lock"
-    lk.parent.mkdir(parents=True, exist_ok=True)
-    fs.try_claim(lk, {"pid": 99})
-    t0 = time.time()
-    with pytest.raises(fs.LockTimeout):
-        with fs.Lock(lk, stale_s=180, timeout_s=0.3):
-            pass
-    assert time.time() - t0 < 5
-    assert not issubclass(fs.LockTimeout, SystemExit)
-    assert lk.exists(), "別人的新鮮鎖不能被動"
-
-
-def test_lock_times_out_when_claim_keeps_failing_and_file_missing(root, monkeypatch):
-    """回歸 review-5：NAS 拒建檔時 try_claim 回 False 且檔不存在 → 舊碼在破鎖分支 continue 跳過逾時檢查與 sleep＝100% CPU 無限迴圈。
-    現在每圈都走到逾時檢查：在 timeout_s 內拋 LockTimeout、而且有 sleep。"""
-    monkeypatch.setattr(fs, "try_claim", lambda path, payload: False)
-    slept = []
-    t0 = time.time()
-    with pytest.raises(fs.LockTimeout):
-        with fs.Lock(root / "never.lock", timeout_s=0.3, sleep=slept.append):
-            pass
-    assert time.time() - t0 < 5 and slept, "有逾時、有 sleep（不是忙迴圈）"
-
-
 def test_release_retries_on_permission_error(root, monkeypatch):
     """回歸 review-6：Windows 上別的行程開著檔時 unlink 會 PermissionError（sharing violation）——退避重試，用盡才拋。"""
     f = root / "c.claim"
@@ -299,15 +210,3 @@ def test_sweep_dirs_removes_only_children_of_given_root(root):
     assert sorted(p.name for p in removed) == ["s1", "s2"]
     assert (work / "note.txt").exists() and (other / "s3").exists()
     assert fs.sweep_dirs(root / "missing") == []
-
-
-# ── 小工具 ──────────────────────────────────────────────────────────────────
-def test_now_iso_format():
-    s = fs.now_iso()
-    assert len(s) == 19 and s[10] == "T" and s[4] == s[7] == "-" and s[13] == s[16] == ":"
-
-
-def test_sha1_hex_deterministic_and_order_sensitive():
-    assert fs.sha1_hex(b"a", b"b") == fs.sha1_hex(b"a", b"b")
-    assert fs.sha1_hex(b"a", b"b") != fs.sha1_hex(b"b", b"a")
-    assert len(fs.sha1_hex(b"")) == 40

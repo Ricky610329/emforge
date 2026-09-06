@@ -43,10 +43,7 @@ class Batch:
 
     # ── 讀批（worker） ──────────────────────────────────────────────────
     def manifest(self) -> dict:
-        m = self.depot.get_json(paths.batch_manifest(self.store))
-        if m is None:
-            raise FileNotFoundError(f"批 {self.store} 沒有 manifest（{self.depot.spec}）")
-        return m
+        return self.depot.require_json(paths.batch_manifest(self.store))
 
     def ids(self) -> list:
         return [it["id"] for it in self.manifest()["items"]]
@@ -56,10 +53,7 @@ class Batch:
 
     def patterns(self) -> dict:
         """{id: bool[H,W]}，依 manifest 順序。"""
-        key = paths.batch_patterns(self.store)
-        data = self.depot.get_bytes(key)
-        if data is None:
-            raise FileNotFoundError(f"批 {self.store} 沒有 patterns（{self.depot.spec}）")
+        data = self.depot.require_bytes(paths.batch_patterns(self.store))
         with np.load(io.BytesIO(data), allow_pickle=False) as z:
             ids, packed, shape = [str(i) for i in z["ids"]], z["packed"], tuple(int(x) for x in z["shape"])
         return {i: unpack_bits(packed[k], shape) for k, i in enumerate(ids)}

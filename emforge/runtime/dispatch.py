@@ -11,7 +11,7 @@ import numpy as np
 
 from .. import fs, paths
 from ..batches import Batch
-from ..model import KIND_REPEAT, KIND_SAMPLE, KINDS, Job, record_id
+from ..model import KIND_REPEAT, KIND_SAMPLE, KINDS, Job, now_iso, record_id
 
 
 def _p(root, key: str) -> Path:
@@ -43,7 +43,7 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
     items = {rid: {"parent": p.parent, "arm": p.arm, "note": dict(p.note)} for rid, p in zip(ids, keep)}
     fs.atomic_write_json(_p(rt.root, paths.inflight_file(profile.name, store)),
                          {"store": store, "strategy": strategy_name, "tick": tick, "seed": seed, "kind": kind,
-                          "prio": prio, "ids": ids, "items": items, "collected": [], "at": fs.now_iso()})
+                          "prio": prio, "ids": ids, "items": items, "collected": [], "at": now_iso()})
     manifest = {"store": store, "sim_profile": profile.name, "profile_hash": profile.profile_hash,
                 "strategy": strategy_name, "tick": tick, "seed": seed, "prio": prio, "kind": kind,
                 "items": [{"id": rid, **items[rid]} for rid in ids]}

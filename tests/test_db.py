@@ -114,6 +114,20 @@ def test_index_picks_up_files_dropped_behind_its_back_and_drops_vanished(root):
     assert d3.refresh(P) == 1 and len(d3.metas(P)) == 1
 
 
+def test_refresh_does_not_compact_index_when_listing_comes_back_empty(monkeypatch):
+    """列舉可最終一致（S3 式後端）：目錄短暫「看起來」空了不能把整份索引剔光——索引非空而列舉空 → 不壓實。"""
+    from emforge.depot import MemoryDepot
+    depot = MemoryDepot()
+    d = dbm.Database(depot, write_profile=P)
+    d.add(_rec(40, "st1"))
+    d.add(_rec(41, "st1"))
+    before = depot.read_log(paths.db_index(P))
+    monkeypatch.setattr(depot, "list", lambda prefix: [])
+    d2 = dbm.Database(depot)
+    assert d2.refresh(P) == 0
+    assert len(d2.metas(P)) == 2 and depot.read_log(paths.db_index(P)) == before, "索引一行都不動"
+
+
 def test_ids_count_only_status_done_by_default(root):
     """去重只認量成功的：error 的 id 要能被再次提案。"""
     d = dbm.Database(root, write_profile=P)

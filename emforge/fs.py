@@ -1,11 +1,11 @@
-"""emforge/fs.py — 檔案系統協調原語。**唯一**知道儲存後端語義的模組（O-3）。
+"""emforge/fs.py — 檔案系統原語：`FileDepot`（depot/file.py）的實作細節，加上本機工作目錄清掃。
 
-原語：`atomic_write_*`（tmp→replace）、`try_claim/release`（O_EXCL 認領）、`is_stale/newest_mtime`（mtime 心跳）、
-`Lock`（認領＋陳鎖破除）、`append_jsonl`（**單寫者**檔）。換 S3／DB 後端時只改這個檔：
-claim→條件式 PUT、atomic_write→PUT、mtime→LastModified、Lock→lease。
+原語：`atomic_write_*`（tmp→replace）、`read_bytes/read_json`（退避重試）、`try_claim/read_claim/release`（O_EXCL 認領）、
+`touch/mtime/is_stale/newest_mtime`（mtime 心跳）、`append_jsonl/read_jsonl`（**單寫者**檔）、`sweep_dirs`（I-1）。
+協調狀態的呼叫端不直接用這裡——一律經 `Depot`（M12）；鎖＝`Depot.lock`（租約衍生），舊 `fs.Lock` 已退場。
 
 假設（NTFS 本機與 SMB2+ 皆成立；舊系統以此在 NAS 上跑了兩個月）：
-- `open(O_CREAT|O_EXCL)` 原子；同目錄 `os.replace` 原子；server mtime 可信且各機 NTP 同步（`doctor` 量偏移）。
+- `open(O_CREAT|O_EXCL)` 原子；同目錄 `os.replace` 原子；server mtime 可信且各機 NTP 同步（`doctor`／`selfcheck` 量偏移）。
 - SMB 上多寫者 `O_APPEND` 交錯**無保證**——所以 `append_jsonl` 只給單寫者檔，多方匯總一律「一方一檔」。
 """
 import json
@@ -15,16 +15,9 @@ import shutil
 import time
 from pathlib import Path
 
-from . import model
-
-#? M12b：`now_iso`／`sha1_hex` 搬去 model.py（它們是 schema 不是檔案系統語義）。這裡重匯出讓未遷模組先照舊用，
-#  M12c 拆掉 `Lock` 時一起清。
-now_iso = model.now_iso
-sha1_hex = model.sha1_hex
-
 
 class LockTimeout(Exception):
-    """鎖在 timeout_s 內拿不到（別人的鎖還新鮮）。函式庫層永不 SystemExit。"""
+    """`Depot.lock` 在 timeout_s 內拿不到（別人的鎖還新鮮）。函式庫層永不 SystemExit。"""
 
 
 class FsBusy(Exception):
@@ -214,43 +207,6 @@ def newest_mtime(dir_path, pattern: str = "*") -> float | None:
         return None
     ms = [m for m in (mtime(p) for p in d.glob(pattern) if p.is_file()) if m is not None]
     return max(ms) if ms else None
-
-
-# ── 鎖 ──────────────────────────────────────────────────────────────────────
-class Lock:
-    """認領式鎖：`with Lock(path):`。拿不到就等；持鎖者的檔 mtime 老過 stale_s ＝ 死了 → 破鎖。
-
-    #! 破鎖用 os.replace(path → path.broken.<pid>) 而不是 remove：兩個破鎖者同時動手時只有一個 rename 成功，
-    #  另一個拿到 FileNotFoundError 重來——remove 會刪到對方剛建好的**新**鎖（I-3 的變體）。
-    """
-
-    def __init__(self, path, *, stale_s: float = 180.0, timeout_s: float = 90.0, payload: dict | None = None,
-                 sleep=time.sleep, now=time.time):
-        self.path = Path(path)
-        self.stale_s, self.timeout_s = stale_s, timeout_s
-        self.payload = payload
-        self._sleep, self._now = sleep, now
-
-    def __enter__(self):
-        payload = self.payload or {"pid": os.getpid(), "at": now_iso()}
-        t0 = self._now()
-        while True:
-            if try_claim(self.path, payload):
-                return self
-            if is_stale(self.path, self.stale_s, now=self._now()):
-                broken = self.path.with_name(f"{self.path.name}.broken.{os.getpid()}.{random.randrange(16**4):04x}")
-                try:
-                    os.replace(self.path, broken)
-                except (FileNotFoundError, PermissionError):
-                    pass  # 別人先破了／正在寫——重來就好
-            #! 回歸 review-5：破鎖分支以前 `continue` 跳過下面兩行——NAS 拒建檔（try_claim 回 False、檔又不存在）
-            #  就變成 100% CPU 的無限忙迴圈。每一圈都要走到逾時檢查與 sleep。
-            if self._now() - t0 > self.timeout_s:
-                raise LockTimeout(f"{self.path} 佔用 >{self.timeout_s:.0f}s——查殭屍鎖或 NAS 權限")
-            self._sleep(0.02 + random.random() * 0.03)
-
-    def __exit__(self, *exc):
-        release(self.path)
 
 
 # ── 目錄清掃 ────────────────────────────────────────────────────────────────

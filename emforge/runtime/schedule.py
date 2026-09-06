@@ -5,14 +5,14 @@
 - 策略例外／逾時 → 事件、本 tick 跳過、連 strategy_error_limit 次 → 暫停該策略（操作保護，D9）；
   #! 回歸 I-4（2026-08-03）：背景自產例外殺死 worker。這裡任何策略錯都**絕不**終止 runtime。
 """
-from .. import fs, strategy
-from ..model import KIND_SAMPLE
+from .. import strategy
+from ..model import KIND_SAMPLE, sha1_hex
 from .dispatch import dispatch
 
 
 def strategy_seed(base: int, profile: str, name: str, tick: int) -> int:
     """可重現：同 (base, profile, 策略, tick) 同 seed；記進 inflight。"""
-    return int(fs.sha1_hex(f"{base}:{profile}:{name}:{tick}".encode("utf-8"))[:8], 16)
+    return int(sha1_hex(f"{base}:{profile}:{name}:{tick}".encode("utf-8"))[:8], 16)
 
 
 def schedule(rt) -> None:

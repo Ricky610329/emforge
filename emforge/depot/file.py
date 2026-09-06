@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from .. import fs
+from ..model import now_iso
 from .base import Depot
 
 CLOCK_SKEW_WARN_S = 30.0
@@ -148,7 +149,7 @@ class FileDepot(Depot):
         probe = f".selfcheck.{os.getpid()}.{random.randrange(16**4):04x}"
         try:
             self.root.mkdir(parents=True, exist_ok=True)
-            if not self.claim(probe, {"owner": "selfcheck", "at": fs.now_iso()}):
+            if not self.claim(probe, {"owner": "selfcheck", "at": now_iso()}):
                 problems.append(f"根目錄不可寫（claim 探針失敗）：{self.root}")
                 return problems
             skew = _probe_mtime(self.path(probe)) - time.time()

@@ -15,7 +15,7 @@ import numpy as np
 
 from .. import fs, paths, specs
 from ..batches import Batch
-from ..model import KIND_SAMPLE, STATUS_DONE, STATUS_ERROR, Record
+from ..model import KIND_SAMPLE, STATUS_DONE, STATUS_ERROR, Record, now_iso
 from ..queue import DEFAULT_STALE_S
 
 
@@ -114,7 +114,7 @@ def _finalize(rt, inf: dict, collected: set) -> None:
     if inf["kind"] == KIND_SAMPLE and total:
         rate = n_error / total
         if rate > rt.config.runtime.max_error_rate:
-            rt.state["paused_profile"] = {"store": store, "error_rate": rate, "at": fs.now_iso()}
+            rt.state["paused_profile"] = {"store": store, "error_rate": rate, "at": now_iso()}
             rt.event("profile_paused", error_rate=rate, store=store)
 
 

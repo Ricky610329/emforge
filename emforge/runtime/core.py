@@ -10,6 +10,7 @@ from pathlib import Path
 from .. import _version, events, fs, netid, paths, profiles, strategy
 from ..batches import Batch
 from ..db import Database
+from ..model import now_iso
 from ..queue import Queue
 from . import collect as _collect
 from . import notarize as _notarize
@@ -81,7 +82,7 @@ class Runtime:
             raise RuntimeError("readonly runtime 不拿鎖")
         lk = _p(self.root, paths.runtime_lock(self.profile_name))
         stale_s = max(600.0, 5.0 * self.config.runtime.tick_s)
-        payload = {"pid": os.getpid(), "at": fs.now_iso(), "machine": self.machine_tag}
+        payload = {"pid": os.getpid(), "at": now_iso(), "machine": self.machine_tag}
         for _ in range(3):
             if fs.try_claim(lk, payload):
                 self._locked = True
@@ -205,7 +206,7 @@ class Runtime:
         metas = self.db.metas(self.profile_name)
         status = {
             "profile": self.profile_name, "profile_hash": self.profile.profile_hash, "runtime_ver": _version.describe(),
-            "pid": os.getpid(), "machine": self.machine_tag, "tick": self.state["tick"], "last_tick_at": fs.now_iso(),
+            "pid": os.getpid(), "machine": self.machine_tag, "tick": self.state["tick"], "last_tick_at": now_iso(),
             "paused_profile": self.state.get("paused_profile"), "strategies": strategies,
             "inflight": [{"store": i["store"], "strategy": i["strategy"], "kind": i["kind"], "n": len(i["ids"]),
                           "n_collected": len(i["collected"]), "queue_state": self.queue.state(i["store"]),
