@@ -213,3 +213,62 @@ def test_worker_knows_no_measure_or_score(root, claimed):
         assert "measure" not in r and "score" not in r
     src = inspect.getsource(wb)
     assert "specs" not in src and "measure(" not in src
+
+
+# ── M13：經儀器跑批 ──────────────────────────────────────────────────────────
+def _inst(root, q, factory=None, **kw):
+    from emforge.device.instrument import Instrument
+    kw.setdefault("sleep", lambda s: None)
+    return Instrument(root, "216", depot=q.depot, work_root=root / "work", worker_ver="emforge=test",
+                      sim_factory=factory or (lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p)), **kw)
+
+
+def test_run_batch_via_instrument_done_and_instrument_back_to_idle(root, claimed):
+    q, b, job, ids = claimed
+    inst = _inst(root, q)
+    inst.start()
+    out, res, events, work = _run(root, claimed, instrument=inst)
+    assert out == "done" and len(res) == 3 and all(r["status"] == "done" for r in res.values())
+    assert inst.state.state == "idle" and inst.state.n_done == 3 and inst.sim is None and inst._bound is None
+    assert q.depot.get_json(paths.device_state("216"))["n_done"] == 3
+    inst.stop()
+
+
+def test_run_batch_via_instrument_yields_on_estop_before_next_sample(root, claimed):
+    from emforge.device import estop
+    q, b, job, ids = claimed
+    inst = _inst(root, q, factory=lambda wd, p: _HookSim(workdir=str(wd), profile=p))
+    inst.start()
+    calls = {"n": 0}
+
+    def engage():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            estop.engage(q.depot, "216", by="ricky", reason="冒煙")
+
+    _HookSim.hook = engage
+    try:
+        out, res, events, work = _run(root, claimed, instrument=inst)
+    finally:
+        _HookSim.hook = None
+    assert out == "yield" and len(res) == 1, "第一筆寫完、下一筆前看到急停 → 讓位"
+    assert ("job_yield", {"store": job.store, "reason": "estop_engaged"}) in events
+    assert q.claim_owner(job.store) is None, "放掉 claim：急停可能只停這台，別台可續跑"
+    assert inst.state.state == "estop" and not work.path(job.store).exists()
+    inst.stop()
+
+
+def test_run_batch_aborts_running_sample_on_estop_and_counts_attempt(root, claimed):
+    from emforge.device import estop
+    import threading
+    q, b, job, ids = claimed
+    inst = _inst(root, q, factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p, hang_ids={ids[0]}))
+    inst.start()
+    threading.Timer(0.15, lambda: estop.engage(q.depot, None, by="x", reason="r")).start()
+    out, res, events, _ = _run(root, claimed, instrument=inst, timeout_s=10, retry_passes=0, estop_poll_s=0.02)
+    assert out == "yield"
+    r = res[ids[0]]
+    assert r["status"] == "error" and r["error"].startswith("aborted: estop_engaged") and r["attempts"] == 1, "吃一次 attempts"
+    assert "sim_restart" not in [e for e, _ in events], "急停中止不重開模擬器"
+    assert ("job_yield", {"store": job.store, "reason": "estop_engaged"}) in events
+    inst.stop()

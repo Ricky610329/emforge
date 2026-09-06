@@ -11,40 +11,57 @@ class WatchdogTimeout(Exception):
     """呼叫在 timeout_s 內沒回來，已 kill；原例外在 __cause__。"""
 
 
+class Aborted(WatchdogTimeout):
+    """`abort_if` 變真（e-stop）而被 kill——不是逾時、不重開模擬器。"""
+
+
 class SimulatorOpenFailed(Exception):
     """連續 attempts 次開不起來——疑似機器壞死，這批判死。"""
 
 
 class Watchdog:
-    """`with Watchdog(t, on_timeout):`——區塊內超過 t 秒就呼叫 on_timeout（通常是 sim.kill），`fired` 記錄有沒有觸發。"""
+    """`with Watchdog(t, on_timeout):`——區塊內超過 t 秒就呼叫 on_timeout（通常是 sim.kill），`fired` 記錄有沒有觸發；
+    給 `abort_if` 就每 poll_s 查一次，真了也 on_timeout（`aborted` 記錄是哪一種）。"""
 
-    def __init__(self, timeout_s: float, on_timeout):
-        self.timeout_s, self.on_timeout, self.fired = float(timeout_s), on_timeout, False
-        self._timer = None
+    def __init__(self, timeout_s: float, on_timeout, *, abort_if=None, poll_s: float = 1.0):
+        self.timeout_s, self.on_timeout, self.fired, self.aborted = float(timeout_s), on_timeout, False, False
+        self._abort_if, self._poll_s = abort_if, float(poll_s)
+        self._halt = threading.Event()
+        self._thread = None
 
-    def _fire(self) -> None:
-        self.fired = True
+    def _fire(self, aborted: bool = False) -> None:
+        self.fired, self.aborted = True, aborted
         try:
             self.on_timeout()
         except Exception:  # noqa: BLE001 — 殺不掉也不能讓看門狗執行緒炸
             pass
 
+    def _watch(self) -> None:
+        deadline = time.monotonic() + self.timeout_s
+        step = self._poll_s if self._abort_if is not None else self.timeout_s
+        while not self._halt.wait(min(step, max(0.0, deadline - time.monotonic()))):
+            if self._abort_if is not None and self._abort_if():
+                return self._fire(aborted=True)
+            if time.monotonic() >= deadline:
+                return self._fire()
+
     def __enter__(self):
-        self._timer = threading.Timer(self.timeout_s, self._fire)
-        self._timer.daemon = True
-        self._timer.start()
+        self._thread = threading.Thread(target=self._watch, daemon=True, name="emforge-watchdog")
+        self._thread.start()
         return self
 
     def __exit__(self, *exc):
-        self._timer.cancel()
+        self._halt.set()
 
 
-def guarded_call(fn, timeout_s: float, on_timeout):
-    """呼叫 fn()；逾時由 on_timeout 讓它拋錯，並包成 WatchdogTimeout。沒逾時的例外原樣拋。"""
-    with Watchdog(timeout_s, on_timeout) as wd:
+def guarded_call(fn, timeout_s: float, on_timeout, *, abort_if=None, poll_s: float = 1.0):
+    """呼叫 fn()；逾時由 on_timeout 讓它拋錯，並包成 WatchdogTimeout（abort_if 觸發＝Aborted）。沒逾時的例外原樣拋。"""
+    with Watchdog(timeout_s, on_timeout, abort_if=abort_if, poll_s=poll_s) as wd:
         try:
             return fn()
         except Exception as e:
+            if wd.aborted:
+                raise Aborted(f"被中止（abort_if）已殺：{e}") from e
             if wd.fired:
                 raise WatchdogTimeout(f"{timeout_s:.0f}s 逾時已殺：{e}") from e
             raise

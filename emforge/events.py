@@ -11,6 +11,7 @@ EVENTS = {
     # ── runtime ──
     "runtime_start": ("runtime_ver", "profile_hash", "pid", "machine"),
     "runtime_stop": ("reason",),
+    "lock_lost": ("owner",),
     "reconcile_mismatch": ("detail",),
     "config_reloaded": ("n_strategies",),
     "config_invalid": ("error",),
@@ -57,6 +58,15 @@ EVENTS = {
     "gate_rejected": ("store", "reason"),
     "sim_restart": ("store", "reason"),
     "worker_stop": ("reason",),
+    # ── 儀器（devices/<tag>/log.jsonl；單寫者＝該台 Instrument） ──
+    "device_start": ("tag", "worker_ver", "pid"),
+    "device_stop": ("tag", "reason"),
+    "device_fault": ("tag", "error"),
+    "device_simulate": ("tag", "id", "by", "status", "time_s"),
+    "device_abort": ("tag", "by"),
+    "lease_refused": ("tag", "owner", "holder"),
+    "estop_engaged": ("tag", "scope", "by", "reason"),
+    "estop_cleared": ("tag", "scope"),
 }
 
 

@@ -105,3 +105,16 @@ def test_newest_result_at_is_progress_signal(root):
     assert b.newest_result_at() is not None
     b.depot.set_modified_at(paths.batch_result("s", "a"), 1_000_000)
     assert b.newest_result_at() == 1_000_000
+
+
+def test_make_result_shares_base_for_done_error_and_bad_shape():
+    """M13：批結果與儀器 ad-hoc 結果同一來源（`result_base`／`make_result`／`error_result`）。"""
+    from emforge.model import SimResult
+    base = batches.result_base("0" * 16, attempts=2, machine="216", worker_ver="v", profile_hash=P.profile_hash)
+    assert base["id"] == "0" * 16 and base["attempts"] == 2 and len(base["at"]) == 19
+    ok = batches.make_result(P, base, SimResult(response=np.zeros((2, 17), np.float32), time_s=0.0, extra={"k": 1}), 3.5)
+    assert ok["status"] == "done" and ok["time_s"] == 3.5 and ok["extra"] == {"k": 1} and len(ok["response"]) == 2
+    bad = batches.make_result(P, base, SimResult(response=np.zeros((3, 17), np.float32), time_s=1.0, extra={}), 1.0)
+    assert bad["status"] == "error" and bad["error"].startswith("bad_response_shape")
+    err = batches.error_result(base, "FakeFailure: x")
+    assert err["status"] == "error" and err["error"] == "FakeFailure: x" and err["machine"] == "216"

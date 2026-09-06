@@ -24,14 +24,19 @@ class GateVerdict:
 
 def gate(job: Job, depot) -> GateVerdict:
     """`depot`＝共享狀態（退役標記）；接受 Depot 或路徑。"""
+    return check(job.sim_profile, job.profile_hash, depot)
+
+
+def check(sim_profile: str, profile_hash: str, depot) -> GateVerdict:
+    """守門本體（不需要 Job 物件；儀器層的前置檢查也用它）。"""
     try:
-        profile = profiles.get_profile(job.sim_profile)
+        profile = profiles.get_profile(sim_profile)
     except profiles.UnknownProfile as e:
         return GateVerdict(False, f"unknown_profile: {e}")
     if profiles.is_retired(depot, profile):
         return GateVerdict(False, f"profile_retired: {profile.name}")
-    if job.profile_hash != profile.profile_hash:
-        return GateVerdict(False, f"profile_hash_mismatch: job={job.profile_hash} registry={profile.profile_hash}"
+    if profile_hash != profile.profile_hash:
+        return GateVerdict(False, f"profile_hash_mismatch: job={profile_hash} registry={profile.profile_hash}"
                                   f"（派工端與執行端的 emforge 版本或 registry.py 不同步）")
     try:
         cls = profiles.load_simulator_class(profile)

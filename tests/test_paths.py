@@ -45,6 +45,16 @@ def test_key_snapshot():
         "control_json": "runtime_state/p/control.json",
         "inflight_dir": "runtime_state/p/inflight/",
         "inflight_file": "runtime_state/p/inflight/s.json",
+        "devices_dir": "devices/",
+        "device_dir": "devices/216/",
+        "device_state": "devices/216/state.json",
+        "device_reference_md": "devices/216/reference.md",
+        "device_reference_json": "devices/216/reference.json",
+        "device_log": "devices/216/log.jsonl",
+        "adhoc_dir": "devices/216/adhoc/",
+        "adhoc_result": "devices/216/adhoc/20260906120000-0123456789abcdef.json",
+        "estop_fleet": "queue/ESTOP",
+        "estop_device": "queue/ESTOP.216",
     }
 
 
@@ -62,7 +72,7 @@ def test_keys_obey_depot_key_rules():
 def test_layout_prefixes_are_the_ones_init_creates():
     """`emforge init` 的 ensure_prefixes 清單；`strategies/` 不在裡面——它是本機程式碼目錄。"""
     assert set(paths.layout_prefixes()) == {"db/", "ledger/", "queue/", "queue/state/", "queue/log/",
-                                            "batches/", "runtime_state/"}
+                                            "batches/", "runtime_state/", "devices/"}
 
 
 def test_local_snapshot_is_paths_under_root():
@@ -72,6 +82,7 @@ def test_local_snapshot_is_paths_under_root():
         "registry_py": "registry.py",
         "user_strategies_dir": "strategies",
         "strategy_workdir": "runtime_state/p/strategies/k",
+        "estop_local": "ESTOP",
     }
 
 

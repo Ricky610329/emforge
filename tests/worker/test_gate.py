@@ -62,3 +62,12 @@ def test_gate_never_constructs_or_opens(root):
     profiles.register_profile(p)
     gate(model.Job(store="s", sim_profile="fake_single", profile_hash=p.profile_hash, prio=5, n=1), root)
     assert _NoGeomSim.opened == []
+
+
+def test_check_is_gate_without_a_job_object(root):
+    """M13：`check(sim_profile, profile_hash, depot)` 給儀器層的前置檢查重用；`gate(job, depot)` 只是包一層。"""
+    from emforge.worker.gate import check
+    testing.make_fake_root(root)
+    v = check(P.name, P.profile_hash, root)
+    assert v.ok and v.profile.name == P.name and v.sim_cls is testing.FakeSimulator
+    assert check(P.name, "0" * 12, root).reason.startswith("profile_hash_mismatch")

@@ -19,6 +19,8 @@
   batches/<store>/manifest.json  patterns.npz  results/<id>.json
   runtime_state/<profile>/lock  strategies.yaml  state.json  status.json  events.jsonl  pending.jsonl  STOP
                           control.json  inflight/<store>.json  strategies/<name>/   ← 最後這個是本機路徑
+  devices/<tag>/state.json  reference.md  reference.json  log.jsonl  adhoc/<stamp>-<id>.json   ← 儀器層（M13）
+  queue/ESTOP  queue/ESTOP.<tag>  <root>/ESTOP（本機路徑）                                    ← e-stop 三層
 """
 import re
 from pathlib import Path
@@ -36,6 +38,7 @@ LEDGER = "ledger/"
 QUEUE = "queue/"
 BATCHES = "batches/"
 RUNTIME_STATE = "runtime_state/"
+DEVICES = "devices/"
 
 _RECORD_EXT = ".npz"
 _RESULT_EXT = ".json"
@@ -123,6 +126,52 @@ def queue_stop(tag: str | None = None) -> str:
 
 def worker_log(tag: str) -> str:
     return f"{queue_log_dir()}{tag}.jsonl"
+
+
+def estop_fleet() -> str:
+    """全機隊急停（CLI 建／清；儀器 open／simulate 前硬檢查）。"""
+    return f"{QUEUE}ESTOP"
+
+
+def estop_device(tag: str) -> str:
+    """單機急停。"""
+    return f"{QUEUE}ESTOP.{tag}"
+
+
+# ── 儀器（M13） ──────────────────────────────────────────────────────────────
+def devices_dir() -> str:
+    return DEVICES
+
+
+def device_dir(tag: str) -> str:
+    return f"{DEVICES}{tag}/"
+
+
+def device_state(tag: str) -> str:
+    """狀態字典（只有該台 Instrument 寫；轉換即寫＋心跳）。"""
+    return f"{device_dir(tag)}state.json"
+
+
+def device_reference_md(tag: str) -> str:
+    return f"{device_dir(tag)}reference.md"
+
+
+def device_reference_json(tag: str) -> str:
+    return f"{device_dir(tag)}reference.json"
+
+
+def device_log(tag: str) -> str:
+    """裝置日誌（單寫者＝該台 Instrument）。"""
+    return f"{device_dir(tag)}log.jsonl"
+
+
+def adhoc_dir(tag: str) -> str:
+    return f"{device_dir(tag)}adhoc/"
+
+
+def adhoc_result(tag: str, rec_id: str, stamp: str) -> str:
+    """`simulate_once` 的結果檔（與批結果同格式、**不入 db**）。"""
+    return f"{adhoc_dir(tag)}{stamp}-{rec_id}{_RESULT_EXT}"
 
 
 # ── 批次 ────────────────────────────────────────────────────────────────────
@@ -245,13 +294,18 @@ def strategy_workdir(root, profile: str, strategy: str) -> Path:
     return Path(root) / "runtime_state" / profile / "strategies" / strategy
 
 
+def estop_local(root) -> Path:
+    """本機急停（第三層）：這台機器自己的檔，NAS 斷線也擋得住。"""
+    return Path(root) / "ESTOP"
+
+
 # ── 整體 ────────────────────────────────────────────────────────────────────
 def layout_prefixes() -> tuple:
     """`emforge init` 要 `ensure_prefixes` 的前綴（不含 per-profile 子前綴，那些第一次用到才建）。"""
-    return (DB, LEDGER, QUEUE, queue_state_dir(), queue_log_dir(), BATCHES, RUNTIME_STATE)
+    return (DB, LEDGER, QUEUE, queue_state_dir(), queue_log_dir(), BATCHES, RUNTIME_STATE, DEVICES)
 
 
-def snapshot(*, profile: str, store: str, rec_id: str, spec: str, tag: str) -> dict:
+def snapshot(*, profile: str, store: str, rec_id: str, spec: str, tag: str, stamp: str = "20260906120000") -> dict:
     """所有 key 函式的一次性展開——tests/test_paths.py 用它釘快照。"""
     return {
         "db_dir": db_dir(profile),
@@ -282,6 +336,16 @@ def snapshot(*, profile: str, store: str, rec_id: str, spec: str, tag: str) -> d
         "control_json": control_json(profile),
         "inflight_dir": inflight_dir(profile),
         "inflight_file": inflight_file(profile, store),
+        "devices_dir": devices_dir(),
+        "device_dir": device_dir(tag),
+        "device_state": device_state(tag),
+        "device_reference_md": device_reference_md(tag),
+        "device_reference_json": device_reference_json(tag),
+        "device_log": device_log(tag),
+        "adhoc_dir": adhoc_dir(tag),
+        "adhoc_result": adhoc_result(tag, rec_id, stamp),
+        "estop_fleet": estop_fleet(),
+        "estop_device": estop_device(tag),
     }
 
 
@@ -291,4 +355,5 @@ def local_snapshot(root, *, profile: str, strategy: str) -> dict:
         "registry_py": registry_py(root),
         "user_strategies_dir": user_strategies_dir(root),
         "strategy_workdir": strategy_workdir(root, profile, strategy),
+        "estop_local": estop_local(root),
     }

@@ -219,3 +219,29 @@ def test_quiet_fleet_waits(rt_root, rt):
     rt.tick()
     ev = [e["event"] for e in fs.read_jsonl(rt_root / paths.events_jsonl("fake_f1"))]
     assert "fleet_quiet" in ev and len(rt.queue.list()) == n_before, "機隊靜默 → 只等、不排程"
+
+
+# ── M13：鎖丟了就停 ─────────────────────────────────────────────────────────
+def test_runtime_stops_after_lock_lost(rt_root):
+    """M13（收 §12-16）：鎖被破／被清後，下一圈發 lock_lost 並停（回 3），不再 tick。"""
+    rt = make_rt(rt_root)
+    key = paths.runtime_lock("fake_f1")
+    rt._sleep = lambda s: rt.depot.delete(key)          # tick 之間有人清掉鎖
+    rc = rt.run(once=False)
+    assert rc == 3 and rt.lock_lost()
+    log = rt.depot.read_log(paths.events_jsonl("fake_f1"))
+    ev = [e["event"] for e in log]
+    assert ev.count("batch_dispatched") >= 1 and ev[-2:] == ["lock_lost", "runtime_stop"]
+    assert log[-1]["reason"] == "lock_lost" and rt.state["tick"] == 1, "只跑了一個 tick"
+
+
+def test_heartbeat_detects_foreign_owner_as_lost_and_does_not_touch_it(rt_root, rt):
+    rt.acquire_lock()
+    key = paths.runtime_lock("fake_f1")
+    rt.depot.delete(key)
+    r2 = make_rt(rt_root)
+    r2.acquire_lock()
+    rt.depot.set_modified_at(key, 1_000_000)
+    assert rt.heartbeat() is False and rt.lock_lost()
+    assert rt.depot.modified_at(key) == 1_000_000, "別人的鎖不 touch"
+    r2.release_lock()

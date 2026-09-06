@@ -5,7 +5,6 @@ state.json（runtime 自己的持久狀態，重啟重讀）與 status.json（�
 鎖＝`Depot` 租約（claim／touch／break_if_stale／release(owner=)）；strategies.yaml 重載比**內容 sha1**，不靠 mtime。
 """
 import os
-import threading
 import time
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from .. import _version, events, netid, paths, profiles, strategy
 from ..batches import Batch
 from ..db import Database
 from ..depot import FileDepot, open_depot
+from ..heartbeat import Heartbeat
 from ..model import now_iso, sha1_hex
 from ..queue import Queue
 from . import collect as _collect
@@ -31,25 +31,6 @@ def default_state() -> dict:
 
 def default_strategy_state() -> dict:
     return {"errors_consecutive": 0, "paused": False, "n_dispatched": 0, "last_dispatch_tick": None}
-
-
-class _Heartbeat(threading.Thread):
-    """背景每 interval_s touch 鎖——一個 tick 可能超過 stale 門檻（策略子行程逐個逾時），不能只靠 tick 開頭心跳（review-7）。"""
-
-    def __init__(self, fn, interval_s: float):
-        super().__init__(daemon=True, name="emforge-heartbeat")
-        self._fn, self._interval, self._halt = fn, interval_s, threading.Event()   # 不叫 _stop：Thread 內部有同名方法
-
-    def run(self) -> None:
-        while not self._halt.wait(self._interval):
-            try:
-                self._fn()
-            except Exception:  # noqa: BLE001 — 心跳失敗不能炸執行緒；鎖變 stale 會被下一個實例看到
-                pass
-
-    def stop(self) -> None:
-        self._halt.set()
-        self.join(timeout=5)
 
 
 class Runtime:
@@ -75,7 +56,7 @@ class Runtime:
         self.config = strategy.parse_strategies_yaml(text.decode("utf-8"), profile=profile_name)
         self._config_sha = sha1_hex(text)
         self.state = self.depot.get_json(paths.state_json(profile_name)) or default_state()
-        self._locked = False
+        self._locked, self._lost = False, False
 
     # ── 鎖（租約；心跳＝touch） ───────────────────────────────────────────
     def acquire_lock(self) -> None:
@@ -86,7 +67,7 @@ class Runtime:
         payload = {"owner": self._lock_owner, "pid": os.getpid(), "at": now_iso(), "machine": self.machine_tag}
         for _ in range(3):
             if self.depot.claim(key, payload):
-                self._locked = True
+                self._locked, self._lost = True, False
                 return
             if self.depot.is_stale(key, stale_s):
                 self.depot.break_if_stale(key, stale_s)      # 沒破到＝別人先破了，下一圈 claim 決勝負
@@ -94,15 +75,23 @@ class Runtime:
             raise RuntimeLocked(f"profile {self.profile_name} 已有 runtime 在跑（{self.depot.owner(key)}）——一實例一 profile")
         raise RuntimeLocked(f"profile {self.profile_name} 的鎖搶不到：{self.depot.spec}/{key}")
 
-    def heartbeat(self) -> None:
-        """`touch` 缺即 no-op：鎖被破後心跳不會重建一個空鎖擋人。"""
-        self.depot.touch(paths.runtime_lock(self.profile_name))
+    def heartbeat(self) -> bool:
+        """鎖還是自己的才 touch；缺／換主 → False 並立 lost（M13：鎖丟了就停，§12-16）。`touch` 缺即 no-op、不重建鎖。"""
+        key = paths.runtime_lock(self.profile_name)
+        cur = self.depot.owner(key)
+        if cur is None or cur.get("owner") != self._lock_owner:
+            self._lost = True
+            return False
+        return self.depot.touch(key)
+
+    def lock_lost(self) -> bool:
+        return self._lost or (self._hb is not None and self._hb.lost.is_set())
 
     def start_heartbeat(self) -> None:
         if not self._locked:
             raise RuntimeError("沒拿鎖不心跳")
         if self._hb is None:
-            self._hb = _Heartbeat(self.heartbeat, self.heartbeat_s)
+            self._hb = Heartbeat(self.heartbeat, self.heartbeat_s)
             self._hb.start()
 
     def stop_heartbeat(self) -> None:
@@ -231,7 +220,7 @@ class Runtime:
 
     # ── run ─────────────────────────────────────────────────────────────
     def run(self, once: bool = False) -> int:
-        """0＝正常停；2＝對帳不一致拒起（I-14）。鎖被占直接拋 RuntimeLocked（CLI 轉 3）。"""
+        """0＝正常停；2＝對帳不一致拒起（I-14）；3＝鎖丟了（被破／被清）。鎖被占直接拋 RuntimeLocked（CLI 轉 3）。"""
         self.acquire_lock()
         try:
             self.start_heartbeat()
@@ -246,6 +235,11 @@ class Runtime:
                 self.event("runtime_stop", reason="reconcile_mismatch")
                 return 2
             while True:
+                self.heartbeat()
+                if self.lock_lost():
+                    self.event("lock_lost", owner=self._lock_owner)
+                    self.event("runtime_stop", reason="lock_lost")
+                    return 3
                 if self.depot.exists(paths.runtime_stop(self.profile_name)):
                     self.event("runtime_stop", reason="stop_file")
                     return 0

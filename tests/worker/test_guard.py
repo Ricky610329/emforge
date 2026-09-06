@@ -65,3 +65,24 @@ def test_open_with_retries_gives_up_after_3_and_kills_between():
     ok = _Sim(fail_first=1)
     guard.open_with_retries(ok, attempts=3, timeout_s=5, sleep=slept.append, retry_wait_s=1)
     assert ok.opens == 2 and ok.kills == 1
+
+
+def test_guarded_call_aborts_when_predicate_becomes_true():
+    """M13：e-stop 進來時正在跑的那筆要被殺——`abort_if` 每 poll_s 查一次，真了就 on_timeout（kill）→ 拋 Aborted。"""
+    flag, kills, estop = threading.Event(), [], []
+
+    def hang():
+        flag.wait(5)
+        raise RuntimeError("killed")
+
+    def kill():
+        kills.append(1)
+        flag.set()
+
+    threading.Timer(0.1, lambda: estop.append(1)).start()
+    t0 = time.time()
+    with pytest.raises(guard.Aborted):
+        guard.guarded_call(hang, 10.0, kill, abort_if=lambda: bool(estop), poll_s=0.02)
+    assert time.time() - t0 < 3 and kills == [1]
+    assert issubclass(guard.Aborted, guard.WatchdogTimeout), "呼叫端的 except WatchdogTimeout 仍接得到"
+    assert guard.guarded_call(lambda: 7, 1.0, kill, abort_if=lambda: False, poll_s=0.01) == 7

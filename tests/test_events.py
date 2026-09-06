@@ -40,3 +40,14 @@ def test_event_names_are_lower_snake_and_have_field_tuples():
         assert paths.is_valid_name(name), name
         assert isinstance(fields, tuple) and all(paths.is_valid_name(f) for f in fields), name
     assert {"batch_dispatched", "profile_tamper", "strategy_paused", "record_candidate", "worker_start", "job_yield"} <= set(events.EVENTS)
+
+
+def test_device_events_are_whitelisted_with_required_fields():
+    """M13：儀器層事件（devices/<tag>/log.jsonl 單寫者＝Instrument）與 runtime 的 lock_lost。"""
+    must = {"device_start": ("tag", "worker_ver", "pid"), "device_stop": ("tag", "reason"),
+            "device_fault": ("tag", "error"), "device_simulate": ("tag", "id", "by", "status"),
+            "device_abort": ("tag", "by"), "lease_refused": ("tag", "owner", "holder"),
+            "estop_engaged": ("tag", "scope", "by", "reason"), "estop_cleared": ("tag", "scope"),
+            "lock_lost": ("owner",)}
+    for name, fields in must.items():
+        assert set(fields) <= set(events.EVENTS[name]), name

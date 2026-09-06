@@ -12,11 +12,32 @@ import numpy as np
 
 from . import paths
 from .depot import open_depot
-from .model import pack_bits, unpack_bits
+from .model import now_iso, pack_bits, unpack_bits
 
 
 class BatchExists(Exception):
     """同名批已存在——防覆寫（store 名要唯一）。"""
+
+
+# ── 結果檔（批結果與儀器 ad-hoc 結果同一來源，M13） ─────────────────────────
+def result_base(rec_id: str, *, attempts: int, machine: str, worker_ver: str, profile_hash: str) -> dict:
+    """每筆結果的戳記（I-10：誰、哪個版本、哪個儀器指紋量的）。"""
+    return {"id": rec_id, "attempts": int(attempts), "machine": machine, "worker_ver": worker_ver,
+            "profile_hash": profile_hash, "at": now_iso()}
+
+
+def make_result(profile, base: dict, out, elapsed_s: float) -> dict:
+    """SimResult → 結果檔 dict：形狀對＝done（原始響應＋time_s＋extra）；形狀錯＝error（bad_response_shape）。"""
+    resp = np.asarray(out.response, np.float32)
+    expected = (len(profile.labels), profile.n_points)
+    if resp.shape != expected:
+        return error_result(base, f"bad_response_shape: {resp.shape} ≠ {expected}")
+    time_s = float(out.time_s) if out.time_s else float(elapsed_s)
+    return {**base, "status": "done", "response": resp.tolist(), "time_s": time_s, "extra": dict(out.extra or {})}
+
+
+def error_result(base: dict, error: str) -> dict:
+    return {**base, "status": "error", "error": str(error)}
 
 
 class Batch:

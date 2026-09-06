@@ -128,3 +128,46 @@ def test_loop_run_batch_fail_marks_fail(root):
                           max_fail=1, max_blowout=1)
     assert rc == 0 and q.state("s1") == "fail"
     assert "216" in fs.read_json(root / paths.fail_file("s1"))["machines"]
+
+
+# ── M13：worker 經儀器 ────────────────────────────────────────────────────────
+def test_loop_does_not_pick_jobs_while_estop_engaged_and_resumes_after_clear(root):
+    from emforge.device import estop
+    testing.make_fake_root(root)
+    make_batch(root, "s1")
+    q = queue.Queue(root)
+    q.add(make_job("s1"))
+    estop.engage(q.depot, None, by="ricky", reason="全停")
+    polls = []
+
+    def sleep(s):
+        polls.append(s)
+        estop.clear(q.depot, None)
+
+    rc = loop.worker_loop(root, "216", once=True, work_root=root / "work", sleep=sleep, poll_s=7)
+    assert rc == 0 and q.state("s1") == "done" and polls == [7], "急停中不撿 job；解除後才跑"
+    ev = [e["event"] for e in q.depot.read_log(paths.device_log("216"))]
+    assert ev[0] == "device_start" and "estop_engaged" in ev and "estop_cleared" in ev and ev[-1] == "device_stop"
+    assert q.depot.get_json(paths.device_state("216"))["state"] == "idle"
+
+
+def test_loop_releases_claim_when_instrument_lease_is_held(root):
+    from emforge.device.instrument import Instrument
+    testing.make_fake_root(root)
+    make_batch(root, "s1")
+    q = queue.Queue(root)
+    q.add(make_job("s1"))
+    inst = Instrument(root, "216", depot=q.depot, work_root=root / "work", sleep=lambda s: None,
+                      sim_factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p))
+    inst.acquire("mcp:ricky")
+    polls = []
+
+    def sleep(s):
+        polls.append(s)
+        inst.release("mcp:ricky")
+
+    rc = loop.worker_loop(root, "216", once=True, work_root=root / "work", sleep=sleep, instrument=inst)
+    assert rc == 0 and q.state("s1") == "done" and len(polls) == 1
+    log = fs.read_jsonl(root / paths.worker_log("216"))
+    assert any(e["event"] == "job_yield" and e["reason"] == "device_busy" for e in log)
+    assert inst.state.owner is None, "跑完放掉租約"

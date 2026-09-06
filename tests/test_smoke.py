@@ -28,11 +28,12 @@ BANNED_MODULE_STEMS = {"utils", "util", "misc", "helpers", "common", "dedust", "
 #  DEPOT_ONLY：共享狀態只准經 `Depot`——不 import pathlib／shutil／glob／emforge.fs、不用 os.path／os.replace…、不 open(。
 #  換後端＝實作一個 `Depot`；只要有一個模組偷偷開檔，那個保證就是假的。
 DEPOT_ONLY_MODULES = (
-    "__init__.py", "__main__.py", "specs.py", "netid.py", "events.py", "profiles.py",
+    "__init__.py", "__main__.py", "specs.py", "netid.py", "events.py", "profiles.py", "heartbeat.py",
     "db.py", "batches.py", "ledger.py", "queue.py", "report.py",
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
     "runtime/schedule.py",
     "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py",
+    "device/__init__.py", "device/limits.py", "device/states.py",
     "cli/__init__.py", "cli/__main__.py", "cli/control.py", "cli/show.py", "cli/verdict.py", "cli/loops.py",
     "strategies/__init__.py", "strategies/blind.py", "strategies/top_k_flip.py",
 )
@@ -44,6 +45,8 @@ DEPOT_ONLY_PARTIAL = {
     "runtime/core.py": "root＝本機程式碼根（registry.py／策略 workdir）",
     "worker/loop.py": "本機 registry.py 與工作目錄根",
     "worker/guard.py": "看門狗（不碰檔）",
+    "device/estop.py": "第三層急停是本機檔 <root>/ESTOP（NAS 斷線也要擋得住）",
+    "device/instrument.py": "root＝本機程式碼根（前置檢查、急停本機層）；本機工作目錄 WorkDir",
     "cli/base.py": "--root 是本機路徑",
     "cli/setup.py": "init 寫本機 registry.py／strategies/；import-legacy 的舊樹是本機路徑",
     "testing.py": "假根建本機 registry.py",
@@ -58,6 +61,10 @@ LOCAL_LAYER = {
     "doctor.py": "本機體檢：root 探針、C 槽、ansysedt 行程",
     "worker/workdir.py": "本機工作目錄生命週期（I-1 是本機碟事故）",
 }
+#? 儀器層依賴方向（M13）：device/* 只可 import worker 的 leaf（guard／gate／workdir）；worker 的 leaf 不可 import device；
+#  只有 worker/batch.py、worker/loop.py（與 runtime、cli）可以 import device。
+WORKER_LEAF = {"worker/gate.py", "worker/guard.py", "worker/fuse.py", "worker/workdir.py"}
+DEVICE_MAY_IMPORT_FROM_WORKER = {"worker.guard", "worker.gate", "worker.workdir"}
 FS_IMPORTS = {"pathlib", "shutil", "glob", "tempfile"}
 #? `os.path` 也算（getmtime／exists 都在裡面）。
 FS_OS_ATTRS = {"path", "replace", "utime", "open", "unlink", "remove", "rename", "makedirs", "scandir",
@@ -165,6 +172,41 @@ def test_coordination_modules_touch_state_only_via_depot():
     for name in DEPOT_ONLY_PARTIAL:
         offenders += _fs_offenders(PKG / name, full=False)
     assert not offenders, "共享狀態只准經 Depot：\n" + "\n".join(offenders)
+
+
+def _package_refs(path) -> set:
+    """這個模組 import 到的 emforge 內部模組（去掉 `emforge.` 前綴；相對 import 解析成同樣形式）。"""
+    refs = set()
+    rel = path.relative_to(PKG).parts[:-1]
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            refs |= {a.name[len("emforge."):] for a in node.names if a.name.startswith("emforge.")}
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = list(rel[:len(rel) - (node.level - 1)]) if node.level > 1 else list(rel)
+                mod = ".".join(base + ([node.module] if node.module else []))
+            elif (node.module or "").startswith("emforge"):
+                mod = (node.module or "")[len("emforge"):].lstrip(".")
+            else:
+                continue
+            refs.add(mod)
+            refs |= {f"{mod}.{a.name}".strip(".") for a in node.names}
+    return refs
+
+
+def test_device_layer_dependency_direction():
+    """M13：device/* 對 worker 只能碰 leaf；worker 的 leaf 不准回頭 import device（否則儀器層與 worker 互相纏住）。"""
+    offenders = []
+    for p in _core_modules():
+        rel = p.relative_to(PKG).as_posix()
+        refs = _package_refs(p)
+        if rel.startswith("device/"):
+            bad = {r for r in refs if r == "worker" or r.startswith("worker.")} - DEVICE_MAY_IMPORT_FROM_WORKER
+            bad = {r for r in bad if not any(r.startswith(ok + ".") for ok in DEVICE_MAY_IMPORT_FROM_WORKER)}
+            offenders += [f"{rel}: import {r}" for r in sorted(bad)]
+        if rel in WORKER_LEAF:
+            offenders += [f"{rel}: import {r}" for r in sorted(refs) if r == "device" or r.startswith("device.")]
+    assert not offenders, "儀器層依賴方向：\n" + "\n".join(offenders)
 
 
 def test_every_core_module_is_classified_for_depot_gate():

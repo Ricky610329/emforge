@@ -2,7 +2,7 @@
 from .. import strategy
 from ..netid import local_tag
 from ..runtime.core import Runtime, RuntimeLocked
-from ..worker import worker_loop
+from ..worker.loop import worker_loop
 from .base import EXIT_LOCKED, add_root, depot_of, err, root_of
 
 

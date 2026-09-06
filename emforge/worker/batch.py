@@ -1,21 +1,24 @@
-"""emforge/worker/batch.py — `run_batch`：一批的逐筆迴圈。只組裝 guard／fuse／workdir，不認得領域。
+"""emforge/worker/batch.py — `run_batch`：一批的逐筆迴圈。只組裝 guard／fuse／workdir／儀器，不認得領域。
 
 流程：建工作目錄 → 建＋開模擬器（三試）→ 第 0 輪跑「還沒 done 的」（續跑）→ 補測輪跑「error 且 attempts<3 的」
 （每輪前殺透重開）→ 每筆：看門狗下 simulate → 逐筆結果檔 → 保險絲 → 讓位檢查 → 結束一律關模擬器、刪工作目錄。
-回傳 "done"（跑完；殘留 error 記在結果檔）／"yield"（claim 被搶或讓位給前景）／"fail"（熔斷或開不起來）。
+回傳 "done"（跑完；殘留 error 記在結果檔）／"yield"（claim 被搶、讓位給前景、急停）／"fail"（熔斷或開不起來）。
 結果檔只有原始響應與戳記；量測與評分是 runtime 的事。
+
+M13：給 `instrument`（`device.Instrument`）就經儀器跑——Instrument 實作 Simulator 協定（open/simulate/kill/close），
+所以逐筆邏輯不變；多的是：每筆前急停讓位（`job_yield reason=estop_engaged`）、正在跑的那筆被急停 `abort`（吃一次 attempts、不重開）。
+不給 instrument（測試／舊呼叫）就直接用 `sim_factory(wd)`。
 """
 import time
 from dataclasses import dataclass
 
-import numpy as np
-
-from ..model import now_iso
+from ..batches import error_result, make_result, result_base
 from .fuse import Fuse
-from .guard import SimulatorOpenFailed, WatchdogTimeout, guarded_call, open_with_retries
+from .guard import Aborted, SimulatorOpenFailed, WatchdogTimeout, guarded_call, open_with_retries
 from .workdir import WorkDir
 
 MAX_ATTEMPTS = 3   #? 毒樣本規則：三次都錯就不再重試，留給人判
+DEFAULT_ESTOP_POLL_S = 5.0
 
 
 def _noop(event, /, **fields):
@@ -35,17 +38,26 @@ class _Run:
     background_prio: int
     sleep: object
     log: object
+    instrument: object = None
+    estop_poll_s: float = DEFAULT_ESTOP_POLL_S
     sim: object = None
+
+    def estop(self) -> bool:
+        return self.instrument is not None and self.instrument.estop_engaged() is not None
 
 
 def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_ver: str, *, work: WorkDir,
-              timeout_s: float | None = None, fuse: Fuse | None = None, retry_passes: int = 2,
-              background_prio: int = 9, sleep=time.sleep, log=_noop) -> str:
+              instrument=None, timeout_s: float | None = None, fuse: Fuse | None = None, retry_passes: int = 2,
+              background_prio: int = 9, sleep=time.sleep, log=_noop, estop_poll_s: float = DEFAULT_ESTOP_POLL_S) -> str:
     run = _Run(queue, batch, job, profile, machine_tag, worker_ver, float(timeout_s or profile.timeout_s),
-               fuse or Fuse(), background_prio, sleep, log)
+               fuse or Fuse(), background_prio, sleep, log, instrument, float(estop_poll_s))
     wd = work.make(job.store)
     try:
-        run.sim = sim_factory(wd)
+        if instrument is not None:
+            instrument.bind(profile, wd, store=job.store)
+            run.sim = instrument
+        else:
+            run.sim = sim_factory(wd)
         open_with_retries(run.sim, sleep=sleep)
         patterns = batch.patterns()
         for rpass in range(1 + retry_passes):
@@ -66,6 +78,8 @@ def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_
     finally:
         if run.sim is not None:
             _close_quiet(run.sim)
+        if instrument is not None:
+            instrument.unbind()
         work.remove(job.store)
 
 
@@ -83,12 +97,16 @@ def _todo(batch, rpass: int) -> list:
 def _run_pass(run: _Run, patterns: dict, todo: list, rpass: int) -> str:
     consecutive = 0
     for rid, prev in todo:
+        if run.estop():
+            return _yield(run, "estop_engaged")            # 每筆前：急停就讓位（不動這筆）
         res = _simulate_one(run, rid, patterns[rid], prev + 1)
         run.batch.write_result(rid, res)
         run.queue.touch_claim(run.job.store)            # claim 心跳：requeue／接管都看得到「還活著」
         if res["status"] == "error":
             run.log("sample_error", store=run.job.store, id=rid, error=res["error"], attempts=res["attempts"])
             consecutive += 1
+            if res["error"].startswith("aborted:"):
+                return _yield(run, "estop_engaged")        # 正在跑的那筆被急停殺掉：吃一次 attempts、不重開、不算保險絲
             if res["error"].startswith("watchdog_timeout"):
                 _restart(run, "watchdog_timeout")
             if rpass == 0:
@@ -113,30 +131,39 @@ def _run_pass(run: _Run, patterns: dict, todo: list, rpass: int) -> str:
 
 
 def _simulate_one(run: _Run, rid: str, bits, attempts: int) -> dict:
-    base = {"id": rid, "attempts": attempts, "machine": run.machine_tag, "worker_ver": run.worker_ver,
-            "profile_hash": run.job.profile_hash, "at": now_iso()}
+    base = result_base(rid, attempts=attempts, machine=run.machine_tag, worker_ver=run.worker_ver,
+                       profile_hash=run.job.profile_hash)
     t0 = time.time()
+    abort_if = run.estop if run.instrument is not None else None
     try:
-        out = guarded_call(lambda: run.sim.simulate(bits), run.timeout_s, run.sim.kill)
+        out = guarded_call(lambda: run.sim.simulate(bits), run.timeout_s, run.sim.kill,
+                           abort_if=abort_if, poll_s=run.estop_poll_s)
+    except Aborted as e:
+        return error_result(base, f"aborted: estop_engaged: {e}")
     except WatchdogTimeout as e:
-        return {**base, "status": "error", "error": f"watchdog_timeout: {e}"}
+        return error_result(base, f"watchdog_timeout: {e}")
     except Exception as e:  # noqa: BLE001 — 模擬器的任何錯都是這一筆的 error，不是 worker 的
-        return {**base, "status": "error", "error": f"{type(e).__name__}: {e}"}
-    resp = np.asarray(out.response, np.float32)
-    expected = (len(run.profile.labels), run.profile.n_points)
-    if resp.shape != expected:
-        return {**base, "status": "error", "error": f"bad_response_shape: {resp.shape} ≠ {expected}"}
-    time_s = float(out.time_s) if out.time_s else time.time() - t0
-    return {**base, "status": "done", "response": resp.tolist(), "time_s": time_s, "extra": dict(out.extra or {})}
+        return error_result(base, f"{type(e).__name__}: {e}")
+    return make_result(run.profile, base, out, time.time() - t0)
+
+
+def _yield(run: _Run, reason: str) -> str:
+    """讓位：放掉**自己的** claim（急停可能只停這台，別台可續跑）、記 job_yield。"""
+    run.queue.release(run.job.store, run.machine_tag)
+    run.log("job_yield", store=run.job.store, reason=reason)
+    return "yield"
 
 
 def _yield_reason(run: _Run) -> str | None:
-    """每筆之後：claim 被別台接走 → 停寫退出（不動別人的 claim）；背景 job 遇前景出現 → 釋放 claim 讓位。"""
+    """每筆之後：claim 被別台接走 → 停寫退出（不動別人的 claim）；背景 job 遇前景出現 → 釋放 claim 讓位；急停 → 釋放讓位。"""
     if run.queue.claim_owner(run.job.store) != run.machine_tag:
         return "claim_taken_over"
     if run.job.prio >= run.background_prio and run.queue.has_unclaimed_foreground(run.background_prio):
         run.queue.release(run.job.store, run.machine_tag)
         return "foreground_job_appeared"
+    if run.estop():
+        run.queue.release(run.job.store, run.machine_tag)
+        return "estop_engaged"
     return None
 
 
