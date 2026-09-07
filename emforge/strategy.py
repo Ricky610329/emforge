@@ -182,7 +182,8 @@ def validate_proposals(raw, profile: Profile, budget: int) -> list:
 def make_context(root, profile: Profile, strategy_name: str, *, budget: int, seed: int, tick: int,
                  params: dict | None, depot=None) -> Context:
     """`root`＝本機（策略 workdir）；`depot`＝共享資料庫（預設 FileDepot(root)）。"""
-    view = dbm.Database(depot if depot is not None else root).view(profile.name, strategy=strategy_name)
+    #! 檢查 #11（2026-09-07）：綁 write_profile——策略拿到的 View 已不持 Database，這是第二道圍籬（refresh 寫索引也受守門）。
+    view = dbm.Database(depot if depot is not None else root, write_profile=profile.name).view(profile.name, strategy=strategy_name)
     workdir = paths.strategy_workdir(root, profile.name, strategy_name)
     workdir.mkdir(parents=True, exist_ok=True)
     return Context(db=view, profile=profile, budget=int(budget), rng=np.random.default_rng(int(seed)),

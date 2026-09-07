@@ -37,6 +37,7 @@ EVENTS = {
     "batch_abandoned": ("store", "by"),
     "profile_tamper": ("store", "expected", "got"),
     "index_repaired": ("n",),
+    "db_unreadable": ("profile", "n", "stems"),          # 檢查 #4：起動時跳過的壞／缺紀錄
     # ── notarize ──
     "record_candidate": ("id", "score", "prev_best"),
     "notarize_dispatched": ("id", "stores"),

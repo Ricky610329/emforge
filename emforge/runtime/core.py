@@ -249,6 +249,9 @@ class Runtime:
             repaired = self.db.refresh(self.profile_name)     # 索引 append 前死掉的檔補回去（review-8）
             if repaired:
                 self.event("index_repaired", n=repaired)
+            if self.db.unreadable:                             # 檢查 #4：壞檔不停實例，但要點名
+                self.event("db_unreadable", profile=self.profile_name, n=len(self.db.unreadable),
+                           stems=[stem for _, stem in self.db.unreadable])
             problems = _reconcile.reconcile(self)
             if problems:
                 self.event("reconcile_mismatch", detail="; ".join(problems))

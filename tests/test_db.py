@@ -202,3 +202,81 @@ def test_view_can_read_other_profile(root):
     assert len(v.query(profile="other_p")) == 1
     assert v.top(1, profile="other_p")[0].sim_profile == "other_p"
     assert dbm.Database(root).profiles() == ["fake_f1", "other_p"]
+
+
+# ── 檢查 #4／#11（2026-09-07）：讀不到的紀錄不能停掉實例；View 不持 Database ──
+def test_refresh_skips_unreadable_record_and_records_it_instead_of_raising():
+    """檢查 #4：列到但解不開（部分複製的備份、備份軟體獨佔、S3 最終一致）→ 跳過並記到 db.unreadable，不拋。"""
+    from emforge.depot import MemoryDepot
+    depot = MemoryDepot()
+    d = dbm.Database(depot, write_profile=P)
+    d.add(_rec(60, "st1"))
+    d.add(_rec(61, "st1"))
+    depot.put_bytes(paths.record_by_stem(P, "deadbeefdeadbeef-bad"), b"this is not an npz")
+    d2 = dbm.Database(depot)
+    assert d2.refresh(P) == 0, "壞檔不算載入"
+    assert d2.unreadable == [(P, "deadbeefdeadbeef-bad")]
+    assert len(d2.metas(P)) == 2 and "deadbeefdeadbeef-bad" not in {m["stem"] for m in d2.metas(P)}
+    assert [r.score for r in d2.view(P).top(10)] == [-60.0, -61.0]
+
+
+def test_refresh_skips_record_listed_but_gone_between_list_and_get(monkeypatch):
+    """檢查 #4：列舉可最終一致——列到了但 get 回 None（剛被刪／後端還沒看到）→ 跳過，不拋 FileNotFoundError。"""
+    from emforge.depot import MemoryDepot
+    depot = MemoryDepot()
+    d = dbm.Database(depot, write_profile=P)
+    d.add(_rec(62, "st1"))
+    ghost = paths.record_by_stem(P, "0123456789abcdef-ghost")
+    real_list = depot.list
+    monkeypatch.setattr(depot, "list", lambda prefix: real_list(prefix) + [ghost])
+    d2 = dbm.Database(depot)
+    assert d2.refresh(P) == 0 and d2.unreadable == [(P, "0123456789abcdef-ghost")]
+    assert len(d2.metas(P)) == 1
+
+
+def test_view_skips_record_whose_file_became_unreadable(root):
+    """檢查 #4：索引有、檔壞了 → top／query／measurements 跳過那筆並記 unreadable，其餘照常。"""
+    d = _seed_db(root)
+    bad = _rec(44, "b-t4")
+    (root / paths.record_file(P, bad.id, "b-t4")).write_bytes(b"garbage")
+    v = d.view(P)
+    assert [r.score for r in v.top(2)] == [-1.0, -2.6]
+    assert len(v.query()) == 5 and v.measurements(bad.id) == []
+    assert d.unreadable and d.unreadable[0] == (P, f"{bad.id}-b-t4")
+    with pytest.raises(Exception):
+        d.load(P, f"{bad.id}-b-t4")   # 直接 load 仍是嚴格的（呼叫端要的就是「一定在」）
+
+
+def test_refresh_drops_index_line_only_when_file_confirmed_missing(monkeypatch):
+    """檢查 #4：索引剔除靠 exists() 確認缺檔，不靠「列舉為空」——列舉整個看不到時，真的缺的剔、還在的留。"""
+    from emforge.depot import MemoryDepot
+    depot = MemoryDepot()
+    d = dbm.Database(depot, write_profile=P)
+    a, b = _rec(63, "st1"), _rec(64, "st1")
+    d.add(a)
+    d.add(b)
+    depot.delete(paths.record_file(P, a.id, "st1"))
+    monkeypatch.setattr(depot, "list", lambda prefix: [])
+    d2 = dbm.Database(depot)
+    assert d2.refresh(P) == 0
+    assert {m["id"] for m in d2.metas(P)} == {b.id}
+    assert [ln["id"] for ln in depot.read_log(paths.db_index(P))] == [b.id]
+
+
+def test_view_holds_no_database_reference(root):
+    """檢查 #11：D7 要成立，View 不能藏著可寫的 Database（以前 ctx.db._db.add 一行就寫庫）。"""
+    v = _seed_db(root).view(P)
+    assert not hasattr(v, "_db")
+    for name, val in vars(v).items():
+        assert not isinstance(val, dbm.Database), name
+        assert not (callable(val) and isinstance(getattr(val, "__self__", None), dbm.Database)), name
+    assert len(v.query()) == 6 and len(v.top(10)) == 4
+
+
+def test_refresh_refuses_other_profile_when_write_bound(root):
+    """檢查 #11：refresh 會寫索引（append／rewrite_log），綁了 profile 的實例不能碰別人的索引。"""
+    d = dbm.Database(root, write_profile=P)
+    dbm.Database(root).add(_rec(65, "o-t1", profile="other_p"))
+    with pytest.raises(dbm.ProfileWriteRefused):
+        d.refresh("other_p")
+    assert d.refresh(P) == 0

@@ -318,3 +318,13 @@ def test_run_survives_single_lock_read_blip(rt_root):
         rt.depot.owner = real
     ev = [e["event"] for e in rt.depot.read_log(paths.events_jsonl("fake_f1"))]
     assert rc == 0 and "lock_lost" not in ev and not rt.lock_lost() and calls["n"] >= 1
+
+
+def test_run_starts_despite_corrupt_record_file_and_emits_db_unreadable(rt_root, rt):
+    """檢查 #4：以前一個壞 .npz 讓 `emforge run` 帶 traceback 死在 refresh；現在起得來、發 db_unreadable 事件點名那筆。"""
+    from emforge import paths
+    (rt_root / paths.record_by_stem("fake_f1", "deadbeefdeadbeef-bad")).parent.mkdir(parents=True, exist_ok=True)
+    (rt_root / paths.record_by_stem("fake_f1", "deadbeefdeadbeef-bad")).write_bytes(b"not an npz")
+    assert rt.run(once=True) == 0
+    ev = [e for e in rt.depot.read_log(rt.events_key) if e["event"] == "db_unreadable"]
+    assert len(ev) == 1 and ev[0]["n"] == 1 and ev[0]["stems"] == ["deadbeefdeadbeef-bad"] and ev[0]["profile"] == "fake_f1"

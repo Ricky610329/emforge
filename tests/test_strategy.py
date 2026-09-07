@@ -186,3 +186,19 @@ def test_timeout_kills_child_raises_strategy_timeout(root):
     with pytest.raises(strategy.StrategyTimeout):
         strategy.propose_in_subprocess(root, testing.FAKE_PROFILE, "slow", budget=1, seed=0, tick=0, params={}, timeout_s=2)
     assert time.time() - t0 < 15
+
+
+def test_make_context_database_is_write_bound_to_the_profile(root, monkeypatch):
+    """檢查 #11：策略路徑建的 Database 必須綁 write_profile（以前是 None，View 反手寫別的 profile 也守不住）。"""
+    from emforge import db as dbm
+    seen = {}
+    real = dbm.Database
+
+    def spy(depot, write_profile=None):
+        seen["write_profile"] = write_profile
+        return real(depot, write_profile=write_profile)
+
+    monkeypatch.setattr(strategy.dbm, "Database", spy)
+    ctx = strategy.make_context(root, testing.FAKE_PROFILE, "blind", budget=1, seed=0, tick=1, params={})
+    assert seen["write_profile"] == testing.FAKE_PROFILE.name
+    assert not hasattr(ctx.db, "_db")
