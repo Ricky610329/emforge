@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import paths
+from . import paths, scoring
 
 STATUS_QUEUED, STATUS_RUNNING, STATUS_DONE, STATUS_ERROR = "queued", "running", "done", "error"
 STATUSES = (STATUS_QUEUED, STATUS_RUNNING, STATUS_DONE, STATUS_ERROR)
@@ -122,23 +122,25 @@ class Spec:
     axes: tuple
     offsets: tuple
 
+    aggregate: str = "min"
+    weights: tuple = ()
+    gates: tuple = ()
+
     def __post_init__(self):
         _check_name("spec", self.name)
-        if len(self.axes) != len(self.offsets):
-            raise ValueError(f"axes {len(self.axes)} 與 offsets {len(self.offsets)} 長度不同")
-        object.__setattr__(self, "labels", tuple(self.labels))
-        object.__setattr__(self, "axes", tuple(self.axes))
-        object.__setattr__(self, "offsets", tuple(float(o) for o in self.offsets))
+        scoring.validate(self)
+        for name in ("labels", "axes"):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
+        for name in ("offsets", "weights"):
+            object.__setattr__(self, name, tuple(float(v) for v in getattr(self, name)))
+        object.__setattr__(self, "gates", tuple((a, op, float(v)) for a, op, v in self.gates))
 
     def score(self, measure: dict) -> float | None:
-        """缺軸或 NaN → None（不猜、不入榜）。"""
-        vals = []
-        for a, o in zip(self.axes, self.offsets):
-            v = measure.get(a)
-            if v is None or float(v) != float(v):
-                return None
-            vals.append(float(v) + o)
-        return min(vals)
+        """缺軸、非有限值或門檻未過 → None。"""
+        return scoring.score(self, measure)
+
+    def gated(self, measure: dict) -> bool:
+        return not scoring.passes(self.gates, measure)
 
 
 # ── Proposal（策略唯一的輸出） ───────────────────────────────────────────────

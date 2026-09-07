@@ -475,3 +475,19 @@ EMFORGE_PLATFORM_TOKEN 只經環境傳遞，不寫程式包、參數或執行紀
 冪等 request_id 限定在 run_id 內；sid 是平台對兩者的雜湊，不同算法可各用 round_0。
 client 等到 runtime 入庫才算完成，worker.done 只是前一個階段。
 已驗證兩個真算法子行程、兩個假模擬端、真 socket 三輪迴圈。
+
+
+## 平台評估與 MCP（2026-09-08）
+Spec 預設 min 保持舊數值；aggregate="wsum" 要指定與 axes 等長 weights（允許負值表達越低越好）。
+gates=((axis, "<=", limit), ...) 或 >=；缺 gate 軸、NaN、無窮值或門檻未過均不給 score。
+量測仍完整保存，評估不改原始響應。換 spec 必須新名字；run 評估使用啟動時的 spec。
+CLI：report --endpoint http://127.0.0.1:8766 --profile fake_f1 --curve／--calibration／--metrics，
+可加 --strategy、--run-id、--spec、--since-tick。從保存的 measure 重算同一 spec，不混用分數快取。
+曲線含失敗候選、排除 repeat 與重複 id；只算此 run 新增的 sample，共用成果從 inbox results 查。
+calibration 使用 note.pred，回 MAE 與處理平手的 Spearman；少於二點或常數回 null。
+run_usage 分開提出、共用、新增樣本與已保存 sample 耗時；不含未保存的重試時間。
+platform-mcp --endpoint http://127.0.0.1:8766 --port 8767，端點 /mcp；
+非 loopback 要 EMFORGE_PLATFORM_TOKEN。platform://reference 列唯讀操作簽名，
+platform_query 只准唯讀操作；inbox_submit 的單次短效 token 綁定整個 payload。
+agent 可自行完成兩次呼叫，不需人工逐筆批准；送件以 run 內 request_id 冪等。
+algorithm_start／algorithm_stop 只操作已註冊版本及指定節點；沒有改碼、promote 或解除急停工具。

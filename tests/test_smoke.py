@@ -32,6 +32,8 @@ DEPOT_ONLY_MODULES = (
     "client.py", "client_view.py", "submissions.py", "runtime/inbox.py",
     "platform/__init__.py", "platform/service.py", "platform/wire.py",
     "platform/transport.py", "platform/http_server.py", "cli/platform.py",
+    "platform/confirmation.py", "platform/mcp_server.py",
+    "scoring.py", "evaluation.py", "platform/evaluate.py",
     "algorithms.py", "costs.py", "platform/runs.py", "runner/__init__.py",
     "db.py", "batches.py", "ledger.py", "queue.py", "report.py",
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
@@ -81,7 +83,7 @@ FS_IMPORTS = {"pathlib", "shutil", "glob", "tempfile"}
 #? optional extra（`emforge[mcp]`）：這些套件只准在下面的模組、而且只准在**函式內** import——核心 import 期零 mcp，
 #  沒裝 mcp 的機器（開發機、runtime 機）照常跑 worker／runtime／CLI。
 OPTIONAL_EXTRA_IMPORTS = {"mcp", "uvicorn", "starlette", "httpx2", "anyio"}
-OPTIONAL_EXTRA_MODULES = {"device/mcp_server.py", "device/mcp_client.py"}
+OPTIONAL_EXTRA_MODULES = {"platform/mcp_server.py", "device/mcp_server.py", "device/mcp_client.py"}
 #? `os.path` 也算（getmtime／exists 都在裡面）。
 FS_OS_ATTRS = {"path", "replace", "utime", "open", "unlink", "remove", "rename", "makedirs", "scandir",
                "listdir", "mkdir", "stat", "fsync"}

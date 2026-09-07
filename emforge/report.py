@@ -6,7 +6,7 @@
 """
 import numpy as np
 
-from . import paths, strategy
+from . import paths, strategy, evaluation
 from .db import Database
 from .depot import open_depot
 from .model import ARM_BLIND, KIND_REPEAT, STATUS_DONE
@@ -52,8 +52,8 @@ def _blind_reference(metas) -> list:
     """blind 參考分佈：arm=blind 的 done 樣本，**排除公證重測**。
     #! 檢查 #3（2026-09-07）：notarize 的重測沿用 arm、kind=repeat——同一片重量三次不是三個獨立樣本，以前灌水 blind_n 過 k_min
     #  閘、把三筆同值塞進分佈頂端，P(勝 blind) 零新增樣本就翻盤（實測 0.52 → 0.47）。"""
-    return [m for m in metas if m["status"] == STATUS_DONE and m["score"] is not None
-            and m["arm"] == ARM_BLIND and m.get("kind") != KIND_REPEAT]
+    return evaluation.samples([m for m in metas if m["status"] == STATUS_DONE and m["score"] is not None
+                               and m["arm"] == ARM_BLIND and m.get("kind") != KIND_REPEAT])
 
 
 def blind_count(db: Database, profile: str) -> int:
@@ -72,7 +72,7 @@ def strategy_rows(db: Database, profile: str, *, k_min: int = DEFAULT_K_MIN) -> 
     for name in sorted({m["strategy"] for m in metas}):
         mine = [m for m in metas if m["strategy"] == name]
         mine_done = [m for m in mine if m["status"] == STATUS_DONE and m["score"] is not None]
-        scores = [m["score"] for m in mine_done]
+        scores = [m["score"] for m in evaluation.samples(mine_done)]
         best = max((conservative[m["id"]] for m in mine_done), default=None)
         has_non_blind = any(m["arm"] != ARM_BLIND for m in mine_done)
         pb = None
@@ -112,7 +112,7 @@ def _fmt(v) -> str:
 
 def _render(profile: str, rows: list, k_min: int, blind_n: int) -> list:
     show_p = blind_n >= k_min
-    lines = [f"## {profile}", ""]
+    lines = [f"## {profile}", "", "P 為獨立 sample 的觀察比較；共用／重測不增加樣本數，不代表因果效果。", ""]
     if not show_p:
         lines.append(f"blind 樣本 n={blind_n} < k_min={k_min} → 只印數字，不印比較（D8：沒有零演算法臂就說不出「較好」）")
         lines.append("")

@@ -3,6 +3,7 @@ import json
 
 from .. import ledger, paths, report
 from ..queue import Queue
+from .platform import platform_of
 from .base import EXIT_OK, EXIT_REFUSED, add_root, depot_of, err, root_of
 
 
@@ -96,7 +97,15 @@ def _add_watch(sub) -> None:
 
 def cmd_report(args) -> int:
     try:
-        print(report.report(_depot(args), args.profile, cross_profile=args.cross_profile, k_min=args.k_min))
+        service = platform_of(args)
+        if args.evaluation:
+            if len(args.profile) != 1:
+                raise report.CrossProfileRefused("評估一次只能指定一個 profile")
+            result = service.call("evaluate", profile=args.profile[0], kind=args.evaluation,
+                                  strategy=args.strategy, run_id=args.run_id, spec=args.spec, since_tick=args.since_tick)
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            print(service.call("report", profiles=args.profile, cross_profile=args.cross_profile, k_min=args.k_min))
     except report.CrossProfileRefused as e:
         err(str(e))
         return EXIT_REFUSED
@@ -109,6 +118,13 @@ def _add_report(sub) -> None:
     s.add_argument("--profile", action="append", required=True)
     s.add_argument("--cross-profile", action="store_true")
     s.add_argument("--k-min", type=int)
+    s.add_argument("--endpoint")
+    group = s.add_mutually_exclusive_group()
+    for kind in ("curve", "calibration", "metrics"):
+        group.add_argument("--" + kind, dest="evaluation", action="store_const", const=kind)
+    for name in ("strategy", "run-id", "spec"):
+        s.add_argument("--" + name)
+    s.add_argument("--since-tick", type=int)
     s.set_defaults(fn=cmd_report)
 
 

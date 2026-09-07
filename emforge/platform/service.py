@@ -3,6 +3,7 @@ from .. import paths, profiles, submissions
 from ..db import Database
 from ..depot import open_depot
 from ..model import now_iso
+from .evaluate import EvaluationOperations, EVALUATION_OPERATIONS
 from .runs import RunOperations, RUN_OPERATIONS
 
 OPERATIONS = {"description", "submit", "submission_status", "submission_results", "algorithm_log",
@@ -15,12 +16,12 @@ def record_wire(rec):
             "response": rec.response.tolist() if rec.response is not None else None}
 
 
-class Platform(RunOperations):
+class Platform(RunOperations, EvaluationOperations):
     def __init__(self, depot):
         self.depot = open_depot(depot)
 
     def call(self, op, **params):
-        if op not in OPERATIONS | RUN_OPERATIONS:
+        if op not in OPERATIONS | RUN_OPERATIONS | EVALUATION_OPERATIONS:
             raise ValueError(f"未知平台操作：{op}")
         return getattr(self, op)(**params)
 

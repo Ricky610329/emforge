@@ -82,3 +82,20 @@ def _add_inbox(sub):
 
 
 COMMANDS = {"platform-serve": _add_serve, "submit": _add_submit, "inbox": _add_inbox}
+
+
+def cmd_platform_mcp(args):
+    from ..platform.mcp_server import serve
+    serve(platform_of(args), args.host, args.port, os.environ.get("EMFORGE_PLATFORM_TOKEN"))
+    return 0
+
+
+def _add_mcp(sub):
+    p = sub.add_parser("platform-mcp", help="平台 MCP；可代理既有平台 HTTP")
+    _connection(p)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8767)
+    p.set_defaults(fn=cmd_platform_mcp)
+
+
+COMMANDS["platform-mcp"] = _add_mcp

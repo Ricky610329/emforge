@@ -71,8 +71,8 @@ def test_bad_submission_is_rejected_without_blocking_next_and_wait_is_bounded(ro
     rt.depot.put_json(paths.submission("fake_f1", sid), doc)
     good = a.submit(patterns(2))
     rt.tick()
+    rt.tick()  # 同時抵達的兩份送件不假設排序；每 tick 至多一批
     assert a.status(sid)["state"] == "rejected"
-    rt.tick()
     assert a.status(good)["state"] != "rejected"
 
 def test_dispatch_saved_but_status_lost_recovers_without_new_measurement(root, monkeypatch):
