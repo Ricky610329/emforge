@@ -19,7 +19,7 @@
 ```
 conda activate ant
 pip install -e .[test]
-python -m pytest                       # 274 條；設 EMFORGE_ANTENNA_REPO=<Antenna clone> 會多跑 adapter parity
+python -m pytest                       # 設 EMFORGE_ANTENNA_REPO=<Antenna clone> 才會跑 adapter 綁定／parity（不設＝跳過 6 條，表頭會說）
 emforge init --root <root> --profile dual_p01_db075
 #   <root>/registry.py 寫：from emforge.adapters.antenna.profiles import register_all; register_all()
 emforge run --root <root> --profile dual_p01_db075      # 開發機：runtime 實例

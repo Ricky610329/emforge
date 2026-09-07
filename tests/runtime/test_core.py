@@ -366,3 +366,14 @@ def test_run_once_returns_1_on_tick_error(rt_root, rt, monkeypatch):
 
     monkeypatch.setattr(core.Runtime, "tick", boom)
     assert rt.run(once=True) == 1
+
+
+def test_run_once_with_default_subprocess_propose(rt_root):
+    """檢查 #22：runtime 的預設 propose_fn（子行程＋--depot spec）在整套裡以前零覆蓋——這條走真子行程。"""
+    rt = core.Runtime(rt_root, "fake_f1", sleep=lambda s: None)
+    try:
+        assert rt.run(once=True) == 0
+    finally:
+        rt.release_lock()
+    ev = [e["event"] for e in rt.depot.read_log(rt.events_key)]
+    assert "batch_dispatched" in ev and "strategy_error" not in ev

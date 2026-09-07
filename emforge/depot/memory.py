@@ -1,7 +1,8 @@
 """emforge/depot/memory.py — `MemoryDepot`：`Depot` 的行程內後端（測試、單行程 demo）。
 
-同名單例（`open_depot("memory://<name>")` 回同一實例；建構時自動註冊）；所有操作在一把 RLock 下＝執行緒安全；
-時鐘可注入（`clock=`）讓陳舊／破鎖測試不用睡。子行程看不到——`run` 遇到它自動 in-process。
+同名單例（`open_depot("memory://<name>")` 回同一實例；具名的建構時註冊、**同名重建拋**、匿名不註冊）；
+所有操作在一把 RLock 下＝執行緒安全；時鐘可注入（`clock=`）讓陳舊／破鎖測試不用睡。
+子行程看不到——`run` 遇到它自動 in-process；`open_depot` 對**未註冊**的名字拋，不再靜默新建一個空的（檢查 #31／#27）。
 """
 import copy
 import itertools
@@ -22,6 +23,12 @@ def registered(name: str):
         return _REGISTRY.get(name)
 
 
+def clear_registry() -> None:
+    """測試間隔離用（conftest）：清掉所有具名實例的登記——同一行程重跑同一批測試才冪等。"""
+    with _REGISTRY_LOCK:
+        _REGISTRY.clear()
+
+
 class MemoryDepot(Depot):
     def __init__(self, name: str | None = None, clock=time.time):
         self.name = name or f"anon-{next(_ANON)}"
@@ -30,8 +37,11 @@ class MemoryDepot(Depot):
         self._docs: dict = {}  # key → (bytes, mtime)
         self._logs: dict = {}  # key → (list[dict], mtime)
         self._lock = threading.RLock()
-        with _REGISTRY_LOCK:
-            _REGISTRY[self.name] = self
+        if name:
+            with _REGISTRY_LOCK:
+                if name in _REGISTRY:
+                    raise ValueError(f"memory://{name} 已存在——同名不重建（要重用就 open_depot，要隔離就換名或 clear_registry）")
+                _REGISTRY[name] = self
 
     def __repr__(self) -> str:
         return f"MemoryDepot({self.name!r})"

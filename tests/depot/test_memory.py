@@ -6,12 +6,25 @@ from emforge.depot import MemoryDepot, open_depot
 
 
 def test_open_depot_memory_same_name_same_instance():
-    a = open_depot("memory://alpha")
+    """檢查 #31：同名回同一實例；**未註冊的名字拋**（以前靜默新建一個空的——子行程對 memory:// 就是這樣看到空庫）；
+    同名重建拋（append-only 態度，以前靜默覆蓋讓 open_depot 指到新的空實例）；匿名不進註冊表。"""
+    import pytest
+    a = MemoryDepot(name="alpha")
     b = open_depot("memory://alpha")
-    c = open_depot("memory://beta")
+    c = MemoryDepot(name="beta")
     assert a is b and a is not c and a.spec == "memory://alpha"
     a.put_bytes("k", b"1")
     assert b.get_bytes("k") == b"1" and c.get_bytes("k") is None
+    with pytest.raises(ValueError, match="never-made"):
+        open_depot("memory://never-made")
+    with pytest.raises(ValueError, match="alpha"):
+        MemoryDepot(name="alpha")
+    anon = MemoryDepot()
+    with pytest.raises(ValueError):
+        open_depot(anon.spec)
+    from emforge.depot import memory as mem
+    mem.clear_registry()
+    assert MemoryDepot(name="alpha") is not a, "清掉註冊表後同名可再建（測試間隔離）"
 
 
 def test_instances_are_isolated():

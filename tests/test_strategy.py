@@ -202,3 +202,14 @@ def test_make_context_database_is_write_bound_to_the_profile(root, monkeypatch):
     ctx = strategy.make_context(root, testing.FAKE_PROFILE, "blind", budget=1, seed=0, tick=1, params={})
     assert seen["write_profile"] == testing.FAKE_PROFILE.name
     assert not hasattr(ctx.db, "_db")
+
+
+def test_propose_in_subprocess_reopens_file_depot_under_cjk_root(root):
+    """檢查 #22：正式機每個 tick 走「子行程＋--depot file://T:/碩二…」；以前 476 條裡沒有一條把 depot 傳進子行程。"""
+    from emforge.depot import FileDepot
+    from tests.test_strategies_shipped import _seed
+    testing.make_fake_root(root)
+    _seed(root, 4)                     # top_k_flip 讀 db：子行程真的經 --depot 重開同一棵樹才有東西可翻
+    out = strategy.propose_in_subprocess(root, testing.FAKE_PROFILE, "top_k_flip", budget=3, seed=1, tick=1,
+                                         params={"k": 2, "d": 1}, timeout_s=60, depot=FileDepot(root))
+    assert len(out) == 3 and all(p.pattern[testing.FAKE_PROFILE.fixed_on].all() for p in out)

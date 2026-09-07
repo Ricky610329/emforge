@@ -283,6 +283,8 @@ def test_depot_flag_and_env_select_backend(fake, monkeypatch):
     monkeypatch.delenv("EMFORGE_DEPOT", raising=False)
     d = depot_of(argparse.Namespace(depot=None), fake)
     assert isinstance(d, FileDepot) and d.root == fake
+    for name in ("cli-env", "cli-flag", "cli-init"):
+        MemoryDepot(name=name)                    # 檢查 #31：memory:// 要先建再用（未註冊的名字拋，不再靜默新建）
     monkeypatch.setenv("EMFORGE_DEPOT", "memory://cli-env")
     assert depot_of(argparse.Namespace(depot=None), fake).spec == "memory://cli-env"
     assert isinstance(depot_of(argparse.Namespace(depot="memory://cli-flag"), fake), MemoryDepot)
@@ -294,7 +296,8 @@ def test_depot_flag_and_env_select_backend(fake, monkeypatch):
 
 def test_run_with_memory_depot_forces_in_process(fake, capsys):
     """M12d：`memory://` 子行程看不到 → run 自動改 in-process 並印一行；磁碟上零狀態。"""
-    from emforge.depot import open_depot
+    from emforge.depot import MemoryDepot, open_depot
+    MemoryDepot(name="cli-run")                   # 檢查 #31：先建再用
     assert _main("init", "--root", fake, "--depot", "memory://cli-run", "--profile", "fake_f1") == 0
     assert _main("run", "--root", fake, "--depot", "memory://cli-run", "--profile", "fake_f1", "--once") == 0
     assert "in-process" in capsys.readouterr().out

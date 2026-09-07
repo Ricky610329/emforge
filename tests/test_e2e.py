@@ -89,7 +89,7 @@ def test_full_loop_on_memory_depot(root, capsys):
     磁碟上只有本機程式碼（registry.py、策略 workdir），db／queue／batches／ledger 一個都不落地。"""
     from emforge.depot import MemoryDepot
     from tests.runtime.conftest import YAML
-    depot = MemoryDepot()
+    depot = MemoryDepot(name="e2e-memory")        # 具名：CLI 段落靠 --depot memory://e2e-memory 找回同一個（匿名不註冊，檢查 #31）
     testing.make_fake_root(root, depot=depot)
     depot.put_bytes(paths.strategies_yaml("fake_f1"), YAML.encode("utf-8"))
     rt = Runtime(root, "fake_f1", depot=depot, sleep=lambda s: None, propose_fn=strategy.propose_in_process)

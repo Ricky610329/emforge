@@ -31,7 +31,7 @@
 
 ## 測試
 
-- 從 repo 根跑 `python -m pytest`（`pyproject` 已設 `pythonpath=["."]`，裸 `pytest` 也行）。
+- 從 repo 根跑 `python -m pytest`（`pyproject` 已設 `pythonpath=["."]`，裸 `pytest` 也行）。「全綠」要設 `EMFORGE_ANTENNA_REPO`，否則 adapter 綁定／COM 建構 6 條靜默 skip（pytest 表頭會說；檢查 #44）。
 - **測試永不碰 NAS**：用 `root` fixture（tmp_path 下、含中文與撇號）；conftest 清掉 `EMFORGE_ROOT`。
 - **沒有 golden、沒有自動寫回基準**（舊 repo 的 `CI=1` 靜默重錨教訓）。決定性只在同 seed 同行程內斷言，且雙向（同 seed 相等／異 seed 不同）。
 - 假件叫 `Fake*`，住 `emforge/testing.py`，使用者寫策略測試也能 import。

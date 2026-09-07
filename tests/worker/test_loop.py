@@ -67,9 +67,17 @@ def test_loop_stop_file_finishes_current_job_then_exits(root):
             q.request_stop("216")                # 跑第一筆時有人建了 STOP
             return super().simulate(bits)
 
-    rc = loop.worker_loop(root, "216", once=False, work_root=root / "work", sleep=lambda s: None,
+    polls = []
+
+    def bounded_sleep(s):
+        #! 檢查 #24：終止條件掛在「被測物一定會成功」上——open 失敗時 simulate 永不被叫、STOP 永不出現、無 sleep 忙迴圈掛死整套。
+        polls.append(s)
+        if len(polls) > 20:
+            q.request_stop("216")
+
+    rc = loop.worker_loop(root, "216", once=False, work_root=root / "work", sleep=bounded_sleep,
                           sim_factory=lambda wd, p: _StopSim(workdir=str(wd), profile=p))
-    assert rc == 0
+    assert rc == 0 and len(polls) <= 20, "STOP 應該由 simulate 觸發，不是保險上限"
     assert q.state("s1") == "done", "當前 job 跑完"
     assert q.state("s2") == "queued", "STOP 在 job 之間生效，不撿下一個"
     assert _events(root)[-1] == "worker_stop"

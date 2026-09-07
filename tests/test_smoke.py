@@ -262,3 +262,14 @@ def test_naming_doc_mentions_reserved_names():
         assert f"`{name}`" in doc, f"docs/naming.md 沒提到保留字 {name}"
     for word in ("snake_case", "CapWords", "EMFORGE_", "#!", "#?"):
         assert word in doc
+
+
+def test_suite_is_pinned_against_live_machine_state_and_env(root):
+    """檢查 #23／#25：測試不能耦合「這台機器現在的狀態」（ansysedt 在跑、磁碟剩多少）與環境變數（EMFORGE_DEPOT 設了
+    會把假資料灌進共享庫）。conftest 的 autouse 把體檢釘成固定值、把整組 EMFORGE_* 拿掉。"""
+    import os
+    from emforge import doctor
+    assert doctor.ansysedt_running() is False and doctor._free_gb(root) == 100.0
+    for name in ("EMFORGE_ROOT", "EMFORGE_DEPOT", "EMFORGE_WORK", "EMFORGE_MACHINE", "EMFORGE_DEVICE_TOKEN",
+                 "EMFORGE_MCP_HOST", "EMFORGE_MCP_PORT"):
+        assert name not in os.environ, name

@@ -7,6 +7,7 @@ runtime／worker／db 的邏輯一行不改。語義刻意保守（列舉可最�
 import io
 import threading
 import time
+import uuid
 
 import numpy as np
 import pytest
@@ -17,7 +18,7 @@ from emforge.depot import Depot, FileDepot, MemoryDepot, open_depot
 
 @pytest.fixture(params=["file", "memory"])
 def depot(request, root) -> Depot:
-    return FileDepot(root) if request.param == "file" else MemoryDepot(name=f"t{id(request)}")
+    return FileDepot(root) if request.param == "file" else MemoryDepot(name=f"t-{uuid.uuid4().hex[:8]}")
 
 
 # ── 文件 ────────────────────────────────────────────────────────────────────
@@ -356,3 +357,12 @@ def test_spec_roundtrips_through_open_depot(depot):
     depot.put_bytes("spec/x", b"1")
     assert again.get_bytes("spec/x") == b"1"
     assert open_depot(depot) is depot
+
+
+def test_lock_holder_broken_and_reclaimed_does_not_delete_the_new_lock_on_exit(depot):
+    """檢查 #45：持鎖者卡太久被破鎖、別人重認領後，原持鎖者離開 with 區塊時 release(owner=) 不能刪到對方的新鎖。"""
+    with depot.lock("q/l", owner="A", stale_s=60, timeout_s=1):
+        depot.set_modified_at("q/l", depot.now() - 1000)
+        assert depot.break_if_stale("q/l", 60) is True
+        assert depot.claim("q/l", {"owner": "B"})
+    assert depot.owner("q/l")["owner"] == "B"

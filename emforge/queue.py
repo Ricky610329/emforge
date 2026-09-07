@@ -40,7 +40,7 @@ class LiveClaim(Exception):
 class Queue:
     def __init__(self, depot):
         self.depot = open_depot(depot)
-        self._lock_owner = f"{socket.gethostname()}:{os.getpid()}"
+        self._lock_owner = f"{socket.gethostname()}:{os.getpid()}:{os.urandom(4).hex()}"   # 每實例獨一（檢查 #45）
 
     # ── jobs.json ───────────────────────────────────────────────────────
     def _read(self) -> list:

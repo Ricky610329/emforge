@@ -320,3 +320,11 @@ def test_queue_runs_the_same_on_memory_depot():
     q.mark_done("b", "216", n_done=2, n_error=0, error_ids=[])
     q.mark_fail("a", "218", "dead")
     assert q.state("b") == "done" and q.state("a") == "fail" and q.pick("37").store == "a"
+
+
+def test_queue_lock_owner_is_unique_per_instance():
+    """檢查 #45：同行程兩個 Queue 以前 owner 都是 host:pid——A 卡 NAS 超過 stale 被 B 破鎖重認領後，A 的 release(owner=) 會刪到 B 的活鎖。"""
+    from emforge.depot import MemoryDepot
+    d = MemoryDepot()
+    a, b = queue.Queue(d), queue.Queue(d)
+    assert a._lock_owner != b._lock_owner
