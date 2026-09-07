@@ -20,7 +20,7 @@
 | MCP tools ↔ 儀器程序 | `device_<動詞或名詞>`＝`Instrument` 方法一對一；清單唯一真相＝`device/reference.PROCEDURES`（說明檔與 server 同源，測試對帳） | `device_state` `device_describe` `device_selfcheck` `device_log`（read-only）`device_simulate` `device_abort` `device_estop` `device_stop_worker` `device_resume_worker`；**沒有** `device_estop_clear` |
 | MCP resources | `device://<名>` | `device://state` `device://reference` `device://reference.json` |
 | MCP 錯誤碼 | `ToolError("<code>: …")`，code 小寫 snake、agent 照碼分支 | `device_busy` `estop_engaged` `precondition_failed` `confirm_rejected` `bad_bits` `unknown_profile` `open_failed` `internal` |
-| 租約 owner | `<來源>:<對象>` | 儀器租約 `queue:<store>`／`mcp:<by>`；runtime 鎖 `<tag>:<pid>:<rand>`；jobs.lock `<host>:<pid>` |
+| 租約 owner | `<來源>:<對象>` | 儀器租約 `queue:<store>`（同一批續跑可重入）／`mcp:<by>:<rand>`（一次性、不重入）；runtime 鎖 `<tag>:<pid>:<rand>`；jobs.lock `<host>:<pid>` |
 | 急停 scope | `fleet` \| `device` \| `local`（外層優先回報） | `queue/ESTOP`／`queue/ESTOP.<tag>`／`<root>/ESTOP` |
 | Depot key | POSIX 相對字串、只能來自 `paths.py`；前綴以 `/` 結尾；末段 `.` 開頭或含 `.broken.`＝後端內部、不列 | `db/fake_f1/_index.jsonl`, `queue/state/`（前綴） |
 | 單位 | 後綴 `_s`／`_min`；無單位的量不加 | `timeout_s`, `stale_s`, `noise_floor` |

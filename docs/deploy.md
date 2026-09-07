@@ -29,11 +29,15 @@ emforge report --root "<EMFORGE_ROOT>" --profile dual_p01_db075
 git clone <emforge remote> C:\Users\<u>\Documents\GitHub\emforge
 pip install -e C:\Users\<u>\Documents\GitHub\emforge
 setx EMFORGE_ANTENNA_REPO C:\Users\<u>\Documents\GitHub\Antenna
-setx EMFORGE_ROOT "T:\碩二_鄒穎麒's\antenna\emforge"
+setx EMFORGE_ROOT C:\emforge_root
+setx EMFORGE_DEPOT "file://T:/碩二_鄒穎麒's/antenna/emforge"
 setx MPLBACKEND Agg
+emforge init --root %EMFORGE_ROOT% --depot %EMFORGE_DEPOT%       # 本機 root：registry.py／strategies/／limits.json；NAS：佈局前綴
 ```
-`EMFORGE_DEPOT` **不設**＝`FileDepot(EMFORGE_ROOT)`＝NAS 上這棵樹（M12 後的預設；設了才是別的後端，如 `file://D:\emforge_state`）。
-`doctor` 會多印一行 `depot`（可寫／O_EXCL／時鐘偏移 >30 s 阻擋）。
+**兩個根分開設**（檢查 #10，2026-09-07）：`EMFORGE_ROOT`＝**本機**程式碼／設定根（registry.py、strategies/、limits.json、本機層 ESTOP、
+策略 workdir）——三台各自在自己的 C 槽；`EMFORGE_DEPOT`＝NAS 上的共享狀態樹（db／queue／batches／runtime_state／devices；今天的佈局一個 byte 不差）。
+以前把 `EMFORGE_ROOT` 直接指到 NAS：本機層急停變成三台共用一個檔、`limits.json` 三台一份、NAS 斷線時三層急停全部讀成「沒有急停」。
+`doctor` 會多印一行 `depot`（可寫／O_EXCL／時鐘偏移 >30 s 阻擋）；`start_worker.cmd` 沒設 `EMFORGE_DEPOT` 會警告（開發機假根才允許不設）。
 **停舊 worker**：舊 repo `jobs_state/STOP` → `jobs-ls` 確認本機無 claim → `tasklist | findstr ansysedt` 為空。
 **體檢**：`emforge doctor --root %EMFORGE_ROOT%` 必須 0（root 探針、磁碟 ≥ 20 GB、無 ansysedt）。
 **smoke**（同一儀器的實證）：
@@ -58,15 +62,17 @@ setx EMFORGE_MCP_PORT 8765
 netsh advfirewall firewall add rule name="emforge-mcp" dir=in action=allow protocol=TCP localport=8765 remoteip=LocalSubnet
 ```
 非 loopback 綁定沒 token → `--serve`／`device-serve` **拒起**（exit 1）。token 外洩＝整個機隊都能被開 HFSS（見 implementation.md §12-24）。
-**上限**：`emforge init` 已在 `%EMFORGE_ROOT%\limits.json` 留範本（本機檔；每台自己的 `allowed_profiles`／`max_sample_s`／`min_free_gb`）；改完重啟 worker 生效，`device-describe <tag>` 印來源。
-**啟動**：`scripts\start_worker.cmd --serve`（＝pull → doctor → `emforge worker --serve`；MCP 在同一行程 daemon thread；`devices/<tag>/state.json` 的 `url` 會填上）。
+**上限**：`emforge init` 已在 `%EMFORGE_ROOT%\limits.json` 留範本（本機檔——§2 的 root 在本機碟，所以真的是每台自己的
+`allowed_profiles`／`max_sample_s`／`min_free_gb`）；改完重啟 worker 生效，`device-describe <tag>` 印來源。
+**啟動**：`scripts\start_worker.cmd --serve`（＝pull → doctor → `emforge worker --serve`；MCP 在同一行程 daemon thread；server **綁上埠之後**
+`devices/<tag>/state.json` 的 `url` 才會填上；埠被佔 → 印 `MCP 埠 … 綁不上`、exit 1、不跑 worker——檢查 #13）。
 只服務、不撿佇列：`emforge device-serve <tag> --root %EMFORGE_ROOT%`。
 **開發機接上**：`emforge fleet --root %EMFORGE_ROOT% --mcp-config > .mcp.json`（header 用 `${EMFORGE_DEVICE_TOKEN}` 佔位，Claude Code 讀環境變數）；
 命令列試量：`emforge device-simulate --url http://<ip>:8765/mcp --profile P --bits @king.txt`（兩段式：先印 token，再帶 `--confirm`）。
 
 ## 3. runtime 一夜
 
-停舊 `grind_loop`（`tmp/grind_loop.STOP`，否則它繼續往舊佇列丟 job）。開發機：
+停舊 `grind_loop`（`tmp/grind_loop.STOP`，否則它繼續往舊佇列丟 job）。開發機同樣兩個根分開：`EMFORGE_ROOT` 本機、`EMFORGE_DEPOT` 指 NAS 樹（runtime 的狀態在 NAS、策略程式碼在本機）：
 ```
 emforge run --root %EMFORGE_ROOT% --profile dual_p01_db075     # detach（start /b 或工作排程器），不掛在 harness 下（I-12）
 ```

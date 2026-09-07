@@ -295,7 +295,7 @@ def strategy_workdir(root, profile: str, strategy: str) -> Path:
 
 
 def estop_local(root) -> Path:
-    """本機急停（第三層）：這台機器自己的檔，NAS 斷線也擋得住。"""
+    """本機急停（第三層）：這台機器自己的檔——前提是 root 在本機碟（deploy.md §2；root 指 NAS 就變成三台共用，檢查 #10）。"""
     return Path(root) / "ESTOP"
 
 

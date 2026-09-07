@@ -2,7 +2,7 @@
 
   fleet   `queue/ESTOP`         全機隊（CLI engage/clear）
   device  `queue/ESTOP.<tag>`   單機（CLI engage/clear）
-  local   `<root>/ESTOP`        本機檔（NAS 斷線也擋得住；本機 watchdog／人手建）
+  local   `<root>/ESTOP`        本機檔（root 在本機碟時 NAS 斷線也擋得住——deploy.md §2 兩個根分開；本機 watchdog／人手建）
 
 儀器 `open()`／`simulate()` 前硬檢查（拋 `EstopEngaged`）；worker 每筆前讓位、job 之間不撿；正在跑的那筆 `abort()`。
 **解除只能 CLI**（`emforge device-estop clear`）——MCP 沒有這條路，設計如此。

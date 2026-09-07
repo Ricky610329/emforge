@@ -8,6 +8,7 @@ setlocal
 set REPO=%~dp0..
 git -C "%REPO%" pull --ff-only || (echo git pull 失敗，不起 worker & exit /b 1)
 if "%EMFORGE_ROOT%"=="" (echo 缺 EMFORGE_ROOT & exit /b 1)
+if "%EMFORGE_DEPOT%"=="" echo 警告：沒設 EMFORGE_DEPOT——共享狀態會落在 EMFORGE_ROOT 的本機樹（正式機要指到 NAS：file://T:/...，見 deploy.md §2）
 emforge doctor --root "%EMFORGE_ROOT%" || (echo doctor 有阻擋條件，不起 worker & exit /b 4)
 if not "%EMFORGE_MCP_HOST%"=="" (
   if "%EMFORGE_DEVICE_TOKEN%"=="" echo 警告：EMFORGE_MCP_HOST=%EMFORGE_MCP_HOST% 但沒設 EMFORGE_DEVICE_TOKEN——--serve 會被拒起

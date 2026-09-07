@@ -316,6 +316,23 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | 10 第 0 輪不看 attempts | attempts<3 | worker/test_batch::pass0_skips_poison_samples… |
 | 砍掉的 | promote 依本榜 spec 重算；_threshold 走 checksum；requeue 看進度＋claim 心跳；watch 接管瞬間；匯入器預設鍵；例外改名 | test_ledger::promote_with_other_spec…；runtime/test_notarize::threshold_on_tampered_ledger…；test_queue::requeue_refuses_when_batch_has_recent_progress…、touch_claim…、watch_treats_vanishing_fail…；legacy::map_profile_ignores_solver_keys… |
 
+## 11c. 2026-09-07 全面檢查 → P0 修正 → 釘住的測試
+
+完整清單 `docs/review-2026-09-07.md`（1 S1／24 S2／20 S3）；P0 十條已修，其餘照該檔的 P1–P3 順序。
+
+| 檢查 # | 修了什麼 | commit | 測試 |
+|---|---|---|---|
+| 1（S1）MCP 租約同名重入、同機兩個 HFSS | `acquire` 只讓 `queue:<store>` 重入；`simulate_once` owner 一次性 `mcp:<by>:<rand>` | `08ac3fe` | device/test_instrument::mcp_lease_never_reenters…、concurrent_simulate_once_with_default_by_runs_exactly_one |
+| 2 abandon 被 .fail 遮蔽、正在量的批標 done | `abandon` 用 `queue.is_live`（與 requeue 同尺） | `d4f1eb2` | runtime/test_collect::abandon_refuses_when_fail_marker_coexists_with_fresh_claim… |
+| 3 公證重測當獨立 blind 樣本 | `report._blind_reference` 排除 `kind=repeat` | `9ce2b5f` | test_report::blind_reference_excludes_notarize_repeats |
+| 5 一拍讀不到鎖＝永久 lock_lost | 讀到別人的 owner 才丟；None 連續 3 拍才丟；`read_claim` 退避 | `d4f1eb2` | runtime/test_core::heartbeat_treats_unreadable_lock_as_unknown…、run_survives_single_lock_read_blip；test_fs::read_claim_retries… |
+| 6 急停在 open 前被當卡住、寫進 .fail | `open_with_retries(fatal=(EstopEngaged, PreconditionFailed))`；急停 → 讓位 | `d4f1eb2` | worker/test_batch::…yields_when_estop_engaged_before_open、…precondition_failed_is_fail_without_retries；worker/test_loop::estop_between_pick_and_open… |
+| 8 doctor 探針只綁 pid | `.doctor_probe_<pid>_<rand>`、finally 釋放 | `08ac3fe` | test_doctor::probe_root_is_concurrency_safe_and_ignores_leftover_probes |
+| 9 confirm token 同窗同值 | nonce 式：每次不同、`_issued`、消費即失效、10 分鐘到期 | `08ac3fe` | device/test_instrument::confirm_tokens_unique_per_issue_bound_to_op_key_and_expire |
+| 10 deploy 把 EMFORGE_ROOT 指 NAS | deploy.md §2：本機 root ＋ `EMFORGE_DEPOT=file://T:/…`；start_worker 警告 | 本 commit | —（文件；fail-closed 留 P1，§12-28） |
+| 13 MCP 埠撞靜默死、url 已宣告 | `server.started` 才 announce；綁不上 → RuntimeError → CLI exit 1 | `8502f8a` | device/test_mcp_server::serve_in_thread_raises_and_does_not_announce…、…real_socket_announces_after_bind…；test_cli::worker_serve_reports_mcp_bind_failure…、device_serve_reports_bind_failure… |
+| 14 EMFORGE_MCP_PORT 壞值全命令 traceback | `--port` 走 argparse 型別（只在用到時轉） | `8502f8a` | test_cli::mcp_port_env_bad_value_only_bites_serve_commands_via_argparse |
+
 ## 12. 已知失效模式（給獨立稽核的 brief 用）
 
 1. stale-claim 接管、runtime 鎖、fleet_quiet 都靠 **`modified_at`（伺服器側）vs 本機 `now()`**：各機時鐘不同步會誤判——`doctor` 的 `depot.selfcheck()` 量偏移 >30 s 就阻擋，不修正。
@@ -331,20 +348,22 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 11. `worker_ver` 目前只含 emforge sha；adapter（antenna repo）的 sha 由 `_bind.antenna_sha()` 提供但**尚未**拼進 worker_ver。
 12. `Simulator.kill()` 對 HFSS 是殺**全部** ansysedt.exe：同機第二個 HFSS 使用者會被誤殺（doctor 拒起）。
 13. 策略層（N 個策略並行）沒有實測資料：所有「多樣性從策略池湧現」都是推論（architecture.md §12）。
-14. `fail` 非終態的代價：一批被所有機器判死後會**永遠 inflight**（策略被 max_inflight 卡住、notarize 除外），直到人 `abandon`——status.json 的 `queue_state=fail` 是唯一提示，沒有自動逾時。
+14. `fail` 非終態的代價：一批被所有機器判死後會**永遠 inflight**（策略被 max_inflight 卡住、notarize 除外），直到人 `abandon`——status.json 的 `queue_state=fail` 是唯一提示，沒有自動逾時。 `abandon` 用 `is_live`（與 requeue 同一把尺）：`.fail` 與別台的新鮮 claim 並存（接管後原主判死）時會拒——先 `stop` 那台（檢查 #2：以前看 `state()=="claimed"` 會放行、把正在量的批標 done）。
 15. `abandon` 與跑著的 runtime 的 collect 有一個很小的競賽窗（runtime 記憶體裡的 inflight 在 abandon 刪檔後不會再寫回，但同一 tick 內兩邊可能各 add 同一筆——db.add 冪等，只是事件可能各發一次）。
-16. 心跳執行緒與主迴圈共用 `Depot.touch`；NAS 短暫斷線時心跳靜默失敗（吞例外），鎖可能在斷線超過 stale 門檻時被第二個實例破掉——與 review-7 前相比只是視窗變小、不是消失。~~被破後原實例還會繼續 tick~~ → M13：心跳先看鎖還是不是自己的（owner 比對），不是 → `lost`，主迴圈下一圈 `lock_lost`＋停（回 3）；**視窗＝一個 tick**（正在跑的那個 tick 會跑完）。
+16. 心跳執行緒與主迴圈共用 `Depot.touch`。讀到**別人的** owner → 立刻 `lost`、主迴圈下一圈 `lock_lost`＋停（回 3；正在跑的 tick 跑完）。讀不到（缺／SMB 瞬斷）＝不知道：連續 `LOCK_UNREADABLE_BEATS`＝3 拍（30 s × 3）仍讀不到才算丟（檢查 #5：以前一拍讀不到就永久停）。代價：鎖真的被清掉後最多再跑約 2 個 tick；那段時間第二個實例若拿到鎖，兩邊各跑一個 tick（dispatch 去重靠 db／inflight）。
 17. `promote --spec` 的分數重算用 `Record.measure`（量測凍結）；spec 若換了 measure 名（＝換儀器）`rescore` 會拒，但 promote 不會——它只認 spec 名有沒有註冊。
 18. `FileDepot.break_if_stale` 不是仲裁：Windows 上兩個並發 rename 可以都成功（契約測試實抓）；破鎖後一律接 `claim`，claim 才決勝負。mtime 身分檢查把誤搬的新鎖放回去，但「放回」在第三方剛好又 claim 到的微秒窗會失敗（留 `.broken.*` 證據、回 False）。
 19. `list` 可最終一致的後端（S3）：`db.refresh` 對「列舉回空而索引非空」不壓實；`inflight()` 對「列到但讀不到」跳過；`Batch.results` 同。其餘列舉呼叫端（`report`、`profiles()`）還沒逐一審過。
 20. `memory://` depot 只存在本行程：`run` 自動 in-process；`worker --depot memory://…` 會什麼都撿不到（另一個行程的 runtime 看不見）——只給測試與單行程 demo。
 21. 急停的三層都是「檔存在即真」，**沒有簽章**：任何能寫 depot 的人都能 engage／clear（clear 走 CLI 只是流程約束，不是權限）。正在跑的那筆被殺是 `abort_if` 每 `estop_poll_s`（5 s）查一次 depot——急停到真的殺掉最多晚 5 s；殺完那筆算 error（attempts+1），三次急停剛好落在同一筆會把它三振成毒樣本。
-22. 儀器租約（`Instrument.acquire`）是**行程內**的鎖（同機只能一個 HFSS 使用者、MCP 與 worker 同一行程），不在 depot——換機器看不到；跨機協調仍靠 queue 的 claim。`status.json["fleet"]`／`fleet` 的 `offline` 只是「心跳年齡 > 90 s」，儀器行程死掉與 NAS 斷線分不出來。
+22. 儀器租約（`Instrument.acquire`）是**行程內**的鎖（同機只能一個 HFSS 使用者、MCP 與 worker 同一行程），不在 depot——換機器看不到；跨機協調仍靠 queue 的 claim。`status.json["fleet"]`／`fleet` 的 `offline` 只是「心跳年齡 > 90 s」，儀器行程死掉與 NAS 斷線分不出來。MCP 的 owner 是一次性 `mcp:<by>:<rand>`、永不重入；只有 worker 的 `queue:<store>` 可重入（同一批續跑）（檢查 #1）。
 23. `check_preconditions` 每次 `open()` 都跑 `doctor.health`（含 `tasklist`，~0.1 s）與 `depot.selfcheck()`（建一個探針檔）；重開頻繁（保險絲冷卻）時會多幾次 NAS 往返。「開過一次後 ansysedt 在跑不算阻擋」假設殘留的 ansysedt 是自己的——同機有人手開 HFSS 就抓不到。
-24. **MCP token 是一把鑰匙開整個機隊**：`EMFORGE_DEVICE_TOKEN` 三台共享、無身分（`by` 是自報）、無到期；外洩＝任何人能對每台開 HFSS 跑任何 profile（受 `allowed_profiles`／兩段式 confirm 限制，但 confirm token 也是同一把 secret 算的）。傳輸是明文 HTTP（區網＋防火牆 `remoteip=LocalSubnet` 是唯一屏障）。
+24. **MCP token 是一把鑰匙開整個機隊**：`EMFORGE_DEVICE_TOKEN` 三台共享、無身分（`by` 是自報）、無到期；外洩＝任何人能對每台開 HFSS 跑任何 profile（受 `allowed_profiles`／兩段式 confirm 限制，但 confirm token 也是同一把 secret 算的）。傳輸是明文 HTTP（區網＋防火牆 `remoteip=LocalSubnet` 是唯一屏障）。confirm token 帶 nonce、每次不同、10 分鐘到期、消費即失效（檢查 #9），但仍是同一把 secret 算的。
 25. MCP 走 **stateless＋JSON response**：每個請求獨立，沒有 session、沒有 SSE 推送；重放同一個 `device_simulate(confirm=…)` 由 token 單次使用擋，但 `device_abort`／`device_estop` 沒有 nonce——重放就再按一次（冪等，無害）。
 26. 同步 tool 跑 SDK 的 anyio thread pool（預設 40 個 worker thread）：`device_simulate` 佔一條 100–250 s，`device_state` 照回；但同時來 40 個阻塞呼叫就全塞（儀器租約只讓一個 simulate 進，其餘立刻 `device_busy`，所以實際只會塞一條）。uvicorn 在 daemon thread：worker 主迴圈死掉行程結束，MCP 也跟著沒了（設計如此——沒有 worker 的 MCP 用 `device-serve`）。
 27. `pythoncom.CoInitialize()` 只在 `open()` 叫、從不 `CoUninitialize`：SDK 的 thread pool 執行緒重用，同一條 thread 多次 open 重複 CoInitialize（無害，回 S_FALSE）；HFSS COM 物件跨執行緒（開在 thread A、下一筆在 thread B）是否成立**未在正式機驗證**——`simulate_once` 一筆一開一關（同一條 thread 內）刻意避開這個問題。
+28. **depot 讀不到時急停 fail-open**：三層急停都靠 `exists`，`FileDepot.exists` 對 OSError 回 False → NAS 斷線時 fleet／device 層讀成「沒有急停」；本機層只有在 `EMFORGE_ROOT` 真的在本機碟時才擋得住（deploy.md §2 已改兩個根分開）。「讀不到就當 engaged」（fail-closed）尚未做——P1，檢查 #10。
+29. `worker --serve`／`device-serve` 綁不上埠 → exit 1、不跑 worker（檢查 #13）；預綁檢查與 uvicorn 真正綁定之間有微秒級 TOCTOU，撞到會以 RuntimeError 收場、不會靜默。
 
 ## 13. 與 architecture.md 的偏差
 
@@ -371,6 +390,12 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | MCP auth 用 SDK `token_verifier`＋`AuthSettings` | ASGI bearer 中介層 `BearerGate`（`hmac.compare_digest`）；`build_server(inst)` 不吃 secret，bearer 在 HTTP 層 | SDK 那條是 OAuth 資源伺服器模型（要 issuer_url／resource_server_url、掛 /.well-known）；共享密鑰不是 OAuth；中介層 15 行、可用 ASGITransport 免 socket 測 |
 | `Limits` 值來源未定（M13） | `<root>/limits.json`（本機檔、`init` 留範本、沒有＝預設、壞 JSON 拒起）；來源進說明檔 | 每台自己的上限（磁碟／允許 profile 不同）；本機檔＝NAS 斷線也讀得到 |
 | 兩段式 token 被拒就燒掉（M13） | 驗證與消費分開：真的跑了才 `consume_confirm` | token 同窗同值，燒掉＝十分鐘內不能重試（M15 測試抓到） |
+| 兩段式 token＝sha1(secret\|op\|key\|10 分鐘窗)（M13–M15） | nonce 式：每次不同、記 `_issued`、消費即失效、`confirm_window_s` 到期 | 同窗同值＝同一件事十分鐘內做不了第二次、訊息叫人重拿卻拿回同一個（檢查 #9） |
+| 儀器租約同 owner 可重入（M13） | 只有 `queue:<store>` 可重入；MCP owner 一次性 `mcp:<by>:<rand>` | 兩個 MCP 呼叫者不帶 by 就同名重入、同機兩個 HFSS（檢查 #1，S1） |
+| MCP 起 server 前就宣告 url（M15） | `server.started` 才 announce＋device_serve；綁不上 → RuntimeError → CLI exit 1 | 埠被佔時 daemon thread 靜默死、fleet 吐死端點（檢查 #13） |
+| deploy：三台 `EMFORGE_ROOT` 指 NAS（M16） | 每台本機 root ＋ `EMFORGE_DEPOT=file://T:/…` | 本機層急停與 limits.json 才真的是本機的；fail-open 範圍縮到共享兩層（檢查 #10；fail-closed 留 P1） |
+| doctor 探針 `.doctor_probe_<pid>` | `<pid>_<rand>`、finally 釋放 | 同行程並發互撞成假的「root 不可寫」、殘留永久擋 open（檢查 #8） |
+| report 的 blind 參考分佈含公證重測 | 排除 `kind=repeat` | 同一片重量三次不是三個獨立樣本，P 零新增樣本就翻盤（檢查 #3） |
 
 ## 14. 未驗證與待決
 
