@@ -19,7 +19,9 @@ OAuth 資源伺服器（`AuthSettings` 要 issuer_url／resource_server_url、�
 import functools
 import hmac
 import json
+import socket
 import threading
+import time
 
 import numpy as np
 
@@ -251,24 +253,71 @@ def app_lifespan(app):
     return inner.router.lifespan_context(inner)
 
 
+def _precheck_port(host: str, port: int) -> None:
+    """先用一個不帶 SO_REUSEADDR 的 socket 綁一次再放掉：埠被佔立刻拋，訊息指名埠（uvicorn 的失敗是 sys.exit(3)＋一行 log）。"""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host, port))
+        except OSError as e:
+            raise RuntimeError(f"MCP 埠 {host}:{port} 綁不上（被佔？前一個 worker／device-serve 沒退乾淨？）：{e}") from e
+
+
 def serve(inst, *, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, secret: str | None = None,
-          json_response: bool = True, stateless: bool = True) -> None:
-    """阻塞跑到行程結束（uvicorn；非主執行緒也能跑——uvicorn 只在主執行緒掛訊號）。"""
+          json_response: bool = True, stateless: bool = True, ready: threading.Event | None = None,
+          hold: dict | None = None) -> None:
+    """阻塞跑到行程結束（uvicorn；非主執行緒也能跑——uvicorn 只在主執行緒掛訊號）。
+    #! 檢查 #13（2026-09-07）：以前起 server 之前就 announce_url＋記 device_serve——埠被佔時 uvicorn 在 daemon thread 裡 sys.exit(3)
+    #  被靜默吞掉，狀態字典卻宣稱 server 起來了、fleet --mcp-config 吐一個連不上的端點。現在**綁定成功（server.started）才宣告**；
+    #  綁不上／沒起來一律 RuntimeError（SystemExit 也轉），`ready` 給 serve_in_thread 等、`hold["server"]` 給呼叫端收。"""
     import asyncio
     import uvicorn
     app = http_app(inst, secret=secret, host=host, json_response=json_response, stateless=stateless)
+    _precheck_port(host, port)
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
+    if hold is not None:
+        hold["server"] = server
     url = endpoint_url(host, port)
-    inst.announce_url(url)
-    inst.log("device_serve", url=url, host=host, port=port, auth=bool(secret))
-    asyncio.run(uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning")).serve())
+
+    async def main():
+        task = asyncio.ensure_future(server.serve())
+        while not server.started and not task.done():
+            await asyncio.sleep(0.02)
+        if not server.started:
+            await task                                  # 讓它拋（SystemExit／例外）；沒拋就是靜默退出
+            raise RuntimeError(f"MCP server 沒起來（{host}:{port}）")
+        inst.announce_url(url)
+        inst.log("device_serve", url=url, host=host, port=port, auth=bool(secret))
+        if ready is not None:
+            ready.set()
+        await task
+
+    try:
+        asyncio.run(main())
+    except SystemExit as e:                             # uvicorn 綁不上／起不來：sys.exit(3)
+        raise RuntimeError(f"MCP server 沒起來（{host}:{port}；uvicorn exit {e.code}）") from None
 
 
-def serve_in_thread(inst, *, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, secret: str | None = None) -> tuple:
-    """與 worker 同一行程：MCP 在 daemon thread（同機只能一個 HFSS 使用者）。回 (thread, url)。"""
+def serve_in_thread(inst, *, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, secret: str | None = None,
+                    timeout_s: float = 3.0) -> tuple:
+    """與 worker 同一行程：MCP 在 daemon thread（同機只能一個 HFSS 使用者）。等到 server 真的綁上才回 (thread, url)；
+    執行緒死了或 timeout_s 內沒 ready → RuntimeError（呼叫端據此不起 worker）。`thread.emforge_stop()` 可收掉。"""
     check_bind(host, secret)
-    url = endpoint_url(host, port)
-    inst.announce_url(url)
-    t = threading.Thread(target=serve, kwargs=dict(inst=inst, host=host, port=port, secret=secret), daemon=True,
-                         name=f"emforge-mcp-{inst.tag}")
+    ready, hold, failure = threading.Event(), {}, {}
+
+    def run():
+        try:
+            serve(inst, host=host, port=port, secret=secret, ready=ready, hold=hold)
+        except BaseException as e:  # noqa: BLE001 — SystemExit 也要接，否則 threading.excepthook 靜默吞掉
+            failure["error"] = e
+
+    t = threading.Thread(target=run, daemon=True, name=f"emforge-mcp-{inst.tag}")
     t.start()
-    return t, url
+    deadline = time.monotonic() + timeout_s
+    while not ready.is_set() and t.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if not ready.is_set():
+        why = failure.get("error") or ("執行緒已結束" if not t.is_alive() else f"{timeout_s:.0f}s 內沒綁上")
+        raise RuntimeError(f"MCP server 沒起來（{host}:{port}）：{why}")
+    t.emforge_stop = lambda: setattr(hold["server"], "should_exit", True) if "server" in hold else None
+    return t, endpoint_url(host, port)

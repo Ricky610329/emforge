@@ -1,4 +1,5 @@
 """emforge/cli/loops.py — 長跑行程：run（runtime 實例）／worker（正式機；`--serve` 同行程再起這台儀器的 MCP server）。"""
+import argparse
 import os
 
 from .. import strategy
@@ -6,7 +7,7 @@ from ..device import mcp_server
 from ..netid import local_tag
 from ..runtime.core import Runtime, RuntimeLocked
 from ..worker.loop import make_instrument, worker_loop
-from .base import EXIT_LOCKED, add_root, depot_of, err, root_of
+from .base import EXIT_ERROR, EXIT_LOCKED, add_root, depot_of, err, root_of
 
 
 def cmd_run(args) -> int:
@@ -34,11 +35,21 @@ def _add_run(sub) -> None:
     s.set_defaults(fn=cmd_run)
 
 
+def _port(value) -> int:
+    """`--port`／EMFORGE_MCP_PORT 的型別：錯值走 argparse 的 exit 2＋人話。
+    #! 檢查 #14（2026-09-07）：以前建 parser 時就 int(環境變數)——EMFORGE_MCP_PORT="" 讓 version／--help／doctor 全吐 traceback，
+    #  start_worker.cmd 誤報成「doctor 有阻擋條件」。現在字串預設交給 argparse，只有用到 --port 的子命令才轉型。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"MCP 埠要是整數，拿到 {value!r}（--port 或 EMFORGE_MCP_PORT）") from None
+
+
 def add_serve_flags(parser) -> None:
     """`--host`／`--port`（預設 EMFORGE_MCP_HOST／EMFORGE_MCP_PORT）；token 一律讀 EMFORGE_DEVICE_TOKEN，不走旗標（別進 shell 歷史）。"""
-    parser.add_argument("--host", default=os.environ.get("EMFORGE_MCP_HOST", mcp_server.DEFAULT_HOST),
+    parser.add_argument("--host", default=os.environ.get("EMFORGE_MCP_HOST") or mcp_server.DEFAULT_HOST,
                         help="MCP 綁定位址（預設 EMFORGE_MCP_HOST 或 127.0.0.1；非 loopback 要 EMFORGE_DEVICE_TOKEN）")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("EMFORGE_MCP_PORT", mcp_server.DEFAULT_PORT)),
+    parser.add_argument("--port", type=_port, default=os.environ.get("EMFORGE_MCP_PORT") or mcp_server.DEFAULT_PORT,
                         help="MCP 埠（預設 EMFORGE_MCP_PORT 或 8765）")
 
 
@@ -60,7 +71,11 @@ def cmd_worker(args) -> int:
     inst = make_instrument(root, tag, depot=depot, work_root=args.work_root)
     inst.start()
     try:
-        _, url = mcp_server.serve_in_thread(inst, host=args.host, port=args.port, secret=device_token())
+        try:
+            _, url = mcp_server.serve_in_thread(inst, host=args.host, port=args.port, secret=device_token())
+        except RuntimeError as e:                        # 埠被佔／起不來：不跑 worker（與 check_bind 拒起同一種處置，檢查 #13）
+            err(str(e))
+            return EXIT_ERROR
         print(f"MCP server：{url}（auth={'bearer' if device_token() else '無（僅 loopback）'}）", flush=True)
         return worker_loop(root, tag, instrument=inst, **loop_kw)
     finally:

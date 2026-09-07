@@ -477,3 +477,51 @@ def test_init_writes_limits_template_and_describe_shows_limits_source(root, caps
     assert _main("device-describe", "216", "--root", root) == 0
     out = capsys.readouterr().out
     assert "1234" in out and "limits.json" in out
+
+
+# ── 檢查 #13／#14（2026-09-07）：MCP 起不來要看得見；EMFORGE_MCP_PORT 壞值不炸別的命令 ──────
+def test_worker_serve_reports_mcp_bind_failure_and_exits_1(fake, monkeypatch, capsys):
+    from emforge.cli import loops
+
+    def dead(inst, **kw):
+        raise RuntimeError("MCP 埠 127.0.0.1:8765 綁不上（被佔？）")
+
+    monkeypatch.setattr(loops.mcp_server, "serve_in_thread", dead)
+    make_batch(fake, "s1")
+    queue.Queue(fake).add(make_job("s1"))
+    assert _main("worker", "--root", fake, "--machine-tag", "216", "--once", "--work-root", fake / "work",
+                 "--serve", "--host", "127.0.0.1", "--port", "8765") == 1
+    assert "綁不上" in capsys.readouterr().err
+    assert queue.Queue(fake).state("s1") == "queued", "MCP 起不來就不跑 worker（處置與 check_bind 拒起對稱）"
+    st = fs.read_json(fake / paths.device_state("216"))
+    assert st["url"] is None
+    ev = [e["event"] for e in fs.read_jsonl(fake / paths.device_log("216"))]
+    assert ev[-1] == "device_stop" and "device_serve" not in ev
+
+
+def test_device_serve_reports_bind_failure_and_exits_1(fake, monkeypatch, capsys):
+    from emforge.cli import device as dev
+
+    def dead(inst, **kw):
+        raise RuntimeError("MCP 埠 127.0.0.1:9000 綁不上（被佔？）")
+
+    monkeypatch.setattr(dev.mcp_server, "serve", dead)
+    assert _main("device-serve", "216", "--root", fake, "--host", "127.0.0.1", "--port", "9000", "--work-root", fake / "work") == 1
+    assert "綁不上" in capsys.readouterr().err
+    ev = [e["event"] for e in fs.read_jsonl(fake / paths.device_log("216"))]
+    assert ev[-1] == "device_stop"
+
+
+def test_mcp_port_env_bad_value_only_bites_serve_commands_via_argparse(fake, monkeypatch, capsys):
+    """以前 add_serve_flags 在建 parser 時就 int(環境變數)：EMFORGE_MCP_PORT="" 讓 version／--help／doctor 全吐 traceback
+    （start_worker.cmd 誤報成 doctor 阻擋）。現在交給 argparse：只有用到 --port 的子命令才轉型，錯就 exit 2＋人話。"""
+    monkeypatch.setenv("EMFORGE_MCP_PORT", "")
+    assert _main("version") == 0
+    monkeypatch.setenv("EMFORGE_MCP_PORT", "abc")
+    assert _main("version") == 0
+    with pytest.raises(SystemExit) as ei:
+        _main("worker", "--root", fake, "--serve")
+    assert ei.value.code == 2 and "EMFORGE_MCP_PORT" in capsys.readouterr().err
+    monkeypatch.setenv("EMFORGE_MCP_PORT", "9123")
+    from emforge.cli import build_parser
+    assert build_parser().parse_args(["worker", "--root", str(fake)]).port == 9123

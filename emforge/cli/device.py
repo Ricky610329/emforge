@@ -127,6 +127,9 @@ def cmd_device_serve(args) -> int:
         print(f"device-serve {args.tag}：{mcp_server.endpoint_url(args.host, args.port)}"
               f"（auth={'bearer' if device_token() else '無（僅 loopback）'}；不撿佇列）", flush=True)
         mcp_server.serve(inst, host=args.host, port=args.port, secret=device_token())
+    except RuntimeError as e:                            # 埠被佔／起不來（serve 已把 uvicorn 的 SystemExit 轉掉，檢查 #13）
+        err(str(e))
+        return EXIT_ERROR
     finally:
         inst.stop()
     return EXIT_OK

@@ -234,14 +234,55 @@ def test_http_app_loopback_without_token_has_no_bearer_gate(served):
         M.http_app(inst, secret=None, host="0.0.0.0")
 
 
-def test_serve_in_thread_is_daemon_and_announces_url(served, monkeypatch):
+def test_serve_in_thread_returns_after_server_signals_ready_and_refuses_bad_bind(served, monkeypatch):
     inst, _ = served
     seen = {}
-    monkeypatch.setattr(M, "serve", lambda inst, **kw: seen.update(kw))
+
+    def fake_serve(inst, *, ready=None, hold=None, **kw):
+        seen.update(kw)
+        ready.set()
+
+    monkeypatch.setattr(M, "serve", fake_serve)
     t, url = M.serve_in_thread(inst, host="127.0.0.1", port=8765, secret=None)
     t.join(timeout=5)
-    assert t.daemon and url == "http://127.0.0.1:8765/mcp" and inst.state.url == url
+    assert t.daemon and url == "http://127.0.0.1:8765/mcp"
     assert seen == {"host": "127.0.0.1", "port": 8765, "secret": None}
-    assert inst.depot.get_json(paths.device_state(inst.tag))["url"] == url
     with pytest.raises(ValueError):
         M.serve_in_thread(inst, host="0.0.0.0", port=8765, secret=None)
+
+
+def test_serve_in_thread_raises_and_does_not_announce_when_server_dies_before_ready(served, monkeypatch):
+    """檢查 #13（2026-09-07）：埠被佔時 uvicorn 在 daemon thread 裡 sys.exit(3) 被靜默吞掉，而 url 已寫進狀態字典、device_serve 已入日誌，
+    worker 照跑、fleet --mcp-config 吐一個連不上的端點。現在 serve 綁定成功才宣告；執行緒死了／沒 ready 就拋。"""
+    inst, _ = served
+
+    def dead_serve(inst, *, ready=None, hold=None, **kw):
+        raise SystemExit(3)                                   # uvicorn 綁不上的實際行為
+
+    monkeypatch.setattr(M, "serve", dead_serve)
+    with pytest.raises(RuntimeError, match="MCP"):
+        M.serve_in_thread(inst, host="127.0.0.1", port=8765, secret=None, timeout_s=2)
+    assert inst.state.url is None and inst.depot.get_json(paths.device_state(inst.tag))["url"] is None
+    assert "device_serve" not in [e["event"] for e in inst.depot.read_log(paths.device_log(inst.tag))]
+
+
+def test_serve_in_thread_real_socket_announces_after_bind_and_second_bind_same_port_raises(root):
+    """真 socket（loopback、隨機空埠）：綁定成功才 announce_url＋device_serve；同埠再起一個 → RuntimeError、url 不被蓋掉。"""
+    import socket
+    inst = make_inst(root)
+    inst.start()
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    t, url = M.serve_in_thread(inst, host="127.0.0.1", port=port, secret=None)
+    try:
+        assert inst.state.url == url and inst.depot.get_json(paths.device_state(inst.tag))["url"] == url
+        assert "device_serve" in [e["event"] for e in inst.depot.read_log(paths.device_log(inst.tag))]
+        with pytest.raises(RuntimeError, match="MCP"):
+            M.serve_in_thread(inst, host="127.0.0.1", port=port, secret=None, timeout_s=3)
+        assert inst.state.url == url, "失敗的那次不蓋掉活著的 url"
+    finally:
+        t.emforge_stop()
+        t.join(timeout=10)
+        inst.stop()
+    assert not t.is_alive()
