@@ -3,6 +3,7 @@ from .. import paths, profiles, submissions
 from ..db import Database
 from ..depot import open_depot
 from ..model import now_iso
+from .runs import RunOperations, RUN_OPERATIONS
 
 OPERATIONS = {"description", "submit", "submission_status", "submission_results", "algorithm_log",
               "db_query", "db_top", "db_sample", "db_lineage", "db_children", "db_runs", "db_profiles",
@@ -14,12 +15,12 @@ def record_wire(rec):
             "response": rec.response.tolist() if rec.response is not None else None}
 
 
-class Platform:
+class Platform(RunOperations):
     def __init__(self, depot):
         self.depot = open_depot(depot)
 
     def call(self, op, **params):
-        if op not in OPERATIONS:
+        if op not in OPERATIONS | RUN_OPERATIONS:
             raise ValueError(f"未知平台操作：{op}")
         return getattr(self, op)(**params)
 
@@ -29,6 +30,16 @@ class Platform:
                 "labels": list(p.labels), "spec": p.spec, "profile_hash": p.profile_hash}
 
     def submit(self, profile, name, run_id, items, request_id=None, spec=None):
+        run = self.depot.get_json(paths.algorithm_run(run_id))
+        if run:
+            identity = run["identity"]
+            if (identity["name"], identity["profile"]) != (name, profile):
+                raise ValueError("run_id 的算法或 profile 不符")
+            if spec is not None and spec != identity["spec"]:
+                raise ValueError("執行固定評估版本，不能中途換 spec")
+            spec = identity["spec"]
+            if run["desired"] != "running":
+                raise ValueError("執行已停止接收新送件")
         return submissions.submit(self.depot, profile, name, run_id, items, request_id, spec)
 
     def _doc(self, profile, name, run_id, sid):

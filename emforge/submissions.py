@@ -7,7 +7,7 @@ import numpy as np
 from . import paths, profiles, specs
 from .db import Database
 from .depot import open_depot
-from .model import canonical_json, now_iso, record_id
+from .model import canonical_json, now_iso, record_id, sha1_hex
 from .strategy import validate_proposals
 
 
@@ -25,7 +25,10 @@ def submit(depot, profile, name, run_id, items, request_id=None, spec=None):
     props = validate_proposals(items, p, len(items))
     if not props:
         raise ValueError("送件不得為空")
-    sid = request_id or "s_" + uuid.uuid4().hex
+    if request_id is not None and (not isinstance(request_id, str) or not paths.is_valid_name(request_id)):
+        raise ValueError("request_id 名稱不合法")
+    sid = ("s_" + sha1_hex(canonical_json([run_id, request_id]).encode("utf-8"))
+           if request_id else "s_" + uuid.uuid4().hex)
     key = paths.submission(profile, sid)
     data = {"profile": profile, "profile_hash": p.profile_hash, "name": name,
             "run_id": run_id, "sid": sid, "spec": spec,
@@ -84,7 +87,9 @@ def resolve(depot, doc):
                 ref["reason"] = rec.note.get("error")
             elif ref["state"] not in ("error", "rejected"):
                 from .queue import Queue
-                if Queue(depot).state(ref["store"]) == "done":
+                collecting = depot.exists(paths.inflight_file(doc["profile"], ref["store"]))
+                record_exists = depot.exists(paths.record_by_stem(doc["profile"], stem))
+                if not collecting and not record_exists and Queue(depot).state(ref["store"]) == "done":
                     ref.update(state="error", reason="量測批已結束但沒有可用紀錄")
         out.append(ref)
     states = {r["state"] for r in out}

@@ -95,3 +95,15 @@ def test_dispatch_saved_but_status_lost_recovers_without_new_measurement(root, m
     assert a.status(sid)["state"] == "completed"
     assert len(rt.db.metas("fake_f1")) == 1
     assert not a.status(sid)["items"][0]["shared"]
+
+def test_worker_done_before_runtime_collect_is_not_submission_complete(root):
+    """回歸 I-5（2026-09-08）：worker 完成到 runtime 入庫間，client 不得提早回 completed。"""
+    rt = setup(root)
+    a = Client(rt.depot, "fake_f1", "anneal", run_id="run_a")
+    sid = a.submit(patterns(1))
+    rt.tick()
+    testing.run_all_jobs(root)
+    assert a.status(sid)["state"] == "dispatched"
+    assert a.results(sid) == []
+    collect.collect(rt)
+    assert a.status(sid)["state"] == "completed" and len(a.results(sid)) == 1

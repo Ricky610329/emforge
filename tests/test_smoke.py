@@ -32,6 +32,7 @@ DEPOT_ONLY_MODULES = (
     "client.py", "client_view.py", "submissions.py", "runtime/inbox.py",
     "platform/__init__.py", "platform/service.py", "platform/wire.py",
     "platform/transport.py", "platform/http_server.py", "cli/platform.py",
+    "algorithms.py", "costs.py", "platform/runs.py", "runner/__init__.py",
     "db.py", "batches.py", "ledger.py", "queue.py", "report.py",
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
     "runtime/schedule.py",
@@ -59,6 +60,11 @@ DEPOT_ONLY_PARTIAL = {
 }
 #? LOCAL_LAYER：本機層／後端本體，本來就認得檔案系統。值＝理由；新增模組不准隨手放這裡。
 LOCAL_LAYER = {
+    "cli/algorithm.py": "讀取使用者指定程式碼目錄、啟動本機算法節點",
+    "runner/node.py": "算法本機行程、工作目錄與輸出",
+    "runner/environment.py": "本機 Python 環境與程式碼展開",
+    "runner/execute.py": "算法入口與本機 import 路徑",
+    "runner/process.py": "本機行程樹與 PID 建立時間",
     "paths.py": "磁碟名／本機路徑的唯一來源（回 key 與 Path 兩種）",
     "fs.py": "FileDepot 的實作原語＋本機工作目錄清掃",
     "depot/__init__.py": "後端本體", "depot/base.py": "後端本體", "depot/file.py": "後端本體",

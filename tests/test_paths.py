@@ -135,3 +135,11 @@ def test_platform_keys():
     assert paths.algo_log("p", "run_a") == "algo_logs/p/run_a.jsonl"
     with pytest.raises(ValueError):
         paths.submission("p", "../outside")
+
+def test_algorithm_paths_snapshot(root):
+    assert paths.algorithm_run("run_a") == "algo_runs/run_a.json"
+    assert paths.algorithm_package("pkg_a") == "algo_packages/pkg_a.json"
+    assert paths.algorithm_node("gpu_a") == "algo_nodes/gpu_a.json"
+    assert paths.algorithm_version("anneal", "pkg_a") == "algorithms/anneal/pkg_a.json"
+    assert paths.runner_work(root,"run_a") == root / "runs" / "run_a" / "work"
+    assert paths.runner_source_file(root,"run_a","main.py") == root / "runs" / "run_a" / "source" / "main.py"

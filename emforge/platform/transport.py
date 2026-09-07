@@ -36,7 +36,7 @@ class RemotePlatform:
     @staticmethod
     def _raise(doc):
         from ..depot import FsBusy, FsCorrupt, LockTimeout
-        types = {"ValueError": ValueError, "TypeError": TypeError, "KeyError": KeyError,
+        types = {"ValueError": ValueError, "ProposalError": ValueError, "TypeError": TypeError, "KeyError": KeyError,
                  "FileNotFoundError": FileNotFoundError, "PermissionError": PermissionError,
                  "FsBusy": FsBusy, "FsCorrupt": FsCorrupt, "LockTimeout": LockTimeout,
                  "OSError": OSError, "TimeoutError": TimeoutError}

@@ -14,11 +14,11 @@
 import argparse
 import sys
 
-from . import control, device, loops, setup, show, verdict, platform
+from . import control, device, loops, setup, show, verdict, platform, algorithm
 from .base import EXIT_ERROR, err
 
 COMMANDS = {**setup.COMMANDS, **loops.COMMANDS, **show.COMMANDS, **verdict.COMMANDS, **control.COMMANDS,
-            **device.COMMANDS, **platform.COMMANDS}
+            **device.COMMANDS, **platform.COMMANDS, **algorithm.COMMANDS}
 
 
 def build_parser() -> argparse.ArgumentParser:

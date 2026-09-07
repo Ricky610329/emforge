@@ -21,6 +21,11 @@ def _reference(rt, doc, index, rid):
 
 
 def _prepare(rt, doc, props, budget):
+    from ..costs import usage
+    run = rt.depot.get_json(paths.algorithm_run(doc["run_id"]))
+    remaining = run["identity"]["budget"] - usage(rt.depot, rt.profile_name, doc["run_id"])["new_measurements"] if run else None
+    if remaining is not None:
+        budget = min(budget, max(0, remaining))
     status = submissions.resolve(rt.depot, doc)
     old = {x["index"]: x for x in status.get("items", [])}
     refs, selected, seen = [], [], set()
@@ -39,6 +44,10 @@ def _prepare(rt, doc, props, budget):
             refs.append({"index": i, "id": rid, "state": "received"})
         else:
             refs.append({"index": i, "id": rid, "state": "received"})
+    if remaining is not None and len(selected) >= remaining:
+        for ref in refs:
+            if ref["state"] == "received" and ref["id"] not in seen:
+                ref.update(state="rejected", reason="執行的新量測候選預算已用完")
     return selected, refs
 
 

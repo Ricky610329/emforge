@@ -450,3 +450,28 @@ HTTP /depot 只接受固定 Depot 原語，/rpc 只接受固定平台操作。to
 具有儲存庫讀写能力，不是多租戶權限隔離；跨不可信網路需外接 TLS。
 HTTP 使用標準函式庫，無新增必要套件；網路故障拋錯，不自動重送副作用命令。
 所有 Depot 契約對真 socket HttpDepot 執行；check_prefix 現在與 check_key 同樣拒絕 .. 路徑。
+
+## 2026-09-08 算法執行端
+algorithm-register --endpoint URL --name anneal --source DIR 上傳文字程式碼包，
+回 pkg_<sha256>；入口預設 main.py，requires 為需 import 的模組名，不代装環境。
+algorithm-worker --endpoint URL --node gpu_a --work-root LOCAL --environment ant=PYTHON
+登記節點；--max-runs 預設 1，--stop-timeout-s 預設 30。
+algorithm-start --endpoint URL --name anneal --version pkg_... --run-id run_a --node gpu_a
+--environment ant --profile P --budget 100；同 run_id 同內容冪等，不同內容拒絕。
+algorithm-status / algorithm-logs / algorithm-stop 皆接受 --endpoint、--run-id。
+algo_runs/<run_id>.json 分 desired 與 state；節點 session 與每次更新均驗所有權。
+run_id、profile、版本、spec、seed、params、environment 固定；新版本新 run_id。
+budget 是新增 sample 候選配額，共用已存在量測不扣；HFSS 重試/公證另計，不宣稱是總呼叫硬上限。
+成本分提出數/共用數/新增量測數/已保存耗時，遺失的失敗嘗試耗時不在帳內。
+
+節點的 runs/<run_id>/{source,work,stdout.log,STOP} 在本機，checkpoint 不刪。
+Windows 使用 Job Object 在節點死亡時回收自己的行程樹；POSIX 入口監看父端 stdin。
+節點重啟把未確認完成的舊執行標 interrupted，不自動換機重開。
+明確提供相同 checkpoint_schema 的版本才可 --resume-from 已結束、同節點的執行。
+算法由環境讀 EMFORGE_ENDPOINT / ALGORITHM / RUN_ID / PROFILE / SPEC / PARAMS / SEED，
+EMFORGE_RUN_STOP 為合作退出旗標、EMFORGE_RESUME_FROM 為來源工作目錄。
+EMFORGE_PLATFORM_TOKEN 只經環境傳遞，不寫程式包、參數或執行紀錄。
+
+冪等 request_id 限定在 run_id 內；sid 是平台對兩者的雜湊，不同算法可各用 round_0。
+client 等到 runtime 入庫才算完成，worker.done 只是前一個階段。
+已驗證兩個真算法子行程、兩個假模擬端、真 socket 三輪迴圈。
