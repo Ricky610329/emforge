@@ -1,0 +1,2503 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>emforge 系統架構報告</title>
+<style>
+@page { size: A4; margin: 18mm 16mm; }
+
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  font-family: "Microsoft JhengHei", "Noto Sans CJK TC", "PingFang TC", sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.6;
+  color: #111;
+  margin: 0;
+}
+
+h1 {
+  page-break-before: always;
+  font-size: 16pt;
+  line-height: 1.3;
+  margin: 0 0 0.45em 0;
+  padding-bottom: 0.2em;
+  border-bottom: 2px solid #333;
+}
+.cover h1, h1.nobreak { page-break-before: avoid; border-bottom: none; }
+h2 { font-size: 12.5pt; margin: 1.0em 0 0.3em 0; padding-left: 0.35em; border-left: 4px solid #666; page-break-after: avoid; }
+h3 { font-size: 11pt; margin: 0.75em 0 0.2em 0; page-break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 0.6em 0 0.2em 0; page-break-after: avoid; }
+p { margin: 0.32em 0; text-align: justify; }
+ul, ol { margin: 0.3em 0; padding-left: 1.5em; }
+li { margin: 0.1em 0; }
+
+code, kbd { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: 9.3pt; background: #f2f2f2; padding: 0 2px; border-radius: 2px; }
+pre {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 8.8pt;
+  line-height: 1.28;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fafafa;
+  border: 1px solid #ddd;
+  border-left: 3px solid #999;
+  padding: 5px 7px;
+  margin: 0.38em 0;
+  page-break-inside: avoid;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+pre.fig { background: #fff; border: 1px solid #ccc; border-left: 1px solid #ccc; font-size: 8.1pt; line-height: 1.22; }
+
+table { border-collapse: collapse; width: 100%; margin: 0.4em 0; font-size: 9.1pt; line-height: 1.42; }
+th, td { border: 1px solid #bbb; padding: 2px 4px; vertical-align: top; text-align: left; }
+th { background: #eee; font-weight: 600; }
+tr { page-break-inside: avoid; }
+td code, th code { font-size: 8.8pt; background: none; padding: 0; }
+table.tight td, table.tight th { padding: 1.5px 4px; font-size: 8.8pt; }
+
+.caption { font-size: 8.8pt; color: #444; text-align: center; margin: 0.1em 0 0.7em 0; }
+.note { background: #f6f6f2; border: 1px solid #ddd8c8; padding: 5px 8px; margin: 0.45em 0; font-size: 9.5pt; page-break-inside: avoid; }
+.warn { background: #fdf4f4; border: 1px solid #e2c8c8; padding: 5px 8px; margin: 0.45em 0; font-size: 9.5pt; page-break-inside: avoid; }
+.src { color: #555; font-size: 9pt; }
+.small { font-size: 9.1pt; }
+
+/* 封面 */
+.cover { text-align: center; padding-top: 60mm; page-break-after: always; }
+.cover .title { font-size: 30pt; font-weight: 700; letter-spacing: 2px; margin-bottom: 6mm; }
+.cover .sub { font-size: 13pt; color: #333; margin-bottom: 22mm; line-height: 1.9; }
+.cover .meta { font-size: 10.5pt; color: #444; line-height: 2.0; }
+.cover .rule { width: 60mm; border-top: 2px solid #333; margin: 8mm auto; }
+
+/* 目錄 */
+.toc { page-break-after: always; }
+.toc h1 { page-break-before: avoid; }
+.toc ol { list-style: none; padding-left: 0; counter-reset: none; }
+.toc li { margin: 0.22em 0; }
+.toc a { color: #111; text-decoration: none; }
+.toc .num { display: inline-block; width: 2.4em; color: #555; }
+.toc .sub2 { padding-left: 2.4em; font-size: 9.6pt; color: #333; }
+
+/* CSS 方框圖 */
+.boxfig { border: 1px solid #ccc; padding: 6px; margin: 0.4em 0; page-break-inside: avoid; background: #fff; }
+.bx { border: 1.5px solid #333; padding: 5px 7px; margin: 3px 0; font-size: 9.1pt; line-height: 1.45; }
+.bx .hd { font-weight: 700; margin-bottom: 3px; }
+.bx.dashed { border-style: dashed; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.arrow { text-align: center; font-size: 11pt; color: #444; line-height: 1.1; margin: 2px 0; }
+.stategrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.st { border: 1.5px solid #333; border-radius: 4px; padding: 5px 6px; text-align: center; font-size: 9.2pt; }
+.st .nm { font-family: "Cascadia Mono", Consolas, monospace; font-weight: 700; }
+.st.term { border-style: double; border-width: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════ 封面 ══════════════ -->
+<div class="cover">
+  <h1 class="nobreak" style="border:none; font-size:30pt; margin:0;">emforge 系統架構報告</h1>
+  <div class="rule"></div>
+  <div class="sub">
+    昂貴模擬（HFSS，一筆 100–200 秒）下的<strong>設計搜尋平台</strong><br>
+    策略庫 × 模擬庫 × 共享資料庫；迴圈裡沒有 LLM
+  </div>
+  <div class="meta">
+    版本：<code>63260ca</code>（2026-09-06，emforge 0.1.0）<br>
+    報告日期：2026-09-07<br>
+    測試狀態：476 條全綠<br>
+    程式碼規模：<code>emforge/</code> 65 個模組、約 7,000 行
+  </div>
+</div>
+
+<!-- ══════════════ 目錄 ══════════════ -->
+<div class="toc">
+<h1 class="nobreak">目錄</h1>
+<ol>
+<li><span class="num">1.</span><a href="#sec-1">摘要：這是什麼、解決什麼問題</a></li>
+<li><span class="num">2.</span><a href="#sec-2">設計原則：D1–D10 與三條貫穿性規則</a></li>
+<li><span class="num">3.</span><a href="#sec-3">系統總覽：四個框與一個候選的一生</a></li>
+<li><span class="num">4.</span><a href="#sec-4">模組地圖與可維護性門</a></li>
+<li><span class="num">5.</span><a href="#sec-5">資料契約</a></li>
+<li><span class="num">6.</span><a href="#sec-6">Depot 抽象：基礎設施解耦</a></li>
+<li><span class="num">7.</span><a href="#sec-7">磁碟／key 佈局</a></li>
+<li><span class="num">8.</span><a href="#sec-8">runtime：一個 tick 裡發生什麼</a></li>
+<li><span class="num">9.</span><a href="#sec-9">策略庫</a></li>
+<li><span class="num">10.</span><a href="#sec-10">模擬庫與 worker</a></li>
+<li><span class="num">11.</span><a href="#sec-11">儀器層（device）</a></li>
+<li><span class="num">12.</span><a href="#sec-12">MCP server：AI 進儀器的第三條路徑</a></li>
+<li><span class="num">13.</span><a href="#sec-13">CLI 一覽</a></li>
+<li><span class="num">14.</span><a href="#sec-14">事件與可觀測性</a></li>
+<li><span class="num">15.</span><a href="#sec-15">品質保證</a></li>
+<li><span class="num">16.</span><a href="#sec-16">部署</a></li>
+<li><span class="num">17.</span><a href="#sec-17">與舊系統 Antenna 的關係</a></li>
+<li><span class="num">18.</span><a href="#sec-18">未完成與待決</a></li>
+<li><span class="num">A.</span><a href="#sec-a">附錄 A：術語表</a></li>
+<li><span class="num">B.</span><a href="#sec-b">附錄 B：里程碑與 commit</a></li>
+</ol>
+<div class="note small">
+<strong>本報告的證據規則</strong>：每一個結構性主張都附程式碼或文件位置（相對於 <code>emforge/</code> repo 根）。
+文件與程式碼衝突時以程式碼與 <code>tests/</code> 為準——這是專案自己的規則（<code>docs/implementation.md</code> 開頭）。
+凡本報告作者「推論但無直接依據」之處，一律以「<em>未驗證</em>」或「<em>本報告推論</em>」明白標示。
+</div>
+</div>
+
+<!-- ══════════════ 1 ══════════════ -->
+<h1 id="sec-1">1　摘要：這是什麼、解決什麼問題</h1>
+
+<h2>1.1　一句話</h2>
+<p>
+emforge 是一個<strong>昂貴模擬下的設計搜尋平台</strong>：把有限的模擬機時當成稀缺資源來調度，
+用累積下來的量測資料庫決定「下一批要燒什麼」。
+它不是一個演算法，是一個讓各種演算法能被公平地跑、比較、記帳的執行環境。
+</p>
+<p class="src">依據：<code>pyproject.toml</code> 的 <code>description</code>、<code>README.md</code>、<code>docs/architecture.md §1</code>。</p>
+
+<h2>1.2　問題形狀</h2>
+<p><code>docs/architecture.md §1</code> 把適用範圍寫成四條同時成立的條件：</p>
+<ol>
+<li>評估一個候選要跑<strong>昂貴的模擬</strong>——本專案是 HFSS，一筆 100–200 秒。</li>
+<li>參數空間<strong>大且離散</strong>——25×25 二值遮罩＝2<sup>625</sup> 種。</li>
+<li><strong>規格由領域專家定，而且會改</strong>——本專案改過三次。</li>
+<li>目標不是「最佳解」，是「<strong>在有限機時內找到夠好且可製造的解</strong>」。</li>
+</ol>
+<p>
+反過來說，同一份文件也明講<strong>不適用</strong>的場景：模擬便宜（直接跑演化演算法就好）、參數連續可微（用梯度）、規格永遠不變。
+把這條寫進架構文件，是為了讓接手的人不要把它當成通用最佳化框架來用。
+</p>
+
+<h2>1.3　兩個硬性約束（同時是驗收條件）</h2>
+<table>
+<tr><th style="width:30%">約束</th><th>意思</th><th style="width:32%">在程式裡怎麼落實</th></tr>
+<tr>
+  <td><strong>沒有 AI 也能用</strong></td>
+  <td>AI 是加值層，拔掉它，系統要能自己跑一整晚。</td>
+  <td>runtime 的排程迴圈（<code>emforge/runtime/</code>）沒有任何 LLM 呼叫；狀態全在磁碟、可中斷續跑。</td>
+</tr>
+<tr>
+  <td><strong>平台不綁定策略</strong></td>
+  <td>研究出來的方法只是「幫使用者做得更好」，使用者不一定要用。</td>
+  <td>策略＝一個 <code>.py</code> 檔，只要有 <code>COMPATIBLE</code> 與 <code>propose(ctx)</code>（<code>emforge/strategy.py</code>）；內建只出貨兩個最小策略。</td>
+</tr>
+</table>
+<p class="src">依據：<code>docs/architecture.md §1</code>「兩個硬性約束（來自委託人，也是驗收條件）」。</p>
+
+<h2>1.4　與舊系統 Antenna 的關係</h2>
+<p>
+emforge 是<strong>另一個 repo、另一套契約</strong>，不是 Antenna 的重構分支。舊系統 Antenna 把生成器、代理模型、
+線上學習、批次 HFSS 驗證線、判讀腳本綁在一起；emforge 只保留其中「平台」的那一半——排程、去重、派工、量測、
+評分、公證、記帳——並把天線領域關進兩個受控接點：
+</p>
+<ul>
+<li><strong>adapter</strong>：<code>emforge/adapters/antenna/</code> 是<em>唯一</em>會 import <code>torch</code>／<code>antenna</code> 的地方，
+    透過環境變數 <code>EMFORGE_ANTENNA_REPO</code> 把舊 repo 掛進 <code>sys.path</code>（<code>adapters/antenna/_bind.py</code>）。</li>
+<li><strong>匯入器</strong>：<code>emforge/legacy/antenna_import.py</code> 把舊 NAS 樹的歷史量測讀進新資料庫，<strong>只讀舊樹</strong>。</li>
+</ul>
+<p>
+核心「零領域依賴」不是慣例而是<strong>被測試釘死的</strong>：<code>tests/test_smoke.py::test_core_modules_never_import_torch_or_antenna</code>
+用 AST 靜態掃描整個套件，<code>adapters/</code> 與 <code>legacy/</code> 以外的模組出現 <code>torch/antenna/win32com/scipy/matplotlib/pandas/loguru</code> 就紅。
+</p>
+
+<h2>1.5　兩個目標</h2>
+<h3>目標一：算法與基礎設施都解耦</h3>
+<p>
+第一層解耦是「算法不進平台」——策略只提案，去重／派工／評分／公證是 runtime 服務。
+第二層解耦是 M12（2026-09-06）做的：<strong>把所有共享協調狀態抽到 <code>Depot</code> 介面後面</strong>
+（<code>emforge/depot/</code>）。原本散在各處的 <code>open()</code>／<code>os.replace</code>／<code>O_EXCL</code> 全部收成十幾個原語；
+今天的 <code>FileDepot</code> 逐位元重現原本的 NAS 佈局，未來換 S3 或 SQL 只要實作同一組原語並通過契約測試，
+runtime／worker／db 的邏輯<strong>一行都不用改</strong>。
+</p>
+<p class="src">動機記在 <code>docs/implementation.md §13</code>：「Ricky 2026-09-05：不倚賴特定渠道、支援多種部署（日月光）；『算法、基礎設施都解耦』」。</p>
+
+<h3>目標二：儀器層讓 AI agent 安全地直接量</h3>
+<p>
+M13–M16（同樣是 2026-09-06）在 worker 與模擬器之間插入一層 <strong>Instrument（儀器）</strong>：狀態機、租約、
+硬限制、前置檢查、兩段式確認、三層急停、自動產生的說明檔。接著每一台正式機各自是一個 <strong>MCP server</strong>，
+把儀器的程序一對一貼成 tools。這讓 AI 層除了「讀狀態、寫策略檔」之外，多了一條<strong>對單台機器下單跑一筆</strong>的路徑——
+但每一步都有人在迴路的閘（confirm token、<code>allowed_profiles</code>、急停解除只能走 CLI）。
+</p>
+<p class="src">依據：<code>docs/architecture.md</code> 末節「與實作的偏差（M13–M14／M15–M16）」、<code>emforge/device/</code>。</p>
+
+<h2>1.6　規模與現況</h2>
+<table class="tight">
+<tr><th style="width:26%">項目</th><th>數字</th><th>依據</th></tr>
+<tr><td>套件程式碼</td><td><code>emforge/</code> 65 個 <code>.py</code>，合計約 7,000 行</td><td><code>wc -l emforge/**/*.py</code></td></tr>
+<tr><td>測試</td><td>476 條（pytest 收集數），全綠</td><td><code>python -m pytest --collect-only -q</code></td></tr>
+<tr><td>核心相依</td><td>只有 <code>numpy&gt;=1.26</code> 與 <code>pyyaml&gt;=6</code></td><td><code>pyproject.toml</code></td></tr>
+<tr><td>開發期間</td><td>2026-09-01 起算 7 天、29 個 commit（最後一個是 2026-09-07 的全面檢查報告，尚未含修正）</td><td><code>git log</code>（見附錄 B）</td></tr>
+<tr><td>正式機驗證</td><td><strong>尚未執行</strong>——三台機器的切換與儀器層驗收都還沒跑</td><td><code>docs/implementation.md §14</code></td></tr>
+</table>
+<div class="warn">
+<strong>誠實的範圍聲明。</strong>emforge 目前是一個「測試齊全、但沒有在真 HFSS 上跑過一輪」的系統。
+所有 MCP 測試都是 in-memory（SDK Client ＋ ASGITransport）；真 socket、真 HFSS、非主執行緒 COM 三件事
+都要在正式機 216 上第一次見真章。策略層（N 個策略並行）也沒有任何實測資料。
+把它當 production system 描述會是誤導。
+</div>
+
+<!-- ══════════════ 2 ══════════════ -->
+<h1 id="sec-2">2　設計原則：D1–D10 與三條貫穿性規則</h1>
+
+<p>
+<code>docs/architecture.md §11</code> 把十條設計決定編號成 D1–D10。它們不是風格偏好，
+每一條都指向舊系統的一次具體失敗或委託人的一句具體要求。以下逐條說明「原則、理由、在程式碼的落點」。
+</p>
+
+<h2>2.1　D1　評估可掛載；runtime 統一算分，策略診斷只當附註</h2>
+<p><strong>原則</strong>：量測分成兩層——<em>measure</em>（原始響應 → 軸值，凍結）與 <em>spec</em>（軸值 → 一個分數，可換）。
+分數只在 runtime 算，策略不准自評。</p>
+<p><strong>理由</strong>：委託人明說「有 AI 加值的好處是我可以很善變我的評估系統」。舊專案的規格被專家改過一次
+（帶內門檻放寬 2 dB、阻帶放寬 5 dB），<strong>不必重量任何資料</strong>就把缺口從 6.1 降到 3.05 dB——
+做到這件事的正是「量測凍結、評分可換」。另一面，策略自評等於「離線考」，舊專案三度證明離線考 ≠ 實戰考。</p>
+<p><strong>落點</strong>：<code>emforge/specs.py</code>（<code>register_measure</code> 綁定 targets 後凍結、<code>register_spec</code>、
+<code>measure()</code>／<code>score()</code>）；<code>emforge/model.py::Spec.score</code>＝<code>min(measure[axis] + offset)</code>，缺軸或 NaN 回 <code>None</code>；
+評分只在 <code>emforge/runtime/collect.py</code> 發生；換評估器走 <code>emforge/ledger.py::rescore</code>（零重量）。</p>
+
+<h2>2.2　D2　一個 runtime 實例綁一個 sim_profile</h2>
+<p><strong>原則</strong>：一個行程只服務一種模擬；要跑第二種＝開第二個實例。</p>
+<p><strong>理由</strong>：委託人要求「不要允許 single 跟 dual 同時跑，不然有點混亂」。實例綁定之後，
+沒有 per-batch 的 config 可以漏（這正是事故 I-6 的成因），資料庫視圖自動是該 profile 的世代，
+策略的 <code>COMPATIBLE</code> 只要在載入時檢查一次。</p>
+<p><strong>落點</strong>：<code>Runtime(root, profile_name)</code>；單例鎖的 key 是 <code>runtime_state/&lt;profile&gt;/lock</code>；
+<code>Database(depot, write_profile=…)</code> 拒寫別的 profile（<code>ProfileWriteRefused</code>）；
+<code>strategies.yaml</code> 的 <code>profile:</code> 與 <code>--profile</code> 不符直接 <code>ConfigError</code>。</p>
+
+<h2>2.3　D3　每個評估器版本一榜，舊榜凍結不刪</h2>
+<p><strong>原則</strong>：榜（ledger）的身分是 <code>(profile, spec)</code> 對；換 spec 就建新榜，舊榜一個 byte 都不動。</p>
+<p><strong>理由</strong>：舊專案現行做法（三代榜並存）已驗證可行。</p>
+<p><strong>落點</strong>：<code>paths.ledger_file(profile, spec)</code> → <code>ledger/&lt;profile&gt;/&lt;spec&gt;.json</code>；
+<code>ledger.rescore</code> 掃 db 每筆重算 score 建新榜，榜已存在需 <code>--force</code>（exit 6）。</p>
+
+<h2>2.4　D4　策略＝一個 <code>.py</code> 的 <code>propose(ctx)</code>；狀態靠 workdir，回饋靠下一 tick 讀 db；沒有 callback</h2>
+<p><strong>原則</strong>：策略只有一個進入點。要有狀態就寫進自己的 workdir（runtime 永不讀它）；
+要看上批結果就下一 tick 從 <code>ctx.db</code> 讀。</p>
+<p><strong>理由</strong>：委託人定調；舊專案的 <code>grind_loop</code> 證明「每 tick 呼叫 ＋ 狀態在檔案」足以承載需要重訓的策略。
+沒有 callback 意味著策略永遠不會被要求「在某個時刻同步回應」——這讓子行程隔離變成可能。</p>
+<p><strong>落點</strong>：<code>emforge/strategy.py</code>（<code>load_strategy</code>／<code>check_compatible</code>／<code>make_context</code>／
+<code>propose_in_subprocess</code>）；<code>Context</code> 的 <code>workdir</code> 由 <code>paths.strategy_workdir(root, profile, strategy)</code> 給。</p>
+
+<h2>2.5　D5　機時＝靜態 prio；背景填空只在佇列空時跑</h2>
+<p><strong>原則</strong>：策略在 <code>strategies.yaml</code> 宣告一個靜態 <code>prio</code>（小者先）；
+<code>prio &gt;= background_prio</code> 的是背景填空，只有在「沒有前景 inflight <em>且</em> 佇列沒有排隊 job」時才排。</p>
+<p><strong>理由</strong>：委託人「會有背景填空閒的 agent」。</p>
+<p><strong>落點</strong>：<code>emforge/runtime/schedule.py::_background_allowed</code>。注意它看的是<strong>全機共用佇列</strong>，
+所以另一個 profile 的實例有 job 排隊時，這個實例的背景策略也不派——設計如此，但容易被誤讀成「卡住」
+（記在 <code>docs/implementation.md §12-6</code>）。</p>
+
+<h2>2.6　D6　era ≡ sim_profile 名，不另設欄位</h2>
+<p><strong>原則</strong>：「世代」不是一個獨立欄位，就是 profile 的名字。改 profile 內容＝換新名字（append-only）。</p>
+<p><strong>理由</strong>：事故 I-7——舊幾何底板讓零厚度對角接觸成為數值幻影，換代之後舊資料<strong>不是變錯，是變不可比</strong>。
+如果「世代」與「profile 名」是兩個必須永遠一致的欄位，那就是 I-6 型事故的溫床。</p>
+<p><strong>落點</strong>：<code>record_id = sha1(packbits(bits) + sim_profile)[:16]</code>——同樣的 bits 在不同 profile 下是<strong>不同設計</strong>
+（<code>emforge/model.py::record_id</code>）；資料庫實體分目錄 <code>db/&lt;profile&gt;/</code>；
+<code>profiles.register_profile</code> 同名不同內容拋 <code>RegistryConflict</code>；<code>report</code> 預設拒絕跨 profile 並排（exit 2）。</p>
+
+<h2>2.7　D7　去重、派工、評分、公證是 runtime 服務；策略只 propose</h2>
+<p><strong>原則</strong>：安全閘不可被繞。<code>kind=repeat</code>（公證重測）只有 runtime 的公證流程與 <code>cli smoke</code> 能設。</p>
+<p><strong>理由</strong>：事故 I-8——查重閘接在管線裡，退出碼被尾端指令吃掉，安全閘<strong>靜默失效</strong>。
+與「迴圈不自己加冕」：自動化流程可以觸發公證，但不能宣告紀錄成立。</p>
+<p><strong>落點</strong>：<code>Proposal.from_dict</code> 用<strong>嚴格鍵集</strong>——多出 <code>kind</code>／<code>sim_profile</code>／<code>score</code> 一律 <code>ProposalError</code>；
+<code>runtime/dispatch.py::dispatch</code> 的簽名<strong>沒有</strong> <code>skip</code>／<code>bypass</code>／<code>keep_*</code> 參數（測試釘死：
+<code>tests/runtime/test_dispatch.py::no_dedup_bypass</code>）；策略拿到的是 <code>db.View</code>，
+結構上就沒有寫入方法（不是被禁，是不存在）。</p>
+
+<h2>2.8　D8　對照臂不強制；<code>arm="blind"</code> 是保留語義</h2>
+<p><strong>原則</strong>：不強迫每個策略都跑對照組，但 <code>blind</code> 這個 arm 名保留給「零演算法對照臂」；
+blind 樣本數不足 <code>k_min</code> 時，報表<strong>只印數字、不印任何比較</strong>。</p>
+<p><strong>理由</strong>：「策略 X 比較好」只在同批有零演算法臂時說得出口。</p>
+<p><strong>落點</strong>：<code>emforge/report.py</code>（<code>blind_count</code>、<code>p_beats_blind</code>、<code>_render</code> 的 <code>show_p</code> 閘）；
+內建策略 <code>emforge/strategies/blind.py</code> 每筆都標 <code>arm="blind"</code>。</p>
+<p class="small"><strong>已知限制</strong>：<code>arm="blind"</code> 是策略<strong>自我宣告</strong>，契約無法驗證——說謊會留紀錄但不會被擋
+（<code>docs/implementation.md §12-5</code>）。</p>
+
+<h2>2.9　D9　策略連續 3 次例外 → runtime 暫停它（操作保護，不是淘汰）</h2>
+<p><strong>原則</strong>：策略出錯不會殺 runtime，但連續失敗會被暫停，等人或 AI 用 <code>emforge resume</code> 重啟。</p>
+<p><strong>理由</strong>：事故 I-4——背景自產路徑拋出例外，直接殺掉兩台機器的 worker 行程。
+歸納成一條鐵則：<strong>背景／填充等級的工作絕不能有能力終止執行器</strong>。</p>
+<p><strong>落點</strong>：<code>runtime/schedule.py::_propose</code> 把所有例外接住 → <code>strategy_error</code> 事件、<code>errors_consecutive += 1</code>；
+達 <code>strategy_error_limit</code>（預設 3）→ <code>paused</code>＋<code>strategy_paused</code> 事件。
+更外一層：策略正式跑在<strong>子行程</strong>（<code>propose_in_subprocess</code>），逾時可殺、記憶體尖峰不傳染。</p>
+
+<h2>2.10　D10　<code>keep_project</code> 不在 Profile／Proposal 任何欄位</h2>
+<p><strong>原則</strong>：「保留模擬專案檔」是交付動作，不是儀器屬性，所以它不出現在任何契約欄位裡。</p>
+<p><strong>理由</strong>：事故 I-1——78 個工作的模擬暫存目錄吃光系統碟，導致求解器連環 COM 例外，<strong>重開機是假好轉</strong>。
+把 <code>keep_project</code> 放進 profile 等於讓策略能開它，會重演磁碟塞爆。</p>
+<p><strong>落點</strong>：契約裡沒有這個欄位（測試 <code>tests/test_model.py::…no_keep_project_field</code>）；
+工作目錄的清理有<strong>兩道</strong>——<code>run_batch</code> 結束（done／fail／yield 皆）刪，worker 啟動時整清
+（<code>emforge/worker/workdir.py</code>、<code>emforge/fs.py::sweep_dirs</code>）。</p>
+
+<h2>2.11　三條貫穿性規則</h2>
+
+<h3>（a）迴圈裡沒有 LLM</h3>
+<p>
+這是整個系統最強的一條。<code>emforge/runtime/</code> 六個檔（<code>core</code>／<code>reconcile</code>／<code>dispatch</code>／
+<code>collect</code>／<code>schedule</code>／<code>notarize</code>）裡沒有任何模型呼叫，也沒有任何需要「外部有人在」的假設。
+AI 層與系統的介面是「改檔案、跑命令列」——所以任何 harness 都能扮演，人也能扮演。
+喚醒源是 <code>watch</code> 的 exit code、<code>events.jsonl</code> 追檔、或 <code>status.json</code>，不綁定任何特定 agent 框架。
+</p>
+<p class="src">依據：<code>docs/architecture.md §10</code>、<code>docs/implementation.md §10</code>。</p>
+
+<h3>（b）append-only 註冊表</h3>
+<p>
+三個註冊表都是 append-only，同名不同內容一律拋 <code>RegistryConflict</code>，而不是覆蓋：
+</p>
+<table class="tight">
+<tr><th style="width:22%">註冊表</th><th style="width:30%">身分（怎麼判「同不同」）</th><th>位置</th></tr>
+<tr><td>measure（量測尺）</td><td>函式的 module+qualname ＋ labels ＋ targets 的 canonical JSON</td><td><code>specs.py::Measure.key</code></td></tr>
+<tr><td>spec（評估器）</td><td>整個 frozen dataclass 相等</td><td><code>specs.py::register_spec</code></td></tr>
+<tr><td>profile（儀器）</td><td><code>profile_hash</code> ＋ shape ＋ labels ＋ n_points ＋ spec ＋ timeout_s ＋ retired ＋ fixed_on</td><td><code>profiles.py::_same</code></td></tr>
+</table>
+<p>
+重跑同一份 <code>registry.py</code> 是 no-op；內容改了就撞衝突——這正是要的行為，因為「改內容 ＝ 換名字」。
+</p>
+
+<h3>（c）config 驅動</h3>
+<p>兩份使用者可寫的設定構成整個實驗介面，兩份都不是 Python 以外的 DSL：</p>
+<ul>
+<li><code>&lt;root&gt;/registry.py</code>——模擬庫與評估器的註冊表。runtime 與 worker <strong>啟動時都執行它</strong>
+（<code>profiles.load_user_registry</code> 用 <code>runpy</code>），所以派工端與執行端看到同一套 profile／spec。</li>
+<li><code>runtime_state/&lt;profile&gt;/strategies.yaml</code>——這個實例跑哪些策略、各自的 <code>prio</code>／<code>batch</code>／
+<code>max_inflight</code>／<code>params</code>，以及 runtime 的十個數值旋鈕。改了之後 runtime 每 tick 比<strong>內容 sha1</strong>
+（不看 mtime）決定要不要重讀；解析失敗發 <code>config_invalid</code> 事件、沿用上次有效設定，<strong>不停 runtime</strong>。</li>
+</ul>
+<div class="note">
+<strong><code>strategies.yaml</code> 的所有數值都是佔位預設。</strong><code>noise_floor</code>／<code>k_min</code>／<code>quiet_s</code>／
+<code>max_error_rate</code>／<code>strategy_error_limit</code> 沒有任何一個經過本問題域以外的校準
+（<code>emforge/strategy.py::RuntimeConfig</code> 的 docstring 與 <code>docs/implementation.md §12-2</code> 都明講）。
+跨域使用要全部重調。
+</div>
+<!-- ══════════════ 3 ══════════════ -->
+<h1 id="sec-3">3　系統總覽：四個框與一個候選的一生</h1>
+
+<h2>3.1　四個框</h2>
+
+<div class="boxfig">
+  <div class="bx dashed">
+    <div class="hd">① AI 加值層（可選；任意 harness；人也能扮演）</div>
+    <div><strong>讀</strong>：<code>status.json</code>、<code>events.jsonl</code>、<code>pending.jsonl</code>、<code>emforge report</code>
+      &nbsp;·&nbsp; <strong>寫</strong>：<code>strategies.yaml</code>、<code>strategies/*.py</code>、<code>registry.py</code></div>
+    <div><strong>命令</strong>：<code>promote</code>（換王）／<code>retire</code>／<code>rescore</code>／<code>requeue</code>／<code>resume</code>／<code>stop</code>／<code>smoke</code>
+      &nbsp;·&nbsp; <strong>經 MCP</strong>：對單台儀器下單跑一筆、按急停、停／續 worker</div>
+    <div><strong>紅線</strong>：不直接改榜、不繞過去重、不設 <code>kind</code>、不改已註冊的 profile 內容</div>
+  </div>
+  <div class="arrow">▲ 讀狀態、報表　│　▼ 改檔案、跑命令（不是 API 呼叫，所以任何 harness 都能做）</div>
+  <div class="bx">
+    <div class="hd">② runtime 實例（一次綁一個 sim_profile；<code>emforge/runtime/</code>）</div>
+    <div style="text-align:center; font-family:Consolas,monospace; font-size:9pt; margin:4px 0;">
+      collect（收結果→量測→評分→入庫）&nbsp;→&nbsp;notarize（破榜→重測→pending）&nbsp;→&nbsp;schedule（propose→驗證→去重→派工）
+    </div>
+    <div>迴圈裡沒有 LLM。狀態全在磁碟（<code>Depot</code>），可中斷續跑。單例鎖＝租約＋背景心跳。</div>
+  </div>
+  <div class="arrow">│ <code>propose(ctx)</code>　　│ Profile → 開儀器　　│ Record 進出　　│ job／claim</div>
+  <div class="row3">
+    <div class="bx">
+      <div class="hd">③a 策略庫</div>
+      <div class="small">N 個 <code>.py</code>；各自宣告 <code>COMPATIBLE</code>；<br>
+      <code>&lt;root&gt;/strategies/</code> 覆蓋內建<br>
+      內建：<code>blind</code>、<code>top_k_flip</code></div>
+    </div>
+    <div class="bx">
+      <div class="hd">③b 模擬庫</div>
+      <div class="small"><code>registry.py</code> 的 Profile 註冊表<br>
+      名字 → 求解器類別、幾何版、kwargs、<br>
+      shape、labels、饋墊、尺、spec、逾時<br>
+      <strong>append-only</strong>；Simulator 四方法協定</div>
+    </div>
+    <div class="bx">
+      <div class="hd">③c 共享資料庫</div>
+      <div class="small"><code>db/&lt;profile&gt;/&lt;id&gt;-&lt;store&gt;.npz</code><br>
+      <code>ledger/&lt;profile&gt;/&lt;spec&gt;.json</code><br>
+      <code>pending</code>／<code>events</code>／<code>queue</code>／<code>batches</code><br>
+      所有實例共享；一筆一檔、永不覆寫</div>
+    </div>
+  </div>
+  <div class="arrow">▼ 共用佇列 <code>queue/jobs.json</code>（prio 排序；worker 不管 job 是誰派的）</div>
+  <div class="bx">
+    <div class="hd">④ worker × N 台正式機（<code>emforge/worker/</code> ＋ <code>emforge/device/</code>）</div>
+    <div>每台＝一個 <code>Instrument</code>（狀態機／租約／急停／前置檢查／說明檔）＋（可選）一個 MCP server。
+      worker <strong>不認得天線</strong>：只呼叫 <code>sim.simulate(bits)</code> 寫原始響應。</div>
+  </div>
+</div>
+<div class="caption">圖 1　四個框。上層對下層只有<strong>宣告</strong>，沒有直接控制：AI 不直接派工（它改設定，runtime 讀）；策略不直接跑模擬（它回傳候選，runtime 派）；runtime 不知道 margin 怎麼算（評估器掛載進來）。</div>
+
+<div class="note">
+<strong>為什麼 runtime 一定要是顯性的框。</strong>舊專案的無人值守迴圈（<code>grind_loop.py</code>）就是它的單策略版，
+而舊系統的最佳解正是它產出的。不把它畫成一個框，重寫時排程邏輯就會散進策略庫或 AI 層，
+又回到「沒有 AI 就跑不動」的狀態。（<code>docs/architecture.md §2</code>）
+</div>
+
+<h2>3.2　一個候選的一生</h2>
+<p>
+以下用一個具體候選 <strong>X</strong> 貫穿。X 由策略 <code>top_k_flip</code> 在第 7 個 tick 產生，
+送去 <code>dual_p01_db075</code> 這個 profile 量測。每一步都標了實際的程式位置。
+</p>
+
+<pre class="fig">
+ 策略庫          runtime                    佇列/worker/儀器         資料庫              人 / AI
+ ───────         ─────────                  ────────────────         ──────              ───────
+    │                │                            │                    │                    │
+    │◀── ctx ────────│ ① schedule：依 prio 輪到 top_k_flip（上批已回、max_inflight=1）
+    │                │    runtime/schedule.py::schedule
+    │                │                            │                    │                    │
+    │─ 60 筆提案 ───▶│ ② propose 在**子行程**跑（逾時可殺、例外不傳染）
+    │                │    strategy.py::propose_in_subprocess → _proposals.npz
+    │                │                            │                    │                    │
+    │                │ ③ 驗證：shape＝profile.shape、bool 或 0/1、饋墊像素必為 True、≤ budget、只准四個鍵
+    │                │    strategy.py::validate_proposals（任一筆錯，整批拒）
+    │                │                            │                    │                    │
+    │                │ ④ 去重：X 的 id ∉ db.ids(profile) ∪ 所有 inflight 的 ids ∪ 批內重複
+    │                │    runtime/dispatch.py::_dedup（另外 4 筆重複 → n_dup 計入事件）
+    │                │                            │                    │                    │
+    │                │ ⑤ 派工＝三個動作、順序固定：先寫 inflight → 寫批 → 加 job
+    │                │─ job ─────────────────────▶│  runtime/dispatch.py::dispatch（I-13）
+    │                │                            │                    │                    │
+    │                │                            │ ⑥ worker：pick（租約 claim）→ gate（profile／
+    │                │                            │    profile_hash／geom_ver／labels，**開模擬器之前**）
+    │                │                            │    → Instrument.acquire("queue:&lt;store&gt;")
+    │                │                            │    → open（急停＋前置檢查）→ simulate ~160 s
+    │                │                            │    → batches/&lt;store&gt;/results/&lt;X.id&gt;.json
+    │                │◀── 逐筆結果檔 ─────────────│    worker/loop.py、worker/batch.py
+    │                │                            │                    │                    │
+    │                │ ⑦ collect：profile_hash 比對 → measure（凍結尺）→ score（掛載的 spec）
+    │                │    runtime/collect.py（不符 → profile_tamper 事件、不入庫）
+    │                │──────────── Record(X) ────────────────────────▶│ ⑧ 入庫，一筆一檔
+    │                │                            │  db.py::Database.add（同名永不覆寫）
+    │                │                            │                    │                    │
+    │                │ ⑨ notarize：X.score &gt; 門檻（max(榜首, pending 最好保守值, 公證中)）？→ 是
+    │                │─ 重測 ×repeat_n（kind=repeat）▶│  runtime/notarize.py
+    │                │◀── 兩筆結果 ───────────────│                    │                    │
+    │                │ ⑩ 三筆分數 spread ≤ noise_floor → 寫 pending.jsonl，**永不改榜**
+    │                │                            │──── pending ──────▶│                    │
+    │                │                            │                    │──── 讀 ──────────▶│ ⑪ 審
+    │                │                            │                    │◀── promote X ─────│
+    │                │                            │                    │ ⑫ ledger 更新，記 by／history
+    │                │                            │  ledger.py::Ledger.promote（唯一寫榜路徑）
+    │                │                            │                    │                    │
+    │◀── ctx ────────│ ⑬ 下一 tick：策略從 ctx.db.top(k) 讀到 X（分數取多次量測的**保守值** min）
+</pre>
+<div class="caption">圖 2　一個候選的一生。策略只出現在 ② 與 ⑬；③④⑤⑦⑧⑨⑩ 全是 runtime，⑥ 是 worker，⑪⑫ 是人或 AI。</div>
+
+<table>
+<tr><th style="width:12%">步驟</th><th style="width:22%">誰做</th><th>策略碰得到嗎</th></tr>
+<tr><td>①②⑬</td><td>策略（透過 <code>ctx</code>）</td><td><strong>是</strong>——這是策略唯一的介面</td></tr>
+<tr><td>③④⑤⑦⑧⑨⑩</td><td>runtime</td><td><strong>否</strong>（D7：安全閘不可被繞）</td></tr>
+<tr><td>⑥</td><td>worker ＋ Instrument</td><td>否</td></tr>
+<tr><td>⑪⑫</td><td>人或 AI</td><td>否</td></tr>
+</table>
+
+<p>
+去重、派工、評分、公證全部碰不到——這是設計，不是限制。策略作者要寫的程式碼只有「怎麼從資料庫挑起點、
+怎麼變異」那 20 行；其餘一律是平台服務。
+</p>
+
+<!-- ══════════════ 4 ══════════════ -->
+<h1 id="sec-4">4　模組地圖與可維護性門</h1>
+
+<h2>4.1　套件樹</h2>
+
+<pre class="fig">
+emforge/
+  __init__.py     __version__ = "0.1.0"；**刻意不 import 任何子模組**（策略子行程與 worker 啟動都要踩，import 必須極輕）
+  _version.py     describe() → "emforge=&lt;sha7&gt;[+dirty]"，worker_ver／runtime_ver 的成分（I-10）
+  paths.py        磁碟命名的唯一真相源：共享狀態回 **Depot key**（POSIX 相對字串）；本機路徑回 Path
+  model.py        契約 dataclass：Profile／Spec／Proposal／Context／Record／Job／SimResult／Simulator；record_id；pack_bits
+  fs.py           FileDepot 的檔案系統原語（atomic_write／try_claim／append_jsonl／sweep_dirs）
+  events.py       事件白名單（封閉集合）＋ emit(depot, key, event, **fields)
+  db.py           Database（一筆一檔 .npz、_index.jsonl 增量、寫綁 profile）＋ View（唯讀）
+  specs.py        measure／spec 註冊表（append-only）；measure()／score()
+  profiles.py     Profile 註冊表；load_simulator_class／check_geom_ver／check_labels／make_simulator／retire
+  strategy.py     strategies.yaml 解析、策略載入、validate_proposals、Context、子行程 propose
+  queue.py        Queue：jobs.json（持鎖讀改寫）、pick（租約認領／接管）、mark_done／fail、requeue、watch、STOP
+  batches.py      Batch：manifest.json／patterns.npz／results/&lt;id&gt;.json；result_base／make_result／error_result
+  ledger.py       Ledger（checksum、promote 唯一寫路徑、history append-only）、Pending、rescore
+  report.py       每策略報表、p_beats_blind、k_min 閘、跨 profile 拒、worker_ver 警告
+  doctor.py       機器體檢（root 探針、depot selfcheck、磁碟、ansysedt 行程）
+  netid.py        機器 tag（EMFORGE_MACHINE 或 IP 末段）
+  heartbeat.py    背景心跳執行緒（runtime 鎖與儀器狀態字典共用）
+  testing.py      FakeSimulator／fake_measure／FAKE_PROFILE／register_fakes／make_fake_root／run_all_jobs
+
+  depot/          **後端無關的協調狀態介面**（M12）
+    base.py         Depot ABC：doc／log／lease／列舉 四種語義 ＋ 衍生的 put_json／require_*／newest／is_stale／lock
+    file.py         FileDepot：key → root/key，逐位元＝今天的 NAS 佈局
+    memory.py       MemoryDepot：行程內單例，給測試與單行程 demo
+    uri.py          open_depot("file://…" | "memory://…" | Path | Depot)
+
+  runtime/        core.py（單例鎖／設定重載／state・status／tick 骨架／run）
+                  reconcile.py（啟動三方對帳）dispatch.py（去重＋派工）collect.py（收結果→量測→評分→入庫）
+                  schedule.py（prio／max_inflight／背景填空／策略暫停）notarize.py（破榜→重測→pending）
+
+  worker/         loop.py（主迴圈）gate.py（開模擬器前守門）guard.py（看門狗／處決線／開機重試）
+                  fuse.py（連敗保險絲，純狀態機）workdir.py（本機工作目錄生命週期）batch.py（一批的逐筆迴圈）
+
+  device/         **儀器層**（M13–M15，MHS 式）
+    estop.py        急停三層（全機／單機／本機）；解除只能 CLI
+    limits.py       Limits 硬限制、check_preconditions、兩段式 confirm token
+    states.py       DeviceState（狀態字典欄位唯一真相）、write_state、read_fleet
+    instrument.py   Instrument：狀態機＋租約＋Simulator 協定直傳＋abort／selfcheck／simulate_once
+    reference.py    儀器說明檔（reference.md／.json）；PROCEDURES＝MCP tools 名單的唯一真相
+    mcp_server.py   這台的 MCP server（唯一 import mcp／uvicorn／starlette 處，且都在函式內）
+    mcp_client.py   對一台儀器下單（`device-simulate` 的本體）
+
+  strategies/     blind.py（零演算法對照臂）top_k_flip.py（鄰域開採最小版）——使用者同名檔蓋過
+  adapters/antenna/  _bind.py（綁舊 repo）sim.py（HFSS 包裝）measure.py（vendored 凍結尺）profiles.py（本域註冊）
+                     ← **唯一**碰 torch／antenna 的地方
+  legacy/antenna_import.py   舊 NAS 資料匯入（torch lazy import）
+  cli/            __init__（接線）base（exit code／--root／--depot）setup loops show verdict control device
+</pre>
+<div class="caption">圖 3　套件樹與每個模組的一句職責。</div>
+
+<h2>4.2　依賴方向（誰可以 import 誰）</h2>
+
+<pre class="fig">
+                        cli/*  ────────────────┐
+                          │                    │
+                          ▼                    ▼
+        runtime/*  ──▶  db  specs  ledger  report  queue  batches  profiles  strategy
+            │             │      │       │       │       │         │
+            └──▶ device/instrument（fleet 狀態）   └──────┴─────────┴──▶  paths ── model ── events
+                          │                                                    │
+   worker/loop ─▶ worker/batch ─▶ device/*                                    ▼
+        │                              │                                   depot/*  ──▶  fs
+        └──▶ worker/{gate,guard,fuse,workdir}  ◀── device/* 只能碰這幾個 leaf
+                                                （worker leaf **不准**回頭 import device）
+
+   adapters/antenna/*  ──▶ core（model／profiles）＋ 舊 Antenna repo（EMFORGE_ANTENNA_REPO）
+   legacy/antenna_import  ──▶ core ＋ adapters/antenna/profiles ＋ torch（lazy）
+</pre>
+<div class="caption">圖 4　依賴方向。<code>adapters/</code> 與 <code>legacy/</code> 是唯二可以碰領域套件的葉子；<code>device/</code> 與 <code>worker/</code> 的方向由靜態測試釘死。</div>
+
+<p>
+儀器層的依賴方向不是慣例，而是 <code>tests/test_smoke.py::test_device_layer_dependency_direction</code> 的斷言：
+<code>device/*</code> 對 <code>worker</code> 只能 import <code>worker.guard</code>／<code>worker.gate</code>／<code>worker.workdir</code> 三個 leaf；
+<code>worker/{gate,guard,fuse,workdir}.py</code> 不准 import 任何 <code>device.*</code>。
+沒有這條，儀器層與 worker 會互相纏住，儀器層就不再能被單獨測試或單獨啟動（<code>emforge device-serve</code>）。
+</p>
+
+<h2>4.3　可維護性門（<code>tests/test_smoke.py</code>）</h2>
+<p>
+這個檔不是功能測試，是<strong>規範的機器版</strong>。11 條測試，全部靜態（AST 掃描，不執行受測程式）：
+</p>
+<table>
+<tr><th style="width:34%">門</th><th>內容</th></tr>
+<tr><td><strong>核心零領域依賴</strong></td>
+    <td><code>adapters/</code>、<code>legacy/</code> 以外的模組不得 import <code>torch</code>／<code>antenna</code>／<code>win32com</code>／
+    <code>pywintypes</code>／<code>scipy</code>／<code>matplotlib</code>／<code>pandas</code>／<code>loguru</code>。</td></tr>
+<tr><td><strong>單檔 ≤ 400 行</strong></td><td>超過就拆檔，不調上限。目前最長 <code>paths.py</code> 365 行。</td></tr>
+<tr><td><strong>單函式 ≤ 60 行</strong></td><td>超過就拆函式，不調上限。</td></tr>
+<tr><td><strong>禁用檔名</strong></td><td><code>utils</code>／<code>util</code>／<code>misc</code>／<code>helpers</code>／<code>common</code>／<code>tools</code>／<code>stuff</code>／<code>dedust</code>——「檔名要說出它做什麼」。</td></tr>
+<tr><td><strong>Depot 三張清單</strong></td>
+    <td>核心每個模組必須落在 <code>DEPOT_ONLY</code>（不 import <code>pathlib</code>／<code>shutil</code>／<code>glob</code>／<code>emforge.fs</code>，不用 <code>os.path</code>／<code>os.replace</code>…，不 <code>open(</code>）／
+    <code>DEPOT_ONLY_PARTIAL</code>（可用本機路徑，<strong>必須附理由</strong>）／<code>LOCAL_LAYER</code>（後端本體與本機層，附理由）三者之一。
+    另有一條測試檢查<strong>沒有模組漏掉分類</strong>、也沒有模組同時列在兩張清單。</td></tr>
+<tr><td><strong>儀器層依賴方向</strong></td><td>見 4.2。</td></tr>
+<tr><td><strong>optional extra 隔離</strong></td>
+    <td><code>mcp</code>／<code>uvicorn</code>／<code>starlette</code>／<code>httpx2</code>／<code>anyio</code> 只准出現在
+    <code>device/mcp_server.py</code>、<code>device/mcp_client.py</code>，而且只准在<strong>函式內</strong> import——核心 import 期零 mcp。</td></tr>
+<tr><td><strong>命名文件同步</strong></td><td><code>docs/naming.md</code> 必須提到程式裡所有保留字（<code>paths.RESERVED_STRATEGY_NAMES</code> ＋ <code>blind</code>）。</td></tr>
+</table>
+
+<p class="small">
+<code>DEPOT_ONLY_PARTIAL</code> 的「附理由」是有實效的設計：每一個被允許碰本機路徑的模組，清單裡都寫著為什麼。
+例如 <code>device/limits.py</code>：「部署設定 <code>&lt;root&gt;/limits.json</code> 是本機檔（每台自己的上限，不經 depot）」；
+<code>device/estop.py</code>：「第三層急停是本機檔 <code>&lt;root&gt;/ESTOP</code>（NAS 斷線也要擋得住）」。
+新模組不表態就紅——不能默默漏掉守門。
+</p>
+
+<!-- ══════════════ 5 ══════════════ -->
+<h1 id="sec-5">5　資料契約</h1>
+<p>
+所有跨邊界的資料結構都是 <code>emforge/model.py</code> 裡的 dataclass。
+一條規則貫穿：<strong>JSON 鍵一律等於欄位名，跨邊界不改名</strong>。陣列用 numpy——
+pattern 是 <code>bool[H,W]</code>，response 是 <code>float32[n_labels, n_points]</code>。
+</p>
+
+<h2>5.1　Profile —— 「一種模擬」的全部定義（＝儀器）</h2>
+<table class="tight">
+<tr><th style="width:17%">欄位</th><th style="width:20%">型別</th><th>意義</th></tr>
+<tr><td><code>name</code></td><td><code>str</code></td><td>profile 名＝era；規則 <code>^[a-z][a-z0-9_]*$</code>；命名慣例 <code>&lt;domain&gt;_&lt;geom&gt;_&lt;variant&gt;</code></td></tr>
+<tr><td><code>simulator</code></td><td><code>"module.path:ClassName"</code></td><td>實作 Simulator 協定的類別，由 <code>load_simulator_class</code> 動態載入</td></tr>
+<tr><td><code>geom_ver</code></td><td><code>str</code></td><td>幾何底板版本；worker 開模擬器前與類別宣告雙邊比對（I-7）</td></tr>
+<tr><td><code>kwargs</code></td><td><code>dict</code></td><td>模擬器建構參數，原名直傳</td></tr>
+<tr><td><code>shape</code></td><td><code>tuple</code></td><td>pattern 形狀，如 <code>(25, 25)</code></td></tr>
+<tr><td><code>labels</code></td><td><code>tuple</code></td><td>響應的列名，如 <code>("S11","S21","S22")</code></td></tr>
+<tr><td><code>n_points</code></td><td><code>int</code></td><td>掃頻點數（本域 17：24–32 GHz、0.5 GHz 一點）</td></tr>
+<tr><td><code>fixed_on</code></td><td><code>bool[H,W]</code></td><td>饋墊等必為金屬的像素——<strong>生成端約束的事實來源</strong>，不是策略猜的</td></tr>
+<tr><td><code>measure</code></td><td><code>str</code></td><td>凍結量測尺的名字</td></tr>
+<tr><td><code>spec</code></td><td><code>str</code></td><td>預設評估器（可換）</td></tr>
+<tr><td><code>timeout_s</code></td><td><code>int</code></td><td>單筆看門狗上限；<strong>只進看門狗、不進模擬器</strong></td></tr>
+<tr><td><code>retired</code></td><td><code>bool</code></td><td>True＝拒收新工作，資料凍結保留</td></tr>
+</table>
+<p>
+<strong><code>profile_hash</code></strong>（<code>@property</code>）＝
+<code>sha1(canonical_json([simulator, geom_ver, kwargs, measure]))[:12]</code>。
+注意它<strong>納入 measure 名</strong>但<strong>不含</strong> name／spec／timeout_s／retired：
+換尺＝換儀器（所以要被 <code>profile_tamper</code> 抓），換評分或改逾時則不是。
+這個 hash 蓋在每一個 job、每一份批 manifest、每一筆結果檔上。
+</p>
+
+<h2>5.2　Spec —— 評估器（可換）</h2>
+<pre><code>Spec(name, labels, measure, axes, offsets)
+    score(measure_dict) -> float | None     # min(measure[a] + o for a, o in zip(axes, offsets))
+                                            # 任一軸缺或 NaN → None（不猜、不入榜）</code></pre>
+<p>本域現有三個 spec（<code>adapters/antenna/profiles.py::register_all</code>）：</p>
+<table class="tight">
+<tr><th>spec</th><th>measure</th><th>axes</th><th>offsets</th><th>備註</th></tr>
+<tr><td><code>dual_v1</code></td><td><code>antenna_dual_r1</code></td><td>m1,m2,m3,m4</td><td>0,0,0,0</td><td>原始規格</td></tr>
+<tr><td><code>dual_v2</code></td><td><code>antenna_dual_r1</code></td><td>m1,m2,m3,m4</td><td>+2,+2,0,+5</td><td>2026-08-12 規格放寬；<strong>純評分層平移，量測不動</strong></td></tr>
+<tr><td><code>single_v1</code></td><td><code>antenna_single_base</code></td><td>S11,Gain</td><td>0,0</td><td></td></tr>
+</table>
+<p class="small">
+<code>dual_v1</code> → <code>dual_v2</code> 正是 D1 的實證：專家改規格，一行註冊 ＋ 一次 <code>rescore</code>，
+零機時、原始資料一個 byte 都沒動。
+</p>
+
+<h2>5.3　Proposal —— 策略唯一的輸出</h2>
+<pre><code>Proposal(pattern: bool[H,W], parent: str|None = None, arm: str|None = None, note: dict = {})
+    KEYS = {"pattern", "parent", "arm", "note"}        # 嚴格鍵集
+    from_dict(d)  # 多出 kind／sim_profile／score 等 runtime 欄位 → ProposalError("forbidden_key: …")</code></pre>
+<p>
+策略<strong>不寫</strong> <code>sim_profile</code>（實例綁定，runtime 蓋章）、<strong>不寫</strong> <code>kind</code>（D7）、
+<strong>不寫</strong> <code>score</code>（D1）。<code>note</code> 是策略的自由欄位：可以放自己的預測值、標準差、診斷——
+會被記錄、供人看，但<strong>不當成效</strong>。
+</p>
+
+<h2>5.4　Context —— 系統給策略的七樣東西</h2>
+<table class="tight">
+<tr><th style="width:14%">欄位</th><th style="width:20%">型別</th><th>為什麼給</th></tr>
+<tr><td><code>db</code></td><td><code>db.View</code>（唯讀）</td><td>「用既有量測資料庫挑起點」是舊專案最大的單一槓桿（+3.63 dB）；策略若各用各的資料等於放棄複利</td></tr>
+<tr><td><code>profile</code></td><td><code>Profile</code></td><td>策略要知道 shape、饋墊位置、labels——這些是儀器屬性，不是策略猜的</td></tr>
+<tr><td><code>budget</code></td><td><code>int</code></td><td>機時是稀缺資源，由 runtime 調度，否則高 prio 策略會餓死背景臂</td></tr>
+<tr><td><code>rng</code></td><td><code>np.random.Generator</code></td><td>已 seed；seed 記進 inflight，可重現</td></tr>
+<tr><td><code>workdir</code></td><td><code>Path</code></td><td>有狀態策略（模型權重、快取）落地在此；<strong>runtime 永不讀它</strong>＝零耦合</td></tr>
+<tr><td><code>tick</code></td><td><code>int</code></td><td>「每 3 tick 重訓」這種節奏不用策略自己數</td></tr>
+<tr><td><code>params</code></td><td><code>dict</code></td><td>來自 <code>strategies.yaml</code> 的 <code>params:</code>（架構文件原本沒有這欄，是實作加的）</td></tr>
+</table>
+<p><code>View</code> 只有四個方法：<code>query()</code>／<code>top(k)</code>／<code>mine()</code>／<code>measurements(id)</code>。
+<code>top()</code> 對同一個 id 的多次量測取<strong>保守值</strong>（min）再排序。</p>
+
+<h2>5.5　Record —— 資料庫的一筆</h2>
+<table class="tight">
+<tr><th style="width:16%">欄位</th><th style="width:22%">型別</th><th>意義</th></tr>
+<tr><td><code>id</code></td><td><code>str</code>（16 hex）</td><td><code>sha1(packbits(bits) + sim_profile)[:16]</code>＝去重鍵</td></tr>
+<tr><td><code>sim_profile</code></td><td><code>str</code></td><td>就是 era（D6）</td></tr>
+<tr><td><code>bits</code></td><td><code>bool[H,W]</code></td><td>幾何宣告：bits 之外的幾何全在 profile 裡</td></tr>
+<tr><td><code>response</code></td><td><code>float32[L,P] | None</code></td><td>原始曲線，永遠保存；status=error 時 None</td></tr>
+<tr><td><code>measure</code></td><td><code>dict</code></td><td>凍結口徑算出的軸值（m1…m6、energy_max）</td></tr>
+<tr><td><code>score</code></td><td><code>float | None</code></td><td>當前評估器算出的主分數（<strong>導出值</strong>，可 rescore 重算）</td></tr>
+<tr><td><code>status</code></td><td><code>queued|running|done|error</code></td><td></td></tr>
+<tr><td><code>strategy</code> <code>arm</code> <code>parent</code> <code>tick</code> <code>seed</code> <code>note</code></td><td>—</td><td>誰產的、是不是對照臂、血統、可重現</td></tr>
+<tr><td><code>kind</code></td><td><code>sample|repeat</code></td><td><code>repeat</code> 只有 runtime 公證與 <code>cli smoke</code> 能設（D7）</td></tr>
+<tr><td><code>run</code></td><td><code>dict</code></td><td><code>{store, machine, worker_ver, profile_hash, time_s}</code></td></tr>
+<tr><td><code>extra</code></td><td><code>dict</code></td><td>儀器側通道（如 single 的 radiation）；<strong>永不進 measure／score／report</strong></td></tr>
+</table>
+<p>
+架構文件對「四個欄位為什麼缺一不可」的說明值得複述，因為它們是這個資料模型的全部理由：
+<strong>幾何宣告</strong>（bits ＋ profile）——可製造性處理（橋、槽、像素尺寸）是幾何的一部分，不是事後濾鏡，
+同 bits × 不同橋寬 ＝ 不同量測對象；<strong>量測條件</strong>（<code>profile_hash</code>）——結果自帶「這批用什麼設定量的」，不靠人記；
+<strong>原始響應</strong>——導出指標會隨評估器改版，原始曲線不會；<strong>世代</strong>（≡ profile）——沒有它，
+三年後接手的人會拿跨代數字做決策。
+</p>
+
+<h2>5.6　Job、SimResult、Simulator 協定</h2>
+<pre><code>Job(store, sim_profile, profile_hash, prio, n, machine=None, origin="runtime", by="", at="", extra={})
+    # from_dict 把不認得的鍵收進 extra，to_dict 再攤回去 → 舊／新版本的 job 互不吃掉對方的欄位
+
+SimResult(response: float32[n_labels, n_points], time_s: float, extra: dict)
+
+class Simulator:                       # 核心只認這五樣
+    geom_ver: str | None               # None ＝ 單邊宣告（不與 profile 比對）
+    labels: tuple
+    def __init__(self, *, workdir: str, profile: Profile)   # 建構子簽名固定
+    def open(self)                     # 一次昂貴連線（HFSS COM）
+    def simulate(self, bits) -&gt; SimResult   # 一筆進、一筆出；可被 kill() 中斷
+    def kill(self)                     # OS 級強殺，可重入；看門狗呼叫
+    def close(self)                    # 優雅關閉；失敗不拋</code></pre>
+<p class="small">
+架構文件原本寫的是五方法協定 <code>open/start/__call__/end/quit</code>（沿用舊系統）；
+實作收成四個，把 <code>start/__call__/end</code> 藏進 adapter——因為 worker 需要的只是「一筆進一筆出、可殺」
+（<code>docs/implementation.md §13</code>）。
+</p>
+
+<h2>5.7　名字規則、store 名格式與保留字</h2>
+<p>
+所有會落到磁碟或設定檔的名字都必須符合 <code>^[a-z][a-z0-9_]*$</code>（<code>paths.is_valid_name</code>）：
+小寫、底線、<strong>不含 <code>-</code></strong>——因為 <code>-</code> 保留給 store 名當欄位分隔。
+</p>
+<table class="tight">
+<tr><th style="width:22%">名字</th><th style="width:38%">格式</th><th>例</th></tr>
+<tr><td>profile</td><td><code>&lt;domain&gt;_&lt;geom&gt;_&lt;variant&gt;</code></td><td><code>dual_p01_db075</code>、<code>single_db100</code>、<code>fake_f1</code></td></tr>
+<tr><td>spec</td><td><code>&lt;domain&gt;_v&lt;N&gt;</code></td><td><code>dual_v2</code>、<code>single_v1</code></td></tr>
+<tr><td>策略</td><td>＝檔案 stem</td><td><code>top_k_flip</code>、<code>blind</code></td></tr>
+<tr><td>機器 tag</td><td>IP 末段字串；釘選比對＝<strong>完全相等</strong></td><td><code>216</code>、<code>218</code>、<code>37</code></td></tr>
+<tr><td>store（一般批）</td><td><code>&lt;profile&gt;-&lt;strategy&gt;-t&lt;tick:05d&gt;</code></td><td><code>dual_p01_db075-top_k_flip-t00007</code></td></tr>
+<tr><td>store（公證重測）</td><td><code>&lt;profile&gt;-notarize-t&lt;tick:05d&gt;-&lt;id[:8]&gt;-r&lt;n&gt;</code></td><td>—</td></tr>
+<tr><td>store（人下的 smoke）</td><td><code>&lt;profile&gt;-smoke-&lt;id[:8]&gt;-&lt;YYYYmmddHHMMSS&gt;-r&lt;n&gt;</code></td><td>沒有 tick，用時間戳</td></tr>
+<tr><td>Record id</td><td><code>sha1(packbits(bits)+sim_profile)[:16]</code></td><td><code>6c4e45d0ff24958e</code></td></tr>
+<tr><td>profile_hash</td><td><code>sha1(canonical_json([simulator, geom_ver, kwargs, measure]))[:12]</code></td><td>—</td></tr>
+<tr><td>事件</td><td><code>&lt;主詞&gt;_&lt;動詞或狀態&gt;</code>，白名單在 <code>events.py</code></td><td><code>batch_dispatched</code>、<code>profile_tamper</code></td></tr>
+<tr><td>租約 owner</td><td><code>&lt;來源&gt;:&lt;對象&gt;</code></td><td>儀器 <code>queue:&lt;store&gt;</code>／<code>mcp:&lt;by&gt;</code>；runtime 鎖 <code>&lt;tag&gt;:&lt;pid&gt;:&lt;rand&gt;</code></td></tr>
+</table>
+<p>
+<strong>保留字</strong>（<code>paths.RESERVED_STRATEGY_NAMES</code>）＝<code>repeat</code>、<code>notarize</code>、<code>runtime</code>、<code>cli</code>——
+這四個是 runtime／CLI 自己產出的紀錄會填進「策略」欄位的值，所以不准當使用者策略名。
+<code>blind</code> <strong>不在此列</strong>：它是內建策略名<em>兼</em>保留 arm 語義（零演算法對照臂）。
+</p>
+
+<!-- ══════════════ 6 ══════════════ -->
+<h1 id="sec-6">6　Depot 抽象：基礎設施解耦</h1>
+
+<h2>6.1　為什麼要有這一層</h2>
+<p>
+2026-09-01 的第一版把「共享狀態」直接寫成 NAS 上的檔案：<code>O_EXCL</code> 建檔認領、<code>os.replace</code> 原子替換、
+mtime 當心跳。這在自家實驗室成立（舊系統以此在 NAS 上跑了兩個月），但部署形態未定——
+合作企業的環境不一定有共用 SMB 檔案系統。M12（2026-09-06）把這一層抽成 <code>Depot</code> 介面。
+</p>
+<p class="src">動機出處：<code>docs/implementation.md §13</code>「Ricky 2026-09-05：不倚賴特定渠道、支援多種部署（日月光）；『算法、基礎設施都解耦』」。</p>
+<p>
+抽象的設計目標是<strong>最小共同集合</strong>：只用 S3（<code>If-None-Match: *</code> 的條件 PUT、版本化 DELETE）、
+SQL（唯一鍵 insert、<code>DELETE … WHERE updated_at &lt; …</code>）與檔案系統（<code>O_EXCL</code>、<code>os.replace</code>）
+<strong>三者都做得到</strong>的原語。所以介面裡<strong>沒有 rename、沒有 compare-and-set</strong>，
+列舉語義刻意寫成「<strong>可最終一致</strong>」。
+</p>
+
+<h2>6.2　四種語義</h2>
+<p>每一個 key 只屬於其中一種，混用就是 bug：</p>
+<table>
+<tr><th style="width:13%">語義</th><th style="width:30%">保證</th><th>用在哪些 key</th></tr>
+<tr><td><strong>doc</strong></td><td>整份原子替換；讀者只會看到<strong>完整的舊版或完整的新版</strong>，不會看到半截</td>
+    <td><code>db/…/*.npz</code>、<code>ledger/…</code>、<code>queue/jobs.json</code>、批 manifest／patterns／逐筆結果、<code>state.json</code>、<code>status.json</code>、<code>control.json</code>、<code>inflight/*.json</code>、<code>devices/&lt;tag&gt;/state.json</code></td></tr>
+<tr><td><strong>log</strong></td><td><strong>單寫者</strong> append；<code>rewrite_log</code> 整份替換給壓實用</td>
+    <td><code>_index.jsonl</code>、<code>events.jsonl</code>、<code>pending.jsonl</code>、<code>queue/log/&lt;tag&gt;.jsonl</code>、<code>devices/&lt;tag&gt;/log.jsonl</code></td></tr>
+<tr><td><strong>lease</strong></td><td>互斥建立（<code>claim</code>）＋心跳（<code>touch</code>）＋過期破除（<code>break_if_stale</code>）＋只刪自己的（<code>release(owner=)</code>）</td>
+    <td><code>queue/jobs.lock</code>、<code>queue/state/&lt;store&gt;.claim</code>、<code>runtime_state/&lt;profile&gt;/lock</code></td></tr>
+<tr><td><strong>marker</strong></td><td>存在即真（空 doc）</td><td><code>queue/STOP</code>、<code>STOP.&lt;tag&gt;</code>、<code>queue/ESTOP[.&lt;tag&gt;]</code>、<code>RETIRED</code>、<code>runtime_state/&lt;p&gt;/STOP</code></td></tr>
+</table>
+<p class="small">另有第五類 <strong>local</strong>：不經 Depot 的本機路徑（<code>registry.py</code>、<code>strategies/</code>、策略 workdir、
+<code>limits.json</code>、本機 <code>ESTOP</code>、worker 工作目錄）。它們是<strong>程式碼與每台機器自己的設定</strong>，刻意不抽象。</p>
+
+<h2>6.3　原語表</h2>
+<table class="tight">
+<tr><th style="width:24%">原語</th><th style="width:30%">語義</th><th style="width:23%">FileDepot 怎麼做</th><th>未來 S3／SQL 的做法（設計意圖）</th></tr>
+<tr><td colspan="4" style="background:#f4f4f4"><strong>文件（doc）</strong></td></tr>
+<tr><td><code>put_bytes(key, data)</code></td><td>整份原子替換</td><td>寫 tmp → fsync → <code>os.replace</code>（PermissionError 退避重試 ~5 s，用盡拋 <code>FsBusy</code>）</td><td>S3 PUT（本身原子）／SQL UPSERT</td></tr>
+<tr><td><code>get_bytes(key)</code></td><td>缺 → <code>None</code></td><td><code>read_bytes</code>（替換瞬間 sharing violation 退避重試）</td><td>GET／SELECT</td></tr>
+<tr><td><code>delete(key)</code></td><td><strong>True ＝這次呼叫移除了它</strong>（競賽仲裁用）；缺 → False</td><td><code>os.unlink</code>，<code>FileNotFoundError</code> → False</td><td>版本化 DELETE／<code>DELETE … RETURNING</code></td></tr>
+<tr><td><code>exists(key)</code></td><td>—</td><td><code>Path.is_file()</code></td><td>HEAD／<code>SELECT 1</code></td></tr>
+<tr><td><code>put_json</code>／<code>get_json</code></td><td>canonical JSON（<code>sort_keys</code>、不轉義中文、<code>indent=1</code>）；壞內容 → <code>FsCorrupt</code></td><td>衍生自 <code>put_bytes</code>／<code>get_bytes</code></td><td>同上</td></tr>
+<tr><td><code>require_bytes</code>／<code>require_json</code></td><td>缺 → <code>FileNotFoundError</code>（「本來就該在」的讀法）</td><td>衍生</td><td>同上</td></tr>
+<tr><td colspan="4" style="background:#f4f4f4"><strong>列舉／時間</strong></td></tr>
+<tr><td><code>list(prefix)</code></td><td>直接子項的完整 key、排序；子前綴帶尾 <code>/</code>；末段 <code>.</code> 開頭者不列；<strong>可最終一致</strong></td><td><code>os.scandir</code>，過濾 <code>.</code> 開頭與 <code>.broken.</code></td><td>ListObjectsV2 with delimiter／<code>SELECT key WHERE key LIKE</code></td></tr>
+<tr><td><code>modified_at(key)</code></td><td><strong>伺服器側</strong> epoch；缺 → None；put／touch 後不減</td><td><code>os.path.getmtime</code></td><td>LastModified／<code>updated_at</code> 欄</td></tr>
+<tr><td><code>set_modified_at</code></td><td>測試／維運鉤子（模擬老租約）</td><td><code>os.utime</code></td><td>直接改欄位</td></tr>
+<tr><td><code>newest(prefix)</code></td><td>直接子項 <code>modified_at</code> 最大值</td><td>衍生</td><td>衍生</td></tr>
+<tr><td><code>is_stale(key, s)</code></td><td><code>now - modified_at &gt; s</code>；<strong>缺 → True</strong>（沒有心跳＝死）</td><td>衍生</td><td>衍生</td></tr>
+<tr><td colspan="4" style="background:#f4f4f4"><strong>日誌（log，單寫者）</strong></td></tr>
+<tr><td><code>append(key, record)</code></td><td>append 一行 JSON</td><td><code>open(…, "a")</code> ＋ flush</td><td>S3 需改成一寫者一物件；SQL INSERT</td></tr>
+<tr><td><code>read_log(key)</code></td><td>缺 → <code>[]</code>；壞行 → <code>FsCorrupt</code></td><td>逐行 <code>json.loads</code></td><td>—</td></tr>
+<tr><td><code>rewrite_log(key, recs)</code></td><td>整份替換（壓實）</td><td>原子寫</td><td>—</td></tr>
+<tr><td colspan="4" style="background:#f4f4f4"><strong>租約（lease）</strong></td></tr>
+<tr><td><code>claim(key, payload)</code></td><td><strong>互斥建立</strong>；已存在 → False。payload 必含 <code>owner</code></td><td><code>os.open(O_CREAT\|O_EXCL)</code>；Windows delete-pending 的 <code>PermissionError</code> 也算「沒搶到」</td><td>S3 <code>If-None-Match: *</code>／SQL 唯一鍵 INSERT</td></tr>
+<tr><td><code>owner(key)</code></td><td>payload；缺／空／半截 → None（＝壞 claim）</td><td><code>read_claim</code></td><td>—</td></tr>
+<tr><td><code>touch(key)</code></td><td>刷新 <code>modified_at</code>；<strong>缺 → False 且不建檔</strong>（鎖被破後心跳變 no-op）</td><td><code>os.utime</code></td><td>UPDATE <code>updated_at</code></td></tr>
+<tr><td><code>release(key, owner)</code></td><td>給 owner 只刪自己的；不符／認不出 → False 不動；缺 → True</td><td>先讀 claim 比對再 unlink</td><td>條件 DELETE</td></tr>
+<tr><td><code>break_if_stale(key, s)</code></td><td>過期才移除。<strong>並發破鎖者可能不只一人 True</strong>，但保證不碰任何新建的租約</td><td><code>os.replace</code> 搬去 <code>&lt;name&gt;.broken.&lt;pid&gt;.&lt;rand&gt;</code> ＋ mtime 身分檢查</td><td>版本化 DELETE（冪等）／<code>DELETE … WHERE updated_at &lt; …</code></td></tr>
+<tr><td><code>lock(key, owner=…)</code></td><td>context manager：claim → 拿不到就看是否過期→破 → 每圈走逾時檢查＋sleep → 逾時拋 <code>LockTimeout</code></td><td>由上述原語衍生（<code>base.py</code>）</td><td>同一份衍生實作，後端無關</td></tr>
+<tr><td colspan="4" style="background:#f4f4f4"><strong>其他</strong></td></tr>
+<tr><td><code>ensure_prefixes(prefixes)</code></td><td>讓後續 <code>list</code> 合法</td><td><code>mkdir(parents=True)</code></td><td>物件儲存＝no-op</td></tr>
+<tr><td><code>selfcheck()</code></td><td>探針 claim／release、可寫、時鐘偏移；回問題清單</td><td>建 <code>.selfcheck.*</code> 探針、比 mtime 與 <code>time.time()</code>，偏移 &gt;30 s 回報</td><td>後端各自實作</td></tr>
+</table>
+<p class="small">
+<strong>時鐘的處理方式值得單獨指出</strong>：<code>modified_at</code> 是<strong>伺服器側</strong>時間，<code>now()</code> 是<strong>本機</strong>時間。
+兩者的偏移由 <code>selfcheck()</code> 量出來、由 <code>doctor</code> 在 &gt;30 s 時<strong>阻擋起 worker</strong>——
+但系統<strong>不做修正</strong>。這是刻意的：修正等於在每台機器上引入一個看不見的補償項。
+</p>
+
+<h2>6.4　三個後端</h2>
+<table>
+<tr><th style="width:16%">後端</th><th style="width:20%">spec</th><th>用途與性質</th></tr>
+<tr><td><code>FileDepot</code></td><td><code>file://&lt;root&gt;</code></td>
+    <td>正式後端。<code>key → root/key</code>，<strong>逐位元重現</strong>原本的磁碟佈局——
+    <code>tests/depot/test_file.py</code> 有兩條測試斷言 <code>put_json</code> 與 <code>claim</code> 寫出的 bytes
+    與舊 <code>fs.atomic_write_json</code>／<code>fs.try_claim</code> 完全相同。</td></tr>
+<tr><td><code>MemoryDepot</code></td><td><code>memory://&lt;name&gt;</code></td>
+    <td>行程內單例（同名回同一實例），所有操作在一把 RLock 下＝執行緒安全，時鐘可注入
+    （陳舊／破鎖測試不用真的睡）。<strong>子行程看不到</strong>——<code>emforge run --depot memory://…</code> 會自動把策略改成 in-process。</td></tr>
+<tr><td>（未來）</td><td><code>s3://</code>、<code>sql://</code></td><td>在 <code>depot/uri.py::open_depot</code> 註冊即可；<strong>尚未實作</strong>。</td></tr>
+</table>
+
+<h3>兩個根的分工</h3>
+<pre><code>--root  / EMFORGE_ROOT    本機**程式碼／設定**根：registry.py、strategies/*.py、策略 workdir、
+                          limits.json、本機 ESTOP、worker 工作目錄
+--depot / EMFORGE_DEPOT   **共享協調狀態**後端 spec；不給 = FileDepot(root) = 今天的樹、一個 byte 都不差</code></pre>
+<p>
+所有吃 <code>--root</code> 的 CLI 也吃 <code>--depot</code>（<code>cli/base.py::depot_of</code>：
+<code>--depot</code> &gt; <code>EMFORGE_DEPOT</code> &gt; <code>FileDepot(root)</code>）。
+建構子一律吃 <code>Depot | str | Path</code>：<code>Runtime(root, profile, depot=…)</code>、<code>worker_loop(root, tag, depot=…)</code>、
+<code>Queue(depot)</code>、<code>Database(depot)</code>、<code>Batch(depot, store)</code>、<code>Ledger(depot, p, spec)</code>。
+</p>
+
+<h2>6.5　契約測試：換後端為什麼能零改 runtime</h2>
+<p>
+<code>tests/depot/test_contract.py</code> 是「基礎設施解耦」的機器版：<strong>36 條測試，用 pytest 參數化對每個後端各跑一次</strong>
+（<code>@pytest.fixture(params=["file","memory"])</code>），加上兩個後端各自的專屬測試，depot 目錄共 89 條。
+</p>
+<p>契約涵蓋的性質，挑幾條有代表性的：</p>
+<ul>
+<li><strong>原子替換在並發讀者下成立</strong>——讀者永遠拿到完整的舊版或新版。</li>
+<li><strong>序列化失敗時不動舊 doc</strong>（<code>put_json</code> 先序列化再寫）。</li>
+<li><strong>8 條執行緒同時 <code>claim</code>，只有一個贏</strong>。</li>
+<li><strong><code>release(owner=別人)</code> 拒絕且保留租約</strong>；<code>touch</code> 對不存在的 key 是 no-op 且<strong>不建檔</strong>。</li>
+<li><strong>key 可以含中文與撇號</strong>——因為真實 NAS 路徑是 <code>T:\碩二_鄒穎麒's\antenna\…</code>，
+    測試的 <code>root</code> fixture 也刻意做成 <code>tmp_path/"碩二_x's"/"emforge"</code>。</li>
+<li><strong>大 npz bytes round-trip</strong>、<strong><code>lock</code> 序列化 8 條執行緒的計數器</strong>、
+    <strong><code>lock</code> 逾時拋 <code>LockTimeout</code> 而不是 <code>SystemExit</code></strong>。</li>
+</ul>
+<p>
+只要一個新後端通過這 36 條，<code>runtime/</code>、<code>worker/</code>、<code>db.py</code>、<code>queue.py</code> 的邏輯就一行都不用改——
+因為它們<strong>只認得這些原語</strong>，而這件事由 <code>test_smoke.py</code> 的三張清單靜態保證（見 4.3）。
+</p>
+
+<h2>6.6　關鍵發現：Windows 上兩個並發 rename 可以都成功</h2>
+<div class="warn">
+<strong>發現</strong>：M12a 的契約測試實際抓到——Windows 上兩個執行緒同時對同一個檔做「rename 到不同目標」，
+<strong>可以兩個都回報成功</strong>（第二個經由先開好的 handle，把已經改過名的同一個檔再改一次）。
+</div>
+<p>
+這推翻了第一版的一個假設：「破鎖＝rename，恰好一個人成功，所以破鎖本身就是仲裁」。
+系統據此做了一個明確的裁決，寫在 <code>depot/file.py</code> 的 <code>#!</code> 事故疤註解裡：
+</p>
+<blockquote style="margin:0.5em 0 0.5em 1em; padding-left:0.8em; border-left:3px solid #999;">
+<strong>破鎖不是仲裁，<code>claim</code>（O_EXCL）才是。</strong>破鎖只保證「搬到的不是別人的新鎖」；
+破完<strong>一律接 <code>claim</code></strong>，誰 claim 到誰算。
+</blockquote>
+<p>三個地方因此改寫：</p>
+<ol>
+<li><code>Depot.break_if_stale</code> 的介面契約直接寫明「並發破鎖者<strong>可能不只一人 True</strong>」
+（<code>depot/base.py</code>），而不是承諾唯一性。</li>
+<li><code>FileDepot.break_if_stale</code> 加了 <strong>mtime 身分檢查</strong>：搬完之後比對被搬走那個檔的 mtime，
+若不等於當初判定過期的那一個，表示搬到的是別人剛建的<strong>新</strong>鎖 → 用 <code>_undo_break</code> 放回去
+（Windows 用 <code>os.rename</code>、POSIX 用 <code>link</code>+<code>unlink</code>，目標已存在就不覆蓋），這次算沒破到。
+破鎖留下的 <code>&lt;name&gt;.broken.&lt;pid&gt;.&lt;rand&gt;</code> 證據檔不刪（給 doctor 數），且<strong>不會被 <code>list</code> 列出來</strong>。</li>
+<li>所有呼叫端都改成「破完必 claim，claim 的回值才是勝負」：
+<code>Queue._claim</code>（<code>queue.py</code>）、<code>Runtime.acquire_lock</code>（<code>runtime/core.py</code>）、
+<code>Depot.lock</code>（<code>depot/base.py</code>）。<code>.fail</code> 檔的接管則用 <code>delete()</code> 的回值仲裁
+（「True ＝這次呼叫移除了它」）。</li>
+</ol>
+<p>
+這個性質被契約測試釘住：<code>test_two_breakers_never_delete_each_others_reclaim_and_claim_arbitrates</code>——
+兩條執行緒同時破一個過期租約，斷言「破成功的可能有 1～2 人，但 claim 到的<strong>恰好一人</strong>，
+而且輸家事後既破不掉、也 <code>release</code> 不掉贏家的新租約」。同一條測試對 <code>MemoryDepot</code> 也跑，
+因為未來的 S3 版本化 DELETE 也是冪等的——同樣可能多人成功。
+</p>
+
+<!-- ══════════════ 7 ══════════════ -->
+<h1 id="sec-7">7　磁碟／key 佈局</h1>
+<p>
+以下是完整的 key 佈局。所有 key 都只能來自 <code>emforge/paths.py</code>——不准在別處拼字串
+（這是 <code>CLAUDE.md</code> 的硬規則，快照釘在 <code>tests/test_paths.py</code>）。
+「語義」欄對應 6.2 的四種＋local。
+</p>
+
+<h2>7.1　共享狀態（Depot key）</h2>
+<table class="tight">
+<tr><th style="width:30%">key</th><th style="width:8%">語義</th><th style="width:14%">寫者</th><th>內容／備註</th></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>資料庫</strong></td></tr>
+<tr><td><code>db/&lt;profile&gt;/&lt;id&gt;-&lt;store&gt;.npz</code></td><td>doc</td><td>runtime／匯入器</td>
+    <td>一筆 Record：<code>bits</code>(packbits u8)、<code>shape</code>、<code>response</code>(f32 或空)、<code>has_response</code>、<code>meta</code>(JSON 字串)。
+    <code>np.savez(allow_pickle=False)</code>。<strong>同名永不覆寫</strong>（<code>Database.add</code> 回 False）。
+    同 id 不同 store（公證重測）是不同檔。</td></tr>
+<tr><td><code>db/&lt;profile&gt;/_index.jsonl</code></td><td>log</td><td>同上（一 profile 一寫者）</td>
+    <td>一行一檔：<code>{stem, store, worker_ver, id, sim_profile, status, score, strategy, arm, parent, tick, kind}</code>。
+    入庫時 append 一行（I-5：不重掃全史）。</td></tr>
+<tr><td><code>db/&lt;profile&gt;/RETIRED</code></td><td>marker</td><td>CLI <code>retire</code></td><td><code>{by, at}</code>；gate 據此拒收新工作</td></tr>
+<tr><td><code>db/&lt;profile&gt;/_imported.json</code></td><td>doc</td><td>匯入器</td><td><code>{store: {results_mtime, n_pt, n_records, …}}</code>——重跑跳過未變的 store</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>榜</strong></td></tr>
+<tr><td><code>ledger/&lt;profile&gt;/&lt;spec&gt;.json</code></td><td>doc</td><td><strong>只有</strong> CLI <code>promote</code>／<code>rescore</code></td>
+    <td><code>{profile, spec, best:{id,score,at,by,note,force}|null, history:[…], _checksum}</code>。
+    <code>_checksum</code>＝除自己以外全文的 sha1[:16]；手改會在下次讀取被抓（<code>LedgerTamper</code>）。</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>佇列（全機共用）</strong></td></tr>
+<tr><td><code>queue/jobs.json</code></td><td>doc</td><td>任何加 job 者，<strong>全程持 <code>jobs.lock</code></strong></td><td><code>[Job…]</code>；讀-改-寫（I-3）</td></tr>
+<tr><td><code>queue/jobs.lock</code></td><td>lease</td><td>同上</td><td><code>owner = &lt;host&gt;:&lt;pid&gt;</code>；stale 180 s 破</td></tr>
+<tr><td><code>queue/state/&lt;store&gt;.claim</code></td><td>lease</td><td>worker</td>
+    <td><code>{owner, at, prior_fail}</code>；心跳＝<strong>每跑完一筆 <code>touch</code> 一次</strong>。
+    壞 claim（無主 &gt;60 s）／陳 claim（老且該批無進度）可被接管。</td></tr>
+<tr><td><code>queue/state/&lt;store&gt;.done</code></td><td>doc</td><td>worker</td><td><code>{machine, at, n_done, n_error, error_ids}</code>——「跑完」≠「全成功」</td></tr>
+<tr><td><code>queue/state/&lt;store&gt;.fail</code></td><td>doc</td><td>worker</td><td><code>{machines, last, at}</code>；<strong>名單外的機器會接管</strong>；接管用 <code>delete()</code> 仲裁</td></tr>
+<tr><td><code>queue/STOP</code>、<code>queue/STOP.&lt;tag&gt;</code></td><td>marker</td><td>CLI／MCP</td><td>worker 收工（在 job <strong>之間</strong>生效，不中斷單筆）；空 doc</td></tr>
+<tr><td><code>queue/log/&lt;tag&gt;.jsonl</code></td><td>log</td><td>該台 worker（單寫者）</td><td>worker 事件</td></tr>
+<tr><td><code>queue/ESTOP</code>、<code>queue/ESTOP.&lt;tag&gt;</code></td><td>marker</td><td>CLI <code>device-estop</code>／MCP <code>device_estop</code></td>
+    <td>急停第 1／2 層 <code>{by, reason, at}</code>；<strong>解除只能 CLI</strong></td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>批</strong></td></tr>
+<tr><td><code>batches/&lt;store&gt;/manifest.json</code></td><td>doc</td><td>runtime</td>
+    <td><code>{store, sim_profile, profile_hash, strategy, tick, seed, prio, kind, items:[{id,parent,arm,note}]}</code>；
+    <strong>patterns 先寫、manifest 最後寫</strong>＝「批完整」的標記</td></tr>
+<tr><td><code>batches/&lt;store&gt;/patterns.npz</code></td><td>doc</td><td>runtime</td><td><code>ids(&lt;U16)</code>、<code>packed(n, ceil(HW/8))</code>、<code>shape</code></td></tr>
+<tr><td><code>batches/&lt;store&gt;/results/&lt;id&gt;.json</code></td><td>doc</td><td>持 claim 的 worker</td>
+    <td><code>{id, status, response, time_s, extra, machine, worker_ver, profile_hash, at, attempts}</code>
+    或 <code>{…, status:"error", error}</code>。<strong>逐筆一檔＝合併語義</strong>（I-15）；
+    <code>newest()</code> 是這批的進度心跳。</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>儀器（一台一目錄）</strong></td></tr>
+<tr><td><code>devices/&lt;tag&gt;/state.json</code></td><td>doc</td><td><strong>只有</strong>該台 <code>Instrument</code></td>
+    <td><code>DeviceState</code>；狀態轉換即寫 ＋ 30 s 心跳。<code>offline</code> 由<strong>讀者</strong>用 <code>modified_at</code> 推導
+    （死掉的儀器寫不了「我離線」）。寫失敗吞掉、記裝置日誌。</td></tr>
+<tr><td><code>devices/&lt;tag&gt;/reference.md</code>／<code>.json</code></td><td>doc</td><td>該台 <code>Instrument</code></td><td>自動產生的說明檔（open 成功時與每小時刷）</td></tr>
+<tr><td><code>devices/&lt;tag&gt;/log.jsonl</code></td><td>log</td><td>該台 <code>Instrument</code>（單寫者）</td><td><code>device_*</code>／<code>lease_refused</code>／<code>estop_*</code></td></tr>
+<tr><td><code>devices/&lt;tag&gt;/adhoc/&lt;stamp&gt;-&lt;id&gt;.json</code></td><td>doc</td><td>該台 <code>Instrument</code></td><td><code>simulate_once</code> 的結果，與批結果同格式、<strong>不入 db</strong></td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>runtime 實例狀態（每個 profile 一份）</strong></td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/lock</code></td><td>lease</td><td>該 profile 的 runtime</td>
+    <td><code>{owner=&lt;tag&gt;:&lt;pid&gt;:&lt;rand&gt;, pid, machine, at}</code>；背景執行緒每 30 s <code>touch</code>；
+    stale ＝ <code>max(600 s, 5×tick_s)</code>；<code>release</code> 只刪自己的</td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/strategies.yaml</code></td><td>doc</td><td>人／<code>init</code></td><td><strong>比內容 sha1</strong> 決定要不要重讀（不看 mtime）；無效沿用上次</td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/state.json</code></td><td>doc</td><td>runtime</td>
+    <td><code>{tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{…}, seed_base}</code>——<strong>持久狀態，重啟重讀</strong></td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/status.json</code></td><td>doc</td><td>runtime</td><td>每 tick 導出的<strong>人讀快照</strong>（人改它不會汙染狀態）</td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/events.jsonl</code></td><td>log</td><td>runtime（＋ CLI 的低頻例外）</td><td>見第 14 章</td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/pending.jsonl</code></td><td>log</td><td>runtime</td><td>公證通過、等人審的候選——<strong>不是榜</strong></td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/control.json</code></td><td>doc</td><td>CLI → runtime</td><td><code>resume</code> 用；runtime 每 tick 開頭消費並刪除</td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/STOP</code></td><td>marker</td><td>CLI</td><td>runtime 收工（tick <strong>之間</strong>）；空 doc</td></tr>
+<tr><td><code>runtime_state/&lt;p&gt;/inflight/&lt;store&gt;.json</code></td><td>doc</td><td>runtime（<code>abandon</code> 可刪）</td>
+    <td><code>{store, strategy, tick, seed, kind, prio, ids, items, collected, at}</code>；
+    列到但 <code>get</code> 回 None 就跳過（列舉可最終一致）</td></tr>
+</table>
+
+<h2>7.2　本機路徑（不經 Depot）</h2>
+<table class="tight">
+<tr><th style="width:34%">路徑</th><th>為什麼是本機的</th></tr>
+<tr><td><code>&lt;root&gt;/registry.py</code></td><td>是<strong>程式碼</strong>，要 <code>runpy</code> 從本機檔案系統載入；runtime 與 worker 啟動都執行＝雙邊同源</td></tr>
+<tr><td><code>&lt;root&gt;/strategies/&lt;name&gt;.py</code></td><td>同上（<code>importlib</code>）；使用者檔優先於內建</td></tr>
+<tr><td><code>&lt;root&gt;/limits.json</code></td><td>每台機器自己的儀器上限；<strong>本機檔＝NAS 斷線也讀得到</strong></td></tr>
+<tr><td><code>&lt;root&gt;/ESTOP</code></td><td>急停第 3 層；NAS 斷線也擋得住</td></tr>
+<tr><td><code>&lt;root&gt;/runtime_state/&lt;p&gt;/strategies/&lt;name&gt;/</code></td><td>策略的私有 workdir，<strong>runtime 永不讀它</strong>；換後端不必跟著搬。
+    子行程交接檔 <code>_proposals.npz</code> 也在這裡。</td></tr>
+<tr><td><code>&lt;EMFORGE_WORK&gt;/&lt;store&gt;/</code></td><td>worker 的模擬工作目錄；預設 <code>%LOCALAPPDATA%\emforge\work</code>。
+    <strong>兩道清理</strong>：跑完即刪、worker 啟動時整清（I-1）</td></tr>
+</table>
+
+<h2>7.3　後端內部名（<code>list</code> 不列）</h2>
+<p>
+<code>.&lt;name&gt;.&lt;pid&gt;.&lt;rand&gt;.tmp</code>（原子寫入中）、<code>.selfcheck.*</code>（doctor／depot 探針）、
+<code>&lt;name&gt;.broken.&lt;pid&gt;.&lt;rand&gt;</code>（破鎖證據）。<code>FileDepot.list</code> 與 <code>MemoryDepot.list</code>
+用同一條規則過濾（末段 <code>.</code> 開頭或含 <code>.broken.</code>），並由契約測試釘住。
+</p>
+<p class="small">
+副作用：<code>_index.jsonl</code>、<code>_imported.json</code> 用單底線開頭而不是點——因為它們<strong>要</strong>被列出來。
+底線前綴在這套慣例裡的意思是「可重建的快取」。
+</p>
+<!-- ══════════════ 8 ══════════════ -->
+<h1 id="sec-8">8　runtime：一個 tick 裡發生什麼</h1>
+
+<h2>8.1　啟動序列與退出碼</h2>
+<pre class="fig">
+Runtime(root, profile, depot=…)         # 建構時就把 strategies.yaml 讀進來；缺檔直接 ConfigError（沒有策略清單不能起）
+  │
+  ▼ run(once=False)
+  ① acquire_lock()      Depot.claim(runtime_state/&lt;p&gt;/lock)；拿不到且已過期 → break_if_stale → 重試 claim 決勝負
+  │                     真的被別人活著佔著 → RuntimeLocked  → CLI **exit 3**
+  ② start_heartbeat()   背景執行緒每 30 s touch 鎖（review-7：一個 tick 可能長過 stale 門檻）
+  ③ 事件 runtime_start（runtime_ver／profile_hash／pid／machine）
+  ④ db.refresh()        「磁碟有、索引無」的檔補回索引（上次死在 add 與 append 之間）→ 事件 index_repaired
+  ⑤ reconcile()         inflight／佇列／批 三方對帳；不一致 → 事件 reconcile_mismatch ＋ runtime_stop → **exit 2**（I-14）
+  │
+  ▼ while True:
+      heartbeat()       鎖還是自己的嗎（比對 owner）？不是 → lost
+      lock_lost()?      → 事件 lock_lost ＋ runtime_stop → **exit 3**
+      STOP 檔存在?      → 事件 runtime_stop(reason=stop_file) → **exit 0**
+      tick()
+      once?             → **exit 0**
+      sleep(tick_s)
+  finally: release_lock()   # 只刪自己的（owner 比對）
+</pre>
+<div class="caption">圖 5　runtime 的啟動與主迴圈。三個退出碼各對應一種明確的狀況，而不是「掛了」。</div>
+
+<h3>對帳（<code>runtime/reconcile.py</code>）</h3>
+<p>啟動時檢查三件事，任一不成立就<strong>停下印差異、不繼續</strong>：</p>
+<ul>
+<li><code>inflight_without_job</code>：有 inflight 但佇列沒有這個 store。</li>
+<li><code>inflight_without_batch</code>：有 inflight 但批的 manifest 或 patterns 不在。</li>
+<li><code>job_without_inflight</code>：本 profile、<code>origin=runtime</code>、非終態的 job 卻沒有 inflight——<strong>這是最危險的一種</strong>，
+    表示派了工但沒人會收結果。</li>
+</ul>
+<p class="small">
+別的 profile 的 job、<code>cli:*</code> origin 的 job 都不歸這個 runtime 管，不列入對帳。
+這條防線來自事故 I-14：「在未落地的狀態上又疊了三層工作」。
+</p>
+
+<h2>8.2　一個 tick 的六個階段</h2>
+<pre class="fig">
+Runtime.tick()                                                   （emforge/runtime/core.py）
+
+ ① 保號        state["tick"] += 1 ; save_state()
+               #! 事故疤（review-3）：tick 號**一加就落地**——中途死掉重啟不會重播同一號、
+               #  不會撞到已存在的 store 名。
+
+ ② 對外同步    heartbeat()        鎖還是自己的才 touch；被破後 touch 是 no-op、**不重建鎖**
+               apply_control()    消費 control.json（resume 策略／profile）並刪除
+               reload_config()    yaml **內容 sha1** 變了才重讀；解析失敗 → config_invalid 事件、沿用上次（不停 runtime）
+
+ ③ collect     new = collect()    走一遍所有 inflight，增量讀結果 → 量測 → 評分 → 入庫 → 收尾
+                                  （細節見 8.3）
+
+ ④ notarize    notarize_step(new) 完成中的公證 → pending；新破榜候選 → 派 repeat_n 個重測
+               save_state()       #  公證登記不能只留在記憶體（死在 schedule 裡會丟）
+
+ ⑤ 排程或只等  fleet_quiet()?  → 事件 fleet_quiet，**本 tick 不排程**
+               否則 schedule()  → 依 prio 逐個策略：propose → 驗證 → 去重 → 派工
+
+ ⑥ 落地        save_state() ; write_status()
+</pre>
+<div class="caption">圖 6　tick 的六個階段。每一步之間都有落地點，所以任何一步中途死掉，重啟都能接上。</div>
+
+<h3><code>fleet_quiet</code>：排隊 ≠ 停滯</h3>
+<p>
+「有派出去的批，但 <code>quiet_s</code> 內整個機隊沒有任何產出」時，runtime 只等、不排程——
+避免在機器已經塞住時繼續往佇列堆東西。「產出」的定義有三個來源，取最新的：
+inflight 檔本身的 <code>modified_at</code>、該批最新結果檔的 <code>modified_at</code>、
+以及（M14 加的）<strong>正拿著我們某批在跑的儀器，其狀態字典的心跳</strong>——
+因為一筆 HFSS 可能長過 <code>quiet_s</code>，只看結果檔會誤判成停滯。
+</p>
+
+<h2>8.3　collect：收結果的終態語義</h2>
+<p>
+<code>runtime/collect.py</code> 是 2026-09-05 獨立審查改動最多的一個檔，
+它的四條 <code>#!</code> 事故疤註解各對應一個真實的資料遺失風險：
+</p>
+<table>
+<tr><th style="width:16%">規則</th><th>內容與理由</th></tr>
+<tr><td><code>profile_hash</code> 比對</td>
+    <td>結果檔自帶量它的儀器指紋；與註冊表不符 → 發 <code>profile_tamper</code> 事件、<strong>不入庫</strong>
+    （但記為已收，不重複讀）。代表有人改了 <code>registry.py</code>，或某台在跑舊程式。（I-10）</td></tr>
+<tr><td>error 等批 done 才收</td>
+    <td>error 結果在批未 done 前<strong>不入庫、不記 collected</strong>——因為 worker 的補測輪會覆寫同一個結果檔（翻案成 done）。
+    先記了就永遠不會再讀，翻案的 HFSS 結果白燒。批到 <code>done</code> 終態才把殘留 error 收進 db。（review-1）</td></tr>
+<tr><td><code>fail</code> 不是終態</td>
+    <td><code>.fail</code> 只代表「這台判死」，名單外的機器<strong>會接管重跑</strong>。所以只發一次 <code>batch_failed</code>
+    （inflight 記 <code>fail_reported</code>）、inflight <strong>留著繼續收</strong>。真的沒人接，由人下 <code>emforge abandon</code>。（review-2）</td></tr>
+<tr><td>每筆立刻落地</td>
+    <td>每入庫一筆就<strong>立刻</strong>把 <code>collected</code> 寫回 inflight 檔。若上次死在「<code>add</code> 成功、
+    <code>collected</code> 沒落地」之間，這次 <code>add</code> 會回 False——但仍然算<strong>新收</strong>、交給 notarize，
+    不能靜默漏掉一個破榜設計。（review-8）</td></tr>
+</table>
+<p>
+<strong>冪等性</strong>因此有三層：<code>Database.add</code> 同 id 同 store 已存在直接回 False（不覆寫，I-15）；
+<code>collected</code> 讓 <code>Batch.results(known_ids=…)</code> 只開新檔（I-5 增量）；
+<code>_persist_inflight</code> 在寫回之前先確認 inflight 檔還在（被 <code>abandon</code> 拿掉的不復活）。
+</p>
+<p>
+批 <code>done</code> 且 <code>set(inflight.ids) ⊆ collected</code> 才算<strong>真的收完</strong>：移除 inflight、發 <code>batch_done</code>。
+此時若 <code>kind=sample</code> 且錯誤率 &gt; <code>max_error_rate</code>，就<strong>暫停整個 profile</strong>
+（<code>paused_profile</code>＋<code>profile_paused</code> 事件）——注意暫停的是 profile，不是策略：
+高錯誤率是儀器或機器的問題，不是策略的錯。
+</p>
+
+<h2>8.4　dispatch：派工是一個動作</h2>
+<pre><code># runtime/dispatch.py（順序不可調換）
+1. StoreExists 先擋         # 同名 store 已有 inflight 或批 → 什麼都不寫（tick 重播的保險，review-3）
+2. _dedup(proposals)        # db.ids(profile)（**只算 done**）∪ 所有 inflight 的 ids ∪ 批內重複
+                            # → 事件 proposals_validated(n_in, n_dup, n_out)；全重複 → return None
+3. put_json(inflight/&lt;store&gt;.json)      # **先寫 inflight**（I-13）
+4. Batch.write(manifest, patterns, ids) # patterns 先、manifest 最後
+5. Queue.add(Job(...))                  # 批必須已落地才准加 job
+6. 事件 batch_dispatched</code></pre>
+<p>
+<strong>為什麼 inflight 要先寫</strong>：事故 I-13 記錄過「派了工但沒掛偵測 → 整條鏈停在那裡沒人知道」。
+順序反過來的後果不對稱——「inflight 在、job 不在」會被 reconcile 抓到；
+「job 在、inflight 不在」則是沒人收結果的死鏈。所以選前者。
+</p>
+<p>
+去重只算<strong>已量成功</strong>的 id（<code>Database.ids(status=("done",))</code>）——error 的設計要能被再次提案。
+<code>kind=repeat</code> 是唯一的例外：<strong>不去重</strong>（同 id 再量正是目的），而且 <code>store</code> 必須顯式指定，
+只有 <code>runtime/notarize.py</code> 與 <code>cli smoke</code> 這樣呼叫。
+</p>
+
+<h2>8.5　schedule：節奏與生死</h2>
+<pre class="fig">
+schedule(rt)                                                  （emforge/runtime/schedule.py）
+  paused_profile? → return（整個 profile 暫停中）
+  for sc in sorted(strategies, key=prio):        # prio 小者先
+      not enabled 或 paused                → skip
+      本策略 kind=sample 的 inflight ≥ max_inflight  → skip     # max_inflight 預設 1 ＝「上批回來才輪到它」
+      prio ≥ background_prio 且（有前景 inflight 或 佇列有 queued job） → skip   # D5
+      seed = yaml 的 seed 或 strategy_seed(seed_base, profile, name, tick)
+      props = propose(**子行程**, timeout_s)
+          StrategyTimeout → 事件 strategy_timeout + strategy_error，連敗 +1
+          任何例外        → 事件 strategy_error，連敗 +1；達 strategy_error_limit → paused
+          **絕不終止 runtime**（I-4）
+      成功 → 連敗歸零；空提案 → 事件 strategy_empty
+      dispatch(...)
+          例外（StoreExists／LockTimeout／NAS）→ 事件 dispatch_failed，
+          **不計策略連敗**（不是策略的錯）、runtime 繼續（review-3）
+</pre>
+<div class="caption">圖 7　排程。<code>max_inflight</code> 就是「策略照自己節奏」的實作——不需要 callback。</div>
+<p>
+<code>strategy_seed(base, profile, name, tick)</code> ＝ <code>int(sha1(f"{base}:{profile}:{name}:{tick}")[:8], 16)</code>——
+同一組 (base, profile, 策略, tick) 永遠得到同一個 seed，而且 seed 被記進 inflight 與 Record，所以任何一批都可重現。
+</p>
+
+<h2>8.6　notarize：迴圈不自己加冕</h2>
+<p>
+這是整個 runtime <strong>唯一</strong>會設 <code>kind=repeat</code> 的地方，也是<strong>唯一</strong>與「紀錄」有關的自動化——
+但它<strong>永遠不寫榜</strong>。
+</p>
+<h3>開新候選</h3>
+<pre><code>門檻 = max( 榜首 score（經 Ledger.best() 走 checksum；被手改 → ledger_tamper 事件、當作沒有榜）,
+            pending 裡最好的 conservative,
+            目前正在公證中的候選 score )
+
+for rec in 本 tick 新收、status=done、score 非 None、kind=sample 的紀錄（依分數降冪）:
+    已在公證中或已在 pending → skip
+    score ≤ 門檻            → skip
+    派 repeat_n 個重測批（store 名 &lt;profile&gt;-notarize-t&lt;tick&gt;-&lt;id8&gt;-r&lt;n&gt;，prio=notarize_prio）
+        派不出去 → dispatch_failed 事件、**不登記候選**（review-3）
+    登記 nz[id] = {stores, tick, score}；事件 record_candidate + notarize_dispatched
+    門檻更新為該分數</code></pre>
+<h3>判定</h3>
+<p>
+重測批全部離開 inflight（<strong>佇列狀態是 <code>fail</code> 的不算、不擋</strong>，否則會等到天荒地老）之後：
+<code>scores = [原始分數] + [每個重測批的分數]</code>；
+<code>spread = max - min</code>，<code>conservative = min</code>。
+</p>
+<ul>
+<li><code>spread ≤ noise_floor</code> → append 一筆到 <code>pending.jsonl</code>
+    （<code>{id, tick, scores, conservative, spread, stores, at, status:"待審（迴圈不加冕）"}</code>）＋事件 <code>notarize_pass</code>。</li>
+<li>否則 → 事件 <code>notarize_reject</code>（分數不穩＝可能是假象）。</li>
+<li>只剩一個分數（重測全掛）→ 也算 reject，不猜。</li>
+</ul>
+<div class="note">
+<strong>設計上的分界線</strong>：runtime 可以說「這個候選我重測過，三次一致，保守值是 −2.31」；
+它<strong>不能</strong>說「這是新紀錄」。後者是人或 AI 的 <code>promote</code>——而且 <code>promote</code> 會把「誰換的王」
+記進 <code>by</code> 欄與 <code>history</code>。
+</div>
+
+<h2>8.7　ledger：榜怎麼被保護</h2>
+<table>
+<tr><th style="width:24%">機制</th><th>內容</th></tr>
+<tr><td>唯一寫路徑</td><td>只有 <code>Ledger.promote</code> 與 <code>ledger.rescore</code> 會寫 <code>ledger/&lt;profile&gt;/&lt;spec&gt;.json</code>；
+    CLI 是 <code>emforge promote</code>／<code>emforge rescore</code>。runtime 沒有任何寫榜的路徑。</td></tr>
+<tr><td><code>_checksum</code></td><td>寫入時算全文（不含 <code>_checksum</code> 自己）的 sha1[:16]；每次 <code>read()</code> 都驗，
+    不符拋 <code>LedgerTamper</code>。這是「繞過會留下紀錄」而非「不可能」。</td></tr>
+<tr><td>必須在 pending</td><td><code>promote</code> 要求 id 在 <code>pending.jsonl</code>；<code>--force</code> 可以繞，
+    但榜上會記 <code>force: true</code>。</td></tr>
+<tr><td>必須帶 <code>--by</code></td><td>沒有 <code>by</code> 直接 <code>ValueError</code>——「誰換的王」是必填。</td></tr>
+<tr><td>分數用本榜的 spec 重算</td><td><code>promote --spec other_v3</code> 時<strong>不抄</strong> pending 裡（用 profile 預設 spec 算的）分數，
+    而是用該榜的 spec 對 db 裡所有量測重算後取 min。（2026-09-05 審查砍掉的四條之一）</td></tr>
+<tr><td>history append-only</td><td>每次 promote／rescore 都 append 一筆，記 <code>prev_id</code>／<code>prev_score</code>／<code>by</code>／<code>note</code>／<code>force</code>。</td></tr>
+<tr><td><code>rescore</code> 拒絕換尺</td><td><code>spec.measure != profile.measure</code> 直接 <code>ValueError</code>：
+    「換尺＝換儀器，不是 rescore」。</td></tr>
+</table>
+<p class="small">
+<strong>已知漏洞</strong>（<code>docs/implementation.md §12-17</code>）：<code>promote --spec</code> 的重算用 <code>Record.measure</code>（量測凍結）；
+若那個 spec 換了 measure 名，<code>rescore</code> 會拒，但 <code>promote</code> 不會——它只檢查 spec 名有沒有註冊。
+</p>
+
+<h2>8.8　<code>strategies.yaml</code> 格式</h2>
+<pre><code>profile: dual_p01_db075            # 必須 == --profile（雙邊宣告；不符 ConfigError）
+runtime:
+  tick_s: 60                       # 每 tick 之間 sleep 多久
+  background_prio: 9               # prio ≥ 這個值 = 背景填空
+  notarize_prio: 1                 # 公證重測的 prio（最高）
+  repeat_n: 2                      # 破榜候選重測幾次
+  noise_floor: 0.3                 # spread ≤ 這個值才算一致
+  k_min: 20                        # blind 樣本少於這個數，report 不印比較
+  quiet_s: 3600                    # 機隊靜默超過這麼久 → 只等不排程
+  max_error_rate: 0.5              # 一批 sample 的錯誤率超過 → 暫停整個 profile
+  propose_timeout_s: 600           # 策略子行程逾時
+  strategy_error_limit: 3          # 連續幾次例外 → 暫停該策略
+strategies:
+  - {name: top_k_flip, prio: 3, batch: 60, max_inflight: 1, enabled: true,
+     seed: null, propose_timeout_s: null, params: {k: 10, d: 3}}
+  - {name: blind, prio: 9, batch: 20}</code></pre>
+<p>
+下列情形一律 <code>ConfigError</code>（不靜默）：頂層或 <code>runtime:</code>／策略項有<strong>不明鍵</strong>、
+策略<strong>重名</strong>、用到<strong>保留字</strong>、名字不合 <code>^[a-z][a-z0-9_]*$</code>、
+<code>profile:</code> 與實例不符。<strong>所有數值都是佔位預設</strong>，跨域要重調。
+</p>
+
+<h2>8.9　<code>status.json</code>：人與 AI 讀的那一份</h2>
+<p>每 tick 覆寫一次，內容是導出值（不是狀態）——人改它不會汙染 runtime：</p>
+<pre><code>{ profile, profile_hash, runtime_ver, pid, machine, tick, last_tick_at, paused_profile,
+  strategies: { &lt;name&gt;: {enabled, paused, prio, batch, inflight:[store…],
+                          errors_consecutive, n_dispatched, last_dispatch_tick} },
+  inflight:   [ {store, strategy, kind, n, n_collected, queue_state, age_s} ],
+  notarize_in_progress: [id…],  pending_count: N,
+  db:    {n_records, n_done},
+  fleet: [ {tag, state, owner, store, profile, n_done, n_error, last_result_at, estop, offline, age_s} ] }</code></pre>
+<p class="small">
+<code>queue_state</code> 是 <code>missing|queued|claimed|done|fail</code>。<code>queue_state = fail</code> 是
+「一批被所有機器判死、卡在 inflight」的<strong>唯一提示</strong>——沒有自動逾時，要人 <code>abandon</code>
+（<code>docs/implementation.md §12-14</code>）。
+</p>
+
+<!-- ══════════════ 9 ══════════════ -->
+<h1 id="sec-9">9　策略庫</h1>
+
+<h2>9.1　契約：兩件事而已</h2>
+<pre class="fig">
+   ┌──────────── &lt;root&gt;/strategies/my_strategy.py ────────────┐
+   │                                                          │
+   │   COMPATIBLE = {"dual_p01_db075"}    或  {"*"}            │ ◀── runtime 載入時比對實例 profile
+   │                                                          │     不符拒載（雙邊宣告的策略端，I-6）
+   │   def propose(ctx) -&gt; list[Proposal | dict]:              │
+   │       ...                                                │
+   └──────────────────────────────────────────────────────────┘
+
+    ctx（系統給的七樣）                      回傳（每筆最多四個鍵）
+   ┌─────────────────────────────┐        ┌────────────────────────────┐
+   │ db       View（唯讀）        │        │ pattern   bool[H,W]  必填   │
+   │ profile  本實例綁的 Profile   │  ──▶   │ parent    Record.id  選填   │
+   │ budget   本 tick 最多幾筆     │propose │ arm       "blind"    選填   │
+   │ rng      已 seed 的亂數       │  ──▶   │ note      dict       選填   │
+   │ workdir  策略專屬持久目錄     │        │                            │
+   │ tick     第幾次被呼叫         │        │ sim_profile／kind／score    │
+   │ params   yaml 的 params:      │        │ 不能寫（runtime 蓋章，D7）  │
+   └─────────────────────────────┘        └────────────────────────────┘
+</pre>
+<div class="caption">圖 8　策略契約。沒有第二個介面、沒有 callback、沒有生命週期鉤子。</div>
+
+<h2>9.2　驗證規則（<code>strategy.validate_proposals</code>）</h2>
+<p>任一筆不合規，<strong>整批拒</strong>（策略要自己修，平台不替它猜）：</p>
+<ol>
+<li>回傳值必須是 <code>list</code>／<code>tuple</code>。</li>
+<li>筆數 ≤ <code>ctx.budget</code>。</li>
+<li>每筆只能有 <code>pattern</code>／<code>parent</code>／<code>arm</code>／<code>note</code> 四個鍵（多一個就 <code>forbidden_key</code>）。</li>
+<li><code>pattern.shape == profile.shape</code>。</li>
+<li><code>pattern</code> 是 bool，或值只含 0／1（會被轉成 bool）。</li>
+<li><code>pattern[profile.fixed_on]</code> 必須<strong>全為 True</strong>——饋墊像素不可翻。</li>
+</ol>
+
+<h2>9.3　子行程隔離</h2>
+<p>
+runtime 正式呼叫策略一律走 <code>propose_in_subprocess</code>：
+</p>
+<pre><code>python -X utf8 -m emforge.strategy --root R --profile P --strategy S \
+       --budget N --seed S --tick T --params '{…}' --out &lt;workdir&gt;/_proposals.npz [--depot spec]</code></pre>
+<ul>
+<li><strong>逾時可殺</strong>：<code>subprocess.run(timeout=…)</code> → <code>StrategyTimeout</code>。</li>
+<li><strong>例外不傳染</strong>：非零 exit code → <code>StrategyFailure</code>，訊息帶 stderr 最後 8 行。父行程永遠活著（I-4）。</li>
+<li><strong>記憶體尖峰不傳染</strong>：策略載大模型、掃全史都在子行程裡（I-5）。</li>
+<li><strong>交接檔無 pickle</strong>：<code>_proposals.npz</code> 存 <code>patterns</code>／<code>parents</code>／<code>arms</code>／<code>notes</code>
+（notes 是 JSON 字串陣列）。<strong>空提案也要落檔</strong>，父行程才分得出「回空」與「沒跑完」。</li>
+<li>子行程用 <code>--depot &lt;spec&gt;</code> 重開後端。<code>memory://</code> 子行程看不到——所以 <code>emforge run --depot memory://…</code>
+自動改成 in-process。</li>
+</ul>
+<p class="small">代價：每 tick 每策略多 1–2 秒的子行程啟動時間；策略多時 tick 會變慢。這是刻意用效能換 I-4 隔離的取捨
+（<code>docs/implementation.md §12-10</code>）。</p>
+
+<h2>9.4　載入順序與 workdir</h2>
+<p>
+<code>resolve_strategy_path(root, name)</code>：<strong>使用者的 <code>&lt;root&gt;/strategies/&lt;name&gt;.py</code> 優先</strong>，
+其次內建 <code>emforge/strategies/&lt;name&gt;.py</code>。保留字與不合規的名字在解析階段就拒。
+</p>
+<p>
+workdir ＝ <code>&lt;root&gt;/runtime_state/&lt;profile&gt;/strategies/&lt;name&gt;/</code>，由 <code>make_context</code> 自動建立。
+它是<strong>本機路徑</strong>、<strong>runtime 永不讀它</strong>——這兩點加起來就是「有狀態策略」的完整支援：
+模型權重、快取、上次的分布統計都放這裡，平台完全不管內容，換 depot 後端也不必跟著搬。
+</p>
+
+<h2>9.5　內建的兩個策略</h2>
+<h3><code>blind</code>——零演算法對照臂（17 行）</h3>
+<pre><code>COMPATIBLE = {"*"}
+
+def propose(ctx):
+    density = float(ctx.params.get("density", 0.5))
+    out = []
+    for _ in range(ctx.budget):
+        pat = ctx.rng.random(ctx.profile.shape) &lt; density
+        pat[ctx.profile.fixed_on] = True
+        out.append(dict(pattern=pat, arm="blind"))
+    return out</code></pre>
+<p>
+它有兩個作用：<strong>（a）</strong> 讓「策略 X 比較好」這句話說得出口（D8，report 的 <code>k_min</code> 閘）；
+<strong>（b）</strong> 新域資料庫是空的時候，它是自然的打底來源——這是冷啟動的架構性緩解。
+</p>
+
+<h3><code>top_k_flip</code>——鄰域開採的最小版（25 行）</h3>
+<pre><code>COMPATIBLE = {"*"}
+
+def propose(ctx):
+    k, d = int(ctx.params.get("k", 10)), int(ctx.params.get("d", 3))
+    free = np.flatnonzero(~ctx.profile.fixed_on.reshape(-1))   # 饋墊不可翻：事實來源是儀器
+    top = ctx.db.top(k)
+    if not top:
+        return []                       # 資料庫空 → 交給 blind 打底，不硬湊
+    per = -(-ctx.budget // len(top))    # ceil：把 budget 填滿
+    out = []
+    for rec in top:
+        for _ in range(per):
+            q = rec.bits.copy().reshape(-1)
+            q[ctx.rng.choice(free, d, replace=False)] ^= True
+            out.append(dict(pattern=q.reshape(ctx.profile.shape), parent=rec.id, note={"d": d}))
+    return out[:ctx.budget]</code></pre>
+<p>
+去重、饋墊檢查、seed 記錄、派工、掛偵測、評分、公證——<strong>沒有一樣在這 25 行裡</strong>。
+註冊只要在 <code>strategies.yaml</code> 加一行 <code>- {name: top_k_flip, prio: 3, batch: 60, params: {k: 10, d: 3}}</code>。
+</p>
+
+<h2>9.6　四種策略如何塞進同一個函式</h2>
+<table class="tight">
+<tr><th style="width:16%"></th><th>純隨機</th><th>鄰域爬山</th><th>代理模型排序（需重訓）</th><th>線上學習（需逐筆回饋）</th></tr>
+<tr><td><strong>做法</strong></td><td><code>rng</code> 生 budget 筆</td><td><code>db.top(k)</code> 各翻 d 格</td>
+    <td><code>tick%3==0</code> → <code>db.query</code> 全量重訓，模型存 workdir；生大池 → 預測 → 配額</td>
+    <td><code>db.mine(since=…)</code> 更新 G，存 workdir；生下一批</td></tr>
+<tr><td><strong>狀態</strong></td><td>無</td><td>無（＝資料庫）</td><td>workdir</td><td>workdir</td></tr>
+<tr><td><strong>回饋</strong></td><td>不需要</td><td>下 tick <code>db.top</code> 自然含</td><td>下 tick <code>db.query</code></td><td>下 tick <code>db.mine</code>；<code>max_inflight=1</code></td></tr>
+</table>
+<p>
+「需逐筆回饋」本質上就是「下一次 <code>propose</code> 之前要看到上批結果」——這正是<strong>資料庫 ＋ tick</strong> 的語義。
+所以不需要 callback（D4）。
+</p>
+<p class="small">
+試跑一個策略不必起 runtime：<code>emforge check-strategy --root R --profile P --strategy S --budget 5 [--seed --tick --params]</code>
+在<strong>本行程</strong>跑一次 <code>propose</code>＋驗證，不派工。
+</p>
+
+<!-- ══════════════ 10 ══════════════ -->
+<h1 id="sec-10">10　模擬庫與 worker</h1>
+
+<h2>10.1　Profile 註冊表（append-only）</h2>
+<p>
+使用者在 <code>&lt;root&gt;/registry.py</code> 呼叫 <code>register_profile</code>／<code>register_spec</code>／<code>register_measure</code>。
+本域的那一份是 <code>emforge/adapters/antenna/profiles.py::register_all()</code>，註冊 7 個 profile：
+</p>
+<table class="tight">
+<tr><th>profile</th><th>geom_ver</th><th>simulator</th><th>diag_bridge_w</th><th>狀態</th></tr>
+<tr><td><code>dual_p01_db075</code></td><td>p01</td><td><code>DualPortSim</code></td><td>0.075 mm</td><td><strong>現役</strong>（主力）</td></tr>
+<tr><td><code>single_db100</code></td><td>s00</td><td><code>SinglePortRadSim</code></td><td>0.100 mm</td><td><strong>現役</strong></td></tr>
+<tr><td><code>dual_p00</code>／<code>dual_p01</code>／<code>single_p00</code></td><td>p00／p01／s00</td><td>—</td><td>—</td><td>退役（只為匯入歷史資料）</td></tr>
+<tr><td><code>harvest_dual</code>／<code>harvest_single</code></td><td>p00／s00</td><td>—</td><td>—</td><td>退役（舊 tuple 檔資料）</td></tr>
+</table>
+<p>
+退役（<code>retired=True</code> 或 <code>db/&lt;profile&gt;/RETIRED</code> 標記）＝<strong>拒收新工作，資料一個 byte 都不動</strong>。
+兩個現役 profile 的 <code>kwargs</code> 全部<strong>顯式</strong>寫出（不吃舊建構子的預設值），
+並由 <code>tests/adapters/test_antenna_ctor.py</code> 對帳舊建構子簽名。
+</p>
+
+<h2>10.2　開模擬器之前的守門（<code>worker/gate.py</code>）</h2>
+<pre class="fig">
+gate(job, depot)  →  check(sim_profile, profile_hash, depot)      順序固定、**不建構、不 open**
+
+  1. profile 在本機註冊表？        否 → unknown_profile
+  2. 已退役？                      是 → profile_retired
+  3. job.profile_hash == 註冊表？   否 → profile_hash_mismatch
+                                        （派工端與執行端的 emforge 版本或 registry.py 不同步）
+  4. 載入模擬器類別                失敗 → simulator_load_failed
+  5. geom_ver 雙邊比對             不符 → geom_ver_mismatch      （模擬器宣告 None ＝ 單邊，跳過）
+  6. labels 比對                   不符 → labels_mismatch
+  →  GateVerdict(ok=True, profile, sim_cls)
+</pre>
+<div class="caption">圖 9　守門。事故 I-6（14 筆雙埠設計被單埠模擬器量完，欄位齊全、數字合理、<strong>不報錯</strong>）的直接對策。</div>
+<p>
+這一段的價值全在「<strong>在昂貴操作之前</strong>」。守門不過＝那一<strong>批</strong>判死（寫 <code>.fail</code>），worker 繼續下一個 job。
+儀器層的前置檢查（<code>device/limits.py::check_preconditions</code>）重用同一個 <code>check()</code>，所以兩條路徑不會分岔。
+</p>
+
+<h2>10.3　worker 六個檔</h2>
+<table>
+<tr><th style="width:17%">檔</th><th>職責</th></tr>
+<tr><td><code>loop.py</code></td><td>主迴圈：STOP → 急停 → <code>Queue.pick</code> → <code>gate</code> → 儀器租約 → <code>run_batch</code> → <code>mark_done</code>／<code>mark_fail</code>。
+    啟動時載入本機 <code>registry.py</code>、印 <code>worker_ver</code>（I-10）、清工作目錄（I-1）、寫 <code>worker_start</code>。</td></tr>
+<tr><td><code>gate.py</code></td><td>見 10.2。leaf——不 import <code>device</code>。</td></tr>
+<tr><td><code>guard.py</code></td><td>看門狗與處決線。<code>Watchdog</code> 是 context manager，區塊內超過 <code>t</code> 秒就呼叫 <code>on_timeout</code>（通常是 <code>sim.kill</code>）；
+    給 <code>abort_if</code> 就每 <code>poll_s</code> 查一次（急停）。<code>open_with_retries</code>：開模擬器最多 3 次、每次帶看門狗、失敗間 kill＋等 15 s。
+    <code>#!</code>：COM 呼叫可以「無例外地永遠不回來」——每個碰模擬器的環節都要有處決線。</td></tr>
+<tr><td><code>fuse.py</code></td><td>連敗保險絲，<strong>純狀態機、零 I/O</strong>：連 <code>max_fail</code>(5) 敗 → <code>cooldown</code>（冷卻 <code>cooldown_s</code>＋殺透重開）；
+    第 <code>max_blowout</code>(3) 次熔斷 → <code>blown</code>（判死這批）。<strong>成功一筆就歸零</strong>——COM 偶發錯不該累積成判死。</td></tr>
+<tr><td><code>workdir.py</code></td><td>本機工作目錄生命週期。預設根 <code>%LOCALAPPDATA%\emforge\work</code>（不在 repo、不在 NAS）。
+    兩道清理：<code>run_batch</code> 結束刪、worker 啟動整清。</td></tr>
+<tr><td><code>batch.py</code></td><td><code>run_batch</code>：一批的逐筆迴圈。只組裝 guard／fuse／workdir／儀器，<strong>不認得領域</strong>。</td></tr>
+</table>
+
+<h3><code>run_batch</code> 的流程</h3>
+<pre><code>建工作目錄 → bind(profile, wd, store) → open_with_retries（3 試，各 300 s 看門狗）
+第 0 輪   跑「還沒 done **且 attempts &lt; 3**」的（＝續跑；毒樣本三振後不再跑，review-10）
+補測輪×2  跑「error 且 attempts &lt; 3」的（每輪之前殺透重開）
+  每一筆：
+    急停？                → job_yield(estop_engaged)，放掉**自己的** claim（別台可續跑）
+    guarded_call(simulate, timeout_s, kill, abort_if=急停, poll_s=5)
+    寫 batches/&lt;store&gt;/results/&lt;id&gt;.json（含 machine／worker_ver／profile_hash／attempts）
+    queue.touch_claim(store)                     # claim 心跳
+    error?  aborted:…      → yield（吃一次 attempts、**不重開**、不算保險絲）
+            watchdog_…     → 殺透重開
+            第 0 輪        → 保險絲（cooldown／blown）
+            補測輪連 3 敗   → 放棄本輪
+    每筆之後：claim 被別台接走 → "yield"（**不動別人的 claim**）
+              背景 job 遇前景 queued → 釋放 claim、"yield"
+finally: close ＋ 刪工作目錄（done／fail／yield 皆刪）
+回傳 "done" | "yield" | "fail"</code></pre>
+<p class="small">
+「跑完」不等於「全成功」：殘留的 error 記在結果檔與 <code>.done</code> 的 <code>error_ids</code> 裡，由 runtime 決定怎麼算。
+worker <strong>不量測、不評分、不寫 db</strong>——這條界線讓 worker 可以在沒有 <code>registry.py</code> 以外任何領域知識的情況下運作。
+</p>
+
+<h2>10.4　佇列租約：接管的仲裁</h2>
+<pre class="fig">
+Queue.pick(machine_tag)  → 依 prio 升冪，第一個可認領的 job
+
+_claim(job, me):
+  ① .done 存在 或 job 釘機且不是我        → 跳過
+  ② .fail 名單含我                        → 跳過（換別台去試）
+  ③ claim 判定 _claim_verdict：
+       無 claim 檔                        → "free"
+       claim 是我的                       → "mine"（續跑）
+       claim 無主（空／半截）且未過 60 s   → "skip"（可能正在寫）
+       claim 無主且過 60 s                → "takeover"（門檻 60 s）      ← 壞 claim（I-2）
+       別人的、批有進度 或 claim 新鮮      → "skip"（讓）
+       別人的、批無進度 且 claim 陳舊      → "takeover"（門檻 stale_s=45 min）
+  ④ 有 .fail → delete()；**回 False ＝ 別台先接走了** → 讓（它會接著 claim）
+  ⑤ takeover → break_if_stale()；**回 False ＝ 別台先破了** → 讓
+  ⑥ claim()（O_EXCL）← **這一步才是仲裁**
+
+  新鮮 claim 在任何路徑下都不會被動到。
+</pre>
+<div class="caption">圖 10　認領判定。破鎖不是仲裁（6.6），<code>claim</code> 與 <code>delete</code> 的回值才是。</div>
+<p>
+「活著」的判定刻意有<strong>兩個來源</strong>：claim 的 <code>modified_at</code>（worker 每跑完一筆就 touch）
+<strong>或</strong>該批最新結果檔的時間（<code>Batch.newest_result_at</code>）。
+只看 claim 時間會誤殺「一筆跑很久」的批；只看結果檔會誤殺「剛開始還沒有第一筆」的批。
+<code>requeue</code> 也用同一個 <code>is_live</code> 判定——有人正在跑就拒絕（exit 7），要先 <code>stop</code> 那台。
+</p>
+
+<h2>10.5　adapter：唯一碰 torch／antenna 的地方</h2>
+<table>
+<tr><th style="width:22%">檔</th><th>內容</th></tr>
+<tr><td><code>_bind.py</code></td><td>用環境變數 <code>EMFORGE_ANTENNA_REPO</code> 把舊 repo <strong>根目錄</strong>插進 <code>sys.path</code>（不是 <code>antenna/</code>——
+    <code>antenna.patch</code> 的 import 鏈含 <code>from script.kill import kill</code>）、lazy import、自動設 <code>MPLBACKEND=Agg</code>。
+    <code>antenna_sha()</code> 取舊 repo 的 git 短 sha。<br>
+    <span class="small">用 env var 而不是 <code>PYTHONPATH</code> 的理由：範圍明確、可以印出「綁到哪個 clone、哪個 sha」；
+    <code>PYTHONPATH</code> 會把整個舊 repo 暴露給核心，讓「核心零 antenna import」只剩守門測試在擋。</span></td></tr>
+<tr><td><code>sim.py</code></td><td>把舊契約 <code>open() / start(n) / __call__(Tensor) / end() / quit()</code>
+    收成 <code>open / simulate / kill / close</code>。建構<strong>不碰 COM</strong>，所以守門與建構都能排在 open 之前。<br>
+    兩個 <code>#!</code>：（a）看門狗 <code>kill()</code> 過的模擬器在 except 路徑<strong>不</strong>呼叫舊 <code>end()</code>——舊 <code>end()</code>
+    內部會自己 reopen（6 次無守門的 DispatchEx，會卡）；（b）<code>open()</code> 在非主執行緒先 <code>pythoncom.CoInitialize()</code>
+    （MCP 的 tool 跑在 SDK 的 worker thread，COM apartment 是 per-thread）。</td></tr>
+<tr><td><code>measure.py</code></td><td><strong>vendored numpy 版</strong>的兩把尺（<code>worst_margin</code> single／<code>worst_margin_dual</code>）＋凍結的 targets。<br>
+    為什麼 vendor 而不是每次呼叫舊 <code>antenna.losses</code>：量測凍結的意義就是「不隨舊 repo 的下一個 commit 漂」；
+    runtime 在開發機算量測，不必拉 torch／matplotlib。「兩份會漂」的風險由 <strong>500 筆逐位元 parity 測試</strong>接住。<br>
+    尺本身還有<strong>方向自證</strong>：S11／S22 必須是「帶內壓低型」（center &lt; side），S21 必須是「通帶抬高型」，
+    寫反會拋錯而不是靜默反號；另有 <code>dual_energy_max</code>（被動網路的能量必 ≤ 1）當健全性檢查。</td></tr>
+<tr><td><code>profiles.py</code></td><td>本域的 measures／specs／profiles，見 10.1。</td></tr>
+</table>
+
+<!-- ══════════════ 11 ══════════════ -->
+<h1 id="sec-11">11　儀器層（device）</h1>
+
+<h2>11.1　為什麼多這一層</h2>
+<p>
+到 M12 為止，worker 直接建構 Simulator 並呼叫它。M13（2026-09-06）在中間插入 <code>Instrument</code>，
+參考的是 MHS（機器健康／儀器控制系統）那一套「讓儀器那裡更專注於模擬」的模型。
+關鍵的一點是：<strong><code>Instrument</code> 自己就實作 Simulator 協定</strong>（<code>bind/open/simulate/kill/close</code>），
+所以 <code>run_batch</code> 把它當 sim 用、逐筆邏輯完全不變——這一層是<strong>加進去的</strong>，不是改寫。
+</p>
+<p class="src">依據：<code>docs/implementation.md §13</code>「Ricky 2026-09-05：參考 MHS『讓 HFSS 那裡更專注於模擬』、三台各自是 MCP server（M15）；儀器層寫在 Depot 上，不用二次搬家」。</p>
+
+<h2>11.2　MHS 概念對應</h2>
+<table>
+<tr><th style="width:22%">MHS 概念</th><th style="width:26%">emforge 的實作</th><th>位置</th></tr>
+<tr><td>states（狀態）</td><td>六個狀態的狀態機 ＋ <code>DeviceState</code> 狀態字典</td><td><code>device/instrument.py</code>、<code>device/states.py</code></td></tr>
+<tr><td>procedures（程序）</td><td><code>bind/open/simulate/kill/close</code>（Simulator 協定直傳）、<code>abort</code>、<code>selfcheck</code>、<code>simulate_once</code></td><td><code>device/instrument.py</code></td></tr>
+<tr><td>read-write（讀寫分離）</td><td>read-only 程序（state／describe／selfcheck／log）與 mutating 程序（simulate／abort／estop／stop_worker／resume_worker）分開標註；MCP 用 <code>ToolAnnotations(read_only_hint=True)</code></td><td><code>device/reference.py::PROCEDURES</code></td></tr>
+<tr><td>自動說明檔</td><td><code>reference.md</code> ＋ <code>reference.json</code>：能量哪些 profile、限制與來源、體檢、近期一筆多久、程序清單、安全五層、相關 key</td><td><code>device/reference.py</code></td></tr>
+<tr><td>可發現</td><td><code>emforge fleet</code> 儀表板；<code>devices/</code> 底下一台一目錄，機隊列舉＝<code>dir_names</code></td><td><code>cli/device.py</code>、<code>device/states.py::read_fleet</code></td></tr>
+<tr><td>三條控制路徑</td><td><strong>MCP</strong>（AI）／<strong>CLI <code>device-*</code></strong>（人）／<strong>Python API</strong>（worker 迴圈）——同一個 <code>Instrument</code> 物件</td><td><code>device/mcp_server.py</code>、<code>cli/device.py</code>、<code>worker/loop.py</code></td></tr>
+<tr><td>共用狀態字典</td><td><code>devices/&lt;tag&gt;/state.json</code>：<strong>只有該台 Instrument 寫</strong>，runtime／fleet／MCP 都讀它</td><td><code>device/states.py</code></td></tr>
+<tr><td>五層安全</td><td>tool 允許名單＋<code>allowed_profiles</code> ／ <code>Limits</code> 硬限制 ／ 前置檢查 ／ 兩段式 confirm ／ 急停三層</td><td><code>device/limits.py</code>、<code>device/estop.py</code></td></tr>
+</table>
+
+<h2>11.3　狀態機</h2>
+<div class="boxfig">
+  <div class="stategrid">
+    <div class="st"><div class="nm">idle</div><div class="small">沒開模擬器</div></div>
+    <div class="st"><div class="nm">opening</div><div class="small">正在開 HFSS</div></div>
+    <div class="st"><div class="nm">ready</div><div class="small">開好、等工作</div></div>
+  </div>
+  <div class="arrow">idle ──open()──▶ opening ──成功──▶ ready ──simulate()──▶ busy ──回來──▶ ready ──close()──▶ idle</div>
+  <div class="stategrid">
+    <div class="st"><div class="nm">busy</div><div class="small">正在跑一筆</div></div>
+    <div class="st term"><div class="nm">fault</div><div class="small">open 失敗<br>（close → idle）</div></div>
+    <div class="st term"><div class="nm">estop</div><div class="small">任一層急停中<br>（解除後 → idle／ready）</div></div>
+  </div>
+  <div class="arrow">opening ──失敗──▶ <strong>fault</strong>（記 <code>last_error</code>、發 <code>device_fault</code>）　　任一狀態 ──急停檔出現──▶ <strong>estop</strong></div>
+</div>
+<div class="caption">圖 11　<code>Instrument</code> 狀態機（<code>device/states.py::STATES</code>）。狀態轉換即寫狀態字典，另有 30 s 心跳。</div>
+<p>
+<code>estop</code> 是<strong>硬狀態</strong>：<code>open()</code> 與 <code>simulate()</code> 進入前都先 <code>_check_estop()</code>，
+急停中直接拋 <code>EstopEngaged</code>；解除後若模擬器還開著回 <code>ready</code>，否則回 <code>idle</code>，並記 <code>estop_cleared</code>。
+<code>offline</code> <strong>不是</strong>一個狀態——它由<strong>讀者</strong>用心跳年齡（&gt; 90 s）推導，
+因為死掉的儀器寫不了「我離線」。
+</p>
+
+<h2>11.4　租約：同機只能有一個 HFSS 使用者</h2>
+<pre><code>inst.acquire(owner) -&gt; bool     # 非阻塞、一次一件；已被別人持有 → False ＋ lease_refused 事件
+inst.release(owner) -&gt; bool     # 只放自己的
+
+owner 命名：worker → "queue:&lt;store&gt;"    MCP → "mcp:&lt;by&gt;"</code></pre>
+<p>
+worker 拿不到租約（MCP 正在跑一筆）就<strong>放掉自己的 queue claim</strong>、記 <code>job_yield reason=device_busy</code>、
+等一輪再撿——不會卡在那裡。反過來，MCP 的 <code>device_simulate</code> 撞到 worker 正在跑，回 <code>device_busy: …</code> 錯誤碼。
+</p>
+<div class="warn">
+<strong>已知限制</strong>（<code>docs/implementation.md §12-22</code>）：儀器租約是<strong>行程內</strong>的鎖
+（<code>threading.RLock</code>），不在 depot——換一台機器看不到它。跨機協調仍然靠佇列的 claim。
+這個設計成立的前提是「MCP server 與 worker 在同一個行程」，而這正是 <code>worker --serve</code> 的做法。
+</div>
+
+<h2>11.5　急停：三層，解除只能 CLI</h2>
+<table>
+<tr><th style="width:12%">層</th><th style="width:26%">key／路徑</th><th>誰能按</th><th>特性</th></tr>
+<tr><td><code>fleet</code></td><td><code>queue/ESTOP</code></td><td>CLI</td><td>全機隊</td></tr>
+<tr><td><code>device</code></td><td><code>queue/ESTOP.&lt;tag&gt;</code></td><td>CLI ＋ MCP <code>device_estop</code></td><td>單機</td></tr>
+<tr><td><code>local</code></td><td><code>&lt;root&gt;/ESTOP</code>（<strong>本機檔</strong>）</td><td>CLI <code>--local</code>／人手建</td><td><strong>NAS 斷線也擋得住</strong></td></tr>
+</table>
+<p>檢查順序 fleet → device → local，回報最外層那一個。急停生效後有四個效果：</p>
+<ol>
+<li><code>Instrument.open()</code>／<code>simulate()</code> <strong>硬擋</strong>（拋 <code>EstopEngaged</code>）。</li>
+<li>正在跑的那一筆由 <code>guarded_call(abort_if=…, poll_s=5)</code> 殺掉 → 結果 <code>error: aborted: estop_engaged</code>
+    （吃一次 <code>attempts</code>、<strong>不重開</strong>、不算保險絲）。</li>
+<li>worker 每筆之前讓位（放掉<strong>自己的</strong> claim，因為急停可能只停這台，別台可以續跑）。</li>
+<li>worker 主迴圈在 job <strong>之間</strong>不撿新工作（等 <code>poll_s</code> 再看）。</li>
+</ol>
+<p>
+<strong>解除只有一條路</strong>：<code>emforge device-estop clear [--tag T | --local] --confirm</code>。
+MCP <strong>沒有</strong> <code>device_estop_clear</code> 這個 tool——這件事被 <code>docs/naming.md</code> 明列，
+也被 <code>device/reference.py::PROCEDURES</code>（tools 名單的唯一真相）與其對帳測試釘住。
+</p>
+<div class="warn">
+<strong>誠實的限制</strong>（<code>docs/implementation.md §12-21</code>）：三層都是「檔存在即真」，<strong>沒有簽章</strong>——
+任何能寫 depot 的人都能 engage／clear；<code>clear</code> 走 CLI 只是流程約束，不是權限。
+另外，急停到真的殺掉正在跑的那筆最多晚 5 秒（<code>estop_poll_s</code>）；
+三次急停剛好落在同一筆上，會把它三振成毒樣本。
+</div>
+
+<h2>11.6　Limits 與前置檢查</h2>
+<pre><code>Limits(allowed_profiles=(),          # 空 = 本機註冊表全部
+       max_sample_s=3600.0,          # profile.timeout_s 不得超過
+       min_free_gb=5.0,              # = doctor.MIN_FREE_GB
+       confirm_window_s=600.0)       # 兩段式 token 的窗
+
+來源：&lt;root&gt;/limits.json（本機檔；emforge init 留範本；沒有 = 預設；**壞 JSON 拒起**，不默默放掉上限）</code></pre>
+<p><code>check_preconditions(profile, limits, depot, root, health)</code> 在<strong>每次 <code>open()</code> 之前</strong>跑，順序固定：</p>
+<ol>
+<li><code>allowed_profiles</code> 允許名單。</li>
+<li><code>worker/gate.py::check</code>——註冊／退役／<code>profile_hash</code>／<code>geom_ver</code>／<code>labels</code>（與 worker 同一份程式碼）。</li>
+<li><code>profile.timeout_s ≤ max_sample_s</code>。</li>
+<li><code>doctor.health</code> 的 <code>blocking</code> 清單（root 不可寫、depot 探針或時鐘偏移、系統碟 &lt; 5 GB、ansysedt 已在跑）。</li>
+<li>系統碟剩餘 &lt; <code>min_free_gb</code>。</li>
+</ol>
+<p class="small">
+一個細節：<strong>開過一次之後，「ansysedt 在跑」不再算阻擋</strong>——因為那時殘留的 ansysedt 是自己的
+（<code>Instrument.open</code> 的 <code>#?</code> 註解）。冷啟動才把它當阻擋（＝舊 worker 沒停）。
+代價記在 §12-23：同機有人手開 HFSS 就抓不到。
+</p>
+
+<h2>11.7　兩段式確認</h2>
+<pre><code>token = sha1(f"{secret}|{op}|{key}|{window}")[:8]        # window = int(now // 600)，10 分鐘一格
+第一次呼叫（不帶 confirm） → {"needs_confirm": True, "token": …, "record_id": …, "preview": {…}}
+第二次呼叫（帶 confirm）   → check_confirm（本窗或上一窗，且沒用過）→ 真的跑 → consume_confirm</code></pre>
+<p>
+<code>secret</code> ＝ <code>EMFORGE_DEVICE_TOKEN</code>（沒設就用隨機值，等於只有本行程能算）。
+token 綁定<strong>操作</strong>與<strong>對象</strong>（<code>op</code>／<code>key</code>），所以「確認要跑 A」不能拿去跑 B。
+</p>
+<p>
+<strong>驗證與消費是分開的</strong>：<code>check_confirm</code> 只驗、<code>consume_confirm</code> 在操作<em>真的開始</em>之後才呼叫。
+理由寫在 <code>Instrument.check_confirm</code> 的 docstring——被拒（儀器忙／急停）就燒掉 token 的話，
+使用者十分鐘內不能重試（同窗內 token 同值）。這是 M15 的測試抓到的。
+</p>
+
+<h2>11.8　<code>DeviceState</code> 欄位</h2>
+<table class="tight">
+<tr><th style="width:20%">欄位</th><th style="width:26%">型別</th><th>意義</th></tr>
+<tr><td><code>tag</code> / <code>at</code> / <code>state</code></td><td>str</td><td>機器 tag、寫入時間、六個狀態之一</td></tr>
+<tr><td><code>owner</code></td><td>str | None</td><td>租約持有者：<code>queue:&lt;store&gt;</code> 或 <code>mcp:&lt;by&gt;</code></td></tr>
+<tr><td><code>store</code> / <code>profile</code> / <code>profile_hash</code></td><td>str | None</td><td>正在跑哪一批、哪個 profile</td></tr>
+<tr><td><code>current_id</code> / <code>sample_started_at</code></td><td>str | None</td><td>正在跑哪一筆、何時開始</td></tr>
+<tr><td><code>n_done</code> / <code>n_error</code> / <code>last_result_at</code> / <code>last_error</code></td><td>int / str</td><td>本行程的累計</td></tr>
+<tr><td><code>worker_ver</code> / <code>pid</code> / <code>started_at</code></td><td>str / int</td><td>版本戳與行程身分（I-10）</td></tr>
+<tr><td><code>url</code></td><td>str | None</td><td>MCP 端點（M15 起 server 時寫入；<code>fleet --mcp-config</code> 讀它）</td></tr>
+<tr><td><code>free_gb</code> / <code>ansysedt_running</code></td><td>float / bool</td><td>最近一次體檢的機器事實</td></tr>
+<tr><td><code>estop</code></td><td>dict | None</td><td>急停中的 <code>{scope, by, reason, at}</code></td></tr>
+<tr><td><code>limits</code></td><td>dict</td><td>這台的 <code>Limits</code></td></tr>
+</table>
+<p class="small">
+讀者額外推導兩欄：<code>age_s</code>（心跳年齡）與 <code>offline</code>（<code>age_s &gt; 90</code>）。
+<code>write_state</code> 失敗一律吞掉並記裝置日誌——NAS 斷線不能殺儀器。
+</p>
+
+<h2>11.9　說明檔與 <code>fleet</code></h2>
+<p>
+<code>devices/&lt;tag&gt;/reference.md</code>（給人與 AI 讀）與 <code>reference.json</code>（給程式讀）在
+<strong>open 成功時</strong>與<strong>每小時</strong>各刷一次。內容：這台能量哪些 profile（註冊表 ∩ <code>allowed_profiles</code>，
+含 <code>profile_hash</code>／<code>geom_ver</code>／shape／labels／timeout）、<code>Limits</code> 與<strong>它的來源檔路徑</strong>、
+體檢結果、近期一筆的中位數秒數、程序清單、五層安全的說明、以及相關 key 的位置。
+</p>
+<p>
+<code>emforge fleet</code> 把所有 <code>devices/*/state.json</code> 攤成一張表（tag／state／owner／store／profile／done／err／last_result／estop），
+<code>offline</code> 蓋掉 <code>state</code> 欄，最後若有全機 ESTOP 會多印一行警告。
+<code>--mcp-config</code> 則吐出 <code>.mcp.json</code> 片段（見第 12 章）。
+</p>
+
+<!-- ══════════════ 12 ══════════════ -->
+<h1 id="sec-12">12　MCP server：AI 進儀器的第三條路徑</h1>
+
+<h2>12.1　定位</h2>
+<pre class="fig">
+                        ┌──────────────────────────────┐
+     AI（Claude Code…）─┤ ① MCP tools（HTTP + bearer）  ├──┐
+                        └──────────────────────────────┘  │
+                        ┌──────────────────────────────┐  │     ┌───────────────────┐
+     人（終端）─────────┤ ② CLI  emforge device-*      ├──┼────▶│   Instrument      │
+                        └──────────────────────────────┘  │     │  （同一個物件）    │
+                        ┌──────────────────────────────┐  │     └───────────────────┘
+     worker 主迴圈 ─────┤ ③ Python API（同行程）        ├──┘              │
+                        └──────────────────────────────┘                 ▼
+                                                                    HFSS（COM）
+   迴圈本身仍然沒有 LLM：③ 是無人值守的那條，①② 只是「人／AI 也能碰同一台儀器」。
+</pre>
+<div class="caption">圖 12　三條控制路徑共用同一個 <code>Instrument</code>。MCP 只增加入口，不改變迴圈。</div>
+<p>
+架構文件原本假設 AI 層只讀狀態、寫提案。M15–M16 之後 AI 還能：<strong>對單台下單跑一筆</strong>（不入 db）、
+<strong>按急停</strong>（不能解）、<strong>停／續 worker</strong>。每一項都有人在迴路的閘。
+</p>
+
+<h2>12.2　tools</h2>
+<table class="tight">
+<tr><th style="width:20%">tool</th><th style="width:9%">性質</th><th style="width:26%">參數</th><th>行為與錯誤</th></tr>
+<tr><td><code>device_state</code></td><td>read-only</td><td>—</td><td>狀態字典 ＋ 最近 10 個狀態轉換</td></tr>
+<tr><td><code>device_describe</code></td><td>read-only</td><td>—</td><td>說明檔（markdown）</td></tr>
+<tr><td><code>device_selfcheck</code></td><td>read-only</td><td>—</td><td>depot 探針 ＋ 機器體檢 ＋ 狀態；<code>problems</code> 空＝可開</td></tr>
+<tr><td><code>device_log</code></td><td>read-only</td><td><code>n=50</code></td><td>裝置日誌最後 n 筆</td></tr>
+<tr><td><code>device_simulate</code></td><td><strong>mutating</strong></td><td><code>profile</code>, <code>bits</code>（<code>"0101…"</code> 字串或 list）, <code>confirm=None</code>, <code>by="mcp"</code></td>
+    <td><strong>兩段式</strong>。第一次回 <code>{needs_confirm, token, record_id, preview}</code>；帶 confirm 才跑。
+    結果寫 <code>devices/&lt;tag&gt;/adhoc/</code>，<strong>不入 db</strong>。
+    模擬本身失敗是<strong>資料</strong>（<code>status="error"</code>），不是 tool 錯誤。</td></tr>
+<tr><td><code>device_abort</code></td><td><strong>mutating</strong></td><td><code>by="mcp"</code></td><td>殺正在跑的那筆（＝<code>kill</code>）。<strong>不需要租約</strong>——誰都能喊停。</td></tr>
+<tr><td><code>device_estop</code></td><td><strong>mutating</strong></td><td><code>reason</code>（必填）, <code>by</code></td><td>按下<strong>這台</strong>的急停（<code>queue/ESTOP.&lt;tag&gt;</code>）。<strong>只有 engage</strong>。</td></tr>
+<tr><td><code>device_stop_worker</code></td><td><strong>mutating</strong></td><td><code>confirm=None</code>, <code>by</code></td><td>兩段式；建 <code>queue/STOP.&lt;tag&gt;</code>，worker 跑完當前 job 收工</td></tr>
+<tr><td><code>device_resume_worker</code></td><td><strong>mutating</strong></td><td><code>confirm=None</code>, <code>by</code></td><td>兩段式；刪 <code>STOP.&lt;tag&gt;</code>（worker 行程若已退出仍要人重啟）</td></tr>
+</table>
+<p>
+<strong>沒有 <code>device_estop_clear</code></strong>。tools 名單的唯一真相是 <code>device/reference.PROCEDURES</code>，
+說明檔與 server 同源、有對帳測試。
+</p>
+
+<h3>錯誤碼</h3>
+<p>
+所有例外都在 tool 邊界轉成 <code>ToolError("&lt;code&gt;: …")</code>，code 是小寫 snake，讓 agent <strong>照碼分支、不解析中文訊息</strong>：
+</p>
+<table class="tight">
+<tr><th style="width:20%">code</th><th style="width:30%">來源例外</th><th>意思</th></tr>
+<tr><td><code>device_busy</code></td><td><code>DeviceBusy</code></td><td>租約被別人（worker 或另一個呼叫）持有</td></tr>
+<tr><td><code>estop_engaged</code></td><td><code>EstopEngaged</code></td><td>急停中</td></tr>
+<tr><td><code>precondition_failed</code></td><td><code>PreconditionFailed</code></td><td>前置檢查不過（清單在訊息裡）</td></tr>
+<tr><td><code>confirm_rejected</code></td><td><code>ConfirmRejected</code></td><td>token 錯、過期或用過</td></tr>
+<tr><td><code>open_failed</code></td><td><code>SimulatorOpenFailed</code></td><td>連續開不起來</td></tr>
+<tr><td><code>unknown_profile</code></td><td><code>UnknownProfile</code></td><td>profile 沒註冊</td></tr>
+<tr><td><code>bad_bits</code></td><td><code>ValueError("bad_bits…")</code></td><td>bits 形狀／內容不對，或饋墊像素不是 True</td></tr>
+<tr><td><code>internal</code></td><td>其他一切</td><td>—</td></tr>
+</table>
+
+<h2>12.3　resources</h2>
+<table class="tight">
+<tr><th style="width:26%">URI</th><th style="width:22%">MIME</th><th>內容</th></tr>
+<tr><td><code>device://state</code></td><td><code>application/json</code></td><td>狀態字典</td></tr>
+<tr><td><code>device://reference</code></td><td><code>text/markdown</code></td><td>說明檔</td></tr>
+<tr><td><code>device://reference.json</code></td><td><code>application/json</code></td><td>說明檔的結構化版</td></tr>
+</table>
+
+<h2>12.4　認證與綁定</h2>
+<pre><code># device/mcp_server.py
+class BearerGate:                       # 15 行的 ASGI 中介層
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            got = dict(scope.get("headers") or ()).get(b"authorization", b"")
+            if not hmac.compare_digest(got, self._expected):   # "Bearer &lt;token&gt;"
+                → 401 www-authenticate: Bearer
+        await self.app(scope, receive, send)</code></pre>
+<ul>
+<li>共享密鑰 <code>EMFORGE_DEVICE_TOKEN</code>（三台＋開發機同一個）＝bearer token ＝兩段式 confirm 的 secret。</li>
+<li><strong>非 loopback 綁定 ＋ 沒有 token → 拒起</strong>（<code>check_bind</code>，CLI exit 1）。
+    loopback 則沿用 SDK 的 DNS-rebinding 防護（Host 白名單）。</li>
+<li><strong>為什麼不用 SDK 的 <code>token_verifier</code>／<code>AuthSettings</code></strong>：那條是 OAuth 資源伺服器模型
+（要 <code>issuer_url</code>／<code>resource_server_url</code>、掛 <code>/.well-known</code> 端點），而共享密鑰不是 OAuth。
+中介層 15 行、而且可以用 <code>httpx2.ASGITransport</code> 免 socket 測試。（<code>docs/implementation.md §13</code>）</li>
+<li>傳輸模式：<strong>stateless ＋ JSON response</strong>（<code>streamable_http_app(json_response=True, stateless_http=True)</code>）——
+每個請求獨立、沒有 session、沒有 SSE 推送。</li>
+</ul>
+
+<h2>12.5　與 worker 同行程</h2>
+<pre><code>emforge worker --root R --serve [--host H --port N]
+  → check_bind(host, token)                     # 先拒再起儀器
+  → inst = make_instrument(root, tag, …)
+  → inst.start()
+  → serve_in_thread(inst, host, port, secret)   # uvicorn 在 **daemon thread**
+  → worker_loop(root, tag, instrument=inst, …)  # 主執行緒跑 worker 迴圈，共用同一台儀器
+
+emforge device-serve &lt;tag&gt; --root R           # 只服務、**不撿佇列**（單筆試量，或這台暫時不當 worker）</code></pre>
+<p>
+同機只能有一個 HFSS 使用者，所以 MCP 與 worker 必須共用同一個 <code>Instrument</code>——
+租約在行程內仲裁。uvicorn 跑在 daemon thread 意味著 <strong>worker 主迴圈結束、行程結束，MCP 也跟著沒了</strong>——
+設計如此；要「沒有 worker 的 MCP」就用 <code>device-serve</code>。
+</p>
+
+<h2>12.6　客戶端與 <code>.mcp.json</code></h2>
+<pre><code># 開發機接上三台
+emforge fleet --root %EMFORGE_ROOT% --mcp-config &gt; .mcp.json
+# 產生：
+{ "mcpServers": {
+    "emforge-216": { "type": "http",
+                     "url": "http://10.x.x.216:8765/mcp",
+                     "headers": {"Authorization": "Bearer ${EMFORGE_DEVICE_TOKEN}"} },
+    "emforge-218": { … }, "emforge-37": { … } } }</code></pre>
+<p>
+<code>url</code> 來自各台狀態字典的 <code>url</code> 欄（server 起來時由 <code>announce_url</code> 寫入；
+綁 <code>0.0.0.0</code> 時填的是對外介面 IP，別台才連得到）。header 用 <code>${EMFORGE_DEVICE_TOKEN}</code> 佔位，
+由 Claude Code 從環境變數展開——token 不進檔案。
+</p>
+<p>命令列的等價物是 <code>emforge device-simulate</code>（<code>device/mcp_client.py</code> 是本體）：</p>
+<pre><code>emforge device-simulate --url http://&lt;ip&gt;:8765/mcp --profile P --bits @king.txt --by ricky
+  → 印出 {"needs_confirm": true, "token": "ab12cd34", "record_id": …, "preview": {…}}
+emforge device-simulate … --confirm ab12cd34          # 真的跑（100–250 s）</code></pre>
+
+<h2>12.7　安全邊界（誠實版）</h2>
+<div class="warn">
+<p><strong>一把鑰匙開整個機隊。</strong><code>EMFORGE_DEVICE_TOKEN</code> 三台共享、<strong>無身分</strong>（<code>by</code> 是自報）、
+<strong>無到期</strong>。外洩 ＝ 任何人能對每台開 HFSS 跑任何 profile——受 <code>allowed_profiles</code> 與兩段式 confirm 限制，
+但 confirm token 也是同一把 secret 算出來的。</p>
+<p><strong>傳輸是明文 HTTP。</strong>唯一的屏障是區網 ＋ 防火牆規則
+（<code>netsh advfirewall … remoteip=LocalSubnet</code>）。</p>
+<p><strong>重放</strong>：<code>device_simulate(confirm=…)</code> 由 token 單次使用擋住；
+<code>device_abort</code>／<code>device_estop</code> <strong>沒有 nonce</strong>，重放就再按一次（冪等、無害）。</p>
+<p><strong>阻塞</strong>：同步 tool 跑在 SDK 的 anyio thread pool（預設 40 條）；<code>device_simulate</code> 會佔一條 100–250 秒，
+但儀器租約只讓一個 simulate 進，其餘立刻 <code>device_busy</code>，所以實際只會塞一條。</p>
+<p class="small">出處：<code>docs/implementation.md §12-24／25／26</code>。</p>
+</div>
+<!-- ══════════════ 13 ══════════════ -->
+<h1 id="sec-13">13　CLI 一覽</h1>
+<p>
+入口 <code>emforge</code>（<code>pyproject.toml</code> 的 <code>[project.scripts]</code> → <code>emforge.cli:main</code>）。
+子命令 kebab-case ↔ 函式 <code>cmd_&lt;snake&gt;</code>；每個模組的 <code>COMMANDS</code> 字典有測試逐一對帳。
+<strong>所有命令回 int</strong>，<code>main</code> 把任何未預期例外轉成 <code>emforge: &lt;Type&gt;: &lt;msg&gt;</code> ＋ exit 1（I-8）。
+每個吃 <code>--root</code> 的命令也吃 <code>--depot</code>。
+</p>
+
+<h2>13.1　子命令</h2>
+<table class="tight">
+<tr><th style="width:19%">命令</th><th style="width:33%">關鍵旗標</th><th style="width:33%">做什麼</th><th style="width:15%">exit</th></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>準備與體檢（<code>cli/setup.py</code>）</strong></td></tr>
+<tr><td><code>version</code></td><td>—</td><td>印版本與 git 戳（<code>worker_ver</code> 的成分）</td><td>0</td></tr>
+<tr><td><code>init</code></td><td><code>--root --depot [--profile P]</code></td>
+    <td>佈局前綴與 <code>strategies.yaml</code> 範本進 depot；<code>registry.py</code>／<code>strategies/</code>／<code>limits.json</code> 在本機 root。<strong>不覆寫已存在的檔</strong></td><td>0</td></tr>
+<tr><td><code>doctor</code></td><td><code>--root [--depot] [--hfss]</code></td>
+    <td>體檢：版本、root 探針、<code>depot.selfcheck()</code>（可寫／O_EXCL／時鐘偏移）、系統碟、ansysedt 行程、舊 repo 綁定</td><td>0；<strong>4</strong>＝有阻擋</td></tr>
+<tr><td><code>check-strategy</code></td><td><code>--profile --strategy [--budget --seed --tick --params]</code></td><td>本行程試跑 <code>propose</code>（不派工）</td><td>0／1</td></tr>
+<tr><td><code>import-legacy</code></td><td><code>--root OLD --out R --stores glob,… [--profile --map --include-errors --verify --dry-run --force --no-rad]</code></td>
+    <td>舊 NAS 資料匯入（舊樹只讀）</td><td>0；<strong>2</strong>＝verify 不符</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>長跑行程（<code>cli/loops.py</code>）</strong></td></tr>
+<tr><td><code>run</code></td><td><code>--profile [--once] [--in-process]</code></td><td>跑一個 runtime 實例</td>
+    <td>0；<strong>2</strong>＝對帳不符；<strong>3</strong>＝鎖被占／鎖丟了</td></tr>
+<tr><td><code>worker</code></td><td><code>[--machine-tag --poll-s --once --work-root --bg-prio --max-fail --cooldown-s --max-blowout --retry-passes] [--serve --host --port]</code></td>
+    <td>正式機 worker；<code>--serve</code> 同行程再起這台的 MCP server</td><td>0；<strong>1</strong>＝非 loopback 無 token 拒起</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>唯讀（<code>cli/show.py</code>）</strong></td></tr>
+<tr><td><code>status</code></td><td><code>--profile</code></td><td>印 <code>status.json</code></td><td>0</td></tr>
+<tr><td><code>events</code></td><td><code>--profile [--last N --event E]</code></td><td>印 <code>events.jsonl</code>（可過濾事件名）</td><td>0</td></tr>
+<tr><td><code>pending</code></td><td><code>--profile</code></td><td>印公證通過、等人審的候選</td><td>0</td></tr>
+<tr><td><code>jobs</code></td><td><code>[--all]</code></td><td>印佇列（預設隱藏 done），含 claim 持有者與釘機</td><td>0</td></tr>
+<tr><td><code>watch</code></td><td><code>--stores a,b [--poll-s --fail-grace-min --timeout-min]</code></td>
+    <td><strong>blocking</strong> 等終態——任何 harness 的收檔偵測掛這裡</td><td><strong>0</strong>=全 done／<strong>1</strong>=有 fail／<strong>2</strong>=逾時</td></tr>
+<tr><td><code>report</code></td><td><code>--profile P [--profile Q --cross-profile] [--k-min]</code></td><td>每策略報表</td><td>0；<strong>2</strong>＝跨 profile 無旗標</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>裁決（<code>cli/verdict.py</code>）——唯一能寫榜</strong></td></tr>
+<tr><td><code>promote</code></td><td><code>&lt;id&gt; --profile --by WHO [--spec --note --force]</code></td><td>換王</td>
+    <td>0；<strong>3</strong>＝不在 pending；<strong>5</strong>＝榜被手改</td></tr>
+<tr><td><code>retire</code></td><td><code>--profile --by</code></td><td>凍結一個 profile（拒新工作、資料保留）</td><td>0</td></tr>
+<tr><td><code>rescore</code></td><td><code>--profile --spec --by [--force]</code></td><td>換評估器建新榜（零重量）</td><td>0；<strong>6</strong>＝榜已存在</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>操作（<code>cli/control.py</code>）</strong></td></tr>
+<tr><td><code>requeue</code></td><td><code>&lt;store&gt; --by</code></td><td>原子清 claim＋done＋fail（I-2）；進度在結果檔，會續跑</td><td>0；<strong>7</strong>＝有人正在跑</td></tr>
+<tr><td><code>abandon</code></td><td><code>&lt;store&gt; --profile --by</code></td><td>放棄一批：殘留結果（含 error）入庫、inflight 移除、佇列標 done</td><td>0；1＝不在 inflight／有人正在跑</td></tr>
+<tr><td><code>resume</code></td><td><code>--profile [--strategy S] --by</code></td><td>寫 <code>control.json</code>；runtime 下個 tick 消費</td><td>0</td></tr>
+<tr><td><code>stop</code></td><td><code>(--profile P | --worker [--machine-tag T]) [--clear]</code></td><td>建／清 STOP 檔（在 tick／job 之間生效）</td><td>0</td></tr>
+<tr><td><code>smoke</code></td><td><code>&lt;id&gt; --profile --by [--machine T --n N]</code></td><td>對已量 id 派重測批（切機／換版本後驗「同一儀器」）</td><td>0</td></tr>
+
+<tr><td colspan="4" style="background:#f4f4f4"><strong>儀器層（<code>cli/device.py</code>）</strong></td></tr>
+<tr><td><code>fleet</code></td><td><code>[--mcp-config]</code></td><td>機隊儀表板；<code>--mcp-config</code> 吐 <code>.mcp.json</code> 片段</td><td>0</td></tr>
+<tr><td><code>device-state</code></td><td><code>&lt;tag&gt;</code></td><td>印一台的狀態字典</td><td>0；1＝尚無</td></tr>
+<tr><td><code>device-describe</code></td><td><code>&lt;tag&gt; [--json]</code></td><td>印一台的說明檔（open 成功後才有）</td><td>0；1＝尚無</td></tr>
+<tr><td><code>device-serve</code></td><td><code>&lt;tag&gt; [--host --port --work-root]</code></td><td>只起 MCP server、<strong>不撿佇列</strong>；阻塞到 Ctrl-C</td><td>0；1＝非 loopback 無 token</td></tr>
+<tr><td><code>device-simulate</code></td><td><code>--url --profile --bits B|@file [--confirm --by --timeout-s]</code></td><td>經 MCP 對一台跑一筆（兩段式）；印 JSON、不入 db</td><td>0；1＝tool 錯誤</td></tr>
+<tr><td><code>device-estop engage</code></td><td><code>[--tag T | --local] --by --reason R</code></td><td>按急停（全機／單機／本機層）</td><td>0；1＝缺 <code>--reason</code></td></tr>
+<tr><td><code>device-estop clear</code></td><td><code>[--tag T | --local] --confirm</code></td><td><strong>唯一</strong>解除急停的路徑</td><td>0；<strong>2</strong>＝沒帶 <code>--confirm</code></td></tr>
+</table>
+
+<h2>13.2　exit code 對照</h2>
+<table class="tight">
+<tr><th style="width:8%">code</th><th style="width:28%">常數</th><th>意思</th></tr>
+<tr><td>0</td><td><code>EXIT_OK</code></td><td>成功</td></tr>
+<tr><td>1</td><td><code>EXIT_ERROR</code></td><td>一般錯誤（含所有未預期例外）</td></tr>
+<tr><td>2</td><td><code>EXIT_REFUSED</code></td><td>拒絕：對帳不一致、跨 profile 並排、急停 clear 沒帶 <code>--confirm</code>、<code>import-legacy --verify</code> 不符</td></tr>
+<tr><td>3</td><td><code>EXIT_LOCKED</code></td><td>鎖被占／鎖丟了；<code>promote</code> 的 id 不在 pending</td></tr>
+<tr><td>4</td><td><code>EXIT_DOCTOR</code></td><td>doctor 有阻擋條件</td></tr>
+<tr><td>5</td><td><code>EXIT_TAMPER</code></td><td>榜檔被手改（checksum 不符）</td></tr>
+<tr><td>6</td><td><code>EXIT_EXISTS</code></td><td>榜已存在（<code>rescore</code> 需 <code>--force</code>）</td></tr>
+<tr><td>7</td><td><code>EXIT_LIVE_CLAIM</code></td><td>有新鮮 claim（<code>requeue</code> 需先 <code>stop</code> 那台）</td></tr>
+</table>
+<p class="small">
+這張表本身是事故 I-8 的產物：安全閘的失敗<strong>必須</strong>是非零 exit code ＋ stderr 原因，
+不能被管線尾端吃掉。<code>watch</code> 的三個 exit code 則是「派工與掛偵測是同一個動作」（I-13）的消費端。
+</p>
+
+<!-- ══════════════ 14 ══════════════ -->
+<h1 id="sec-14">14　事件與可觀測性</h1>
+
+<h2>14.1　事件是封閉集合</h2>
+<p>
+事件是 runtime／worker／儀器對外（人、AI 層、report）<strong>唯一的敘事管道</strong>，
+所以名字與必填欄位在 <code>emforge/events.py</code> 是一個<strong>白名單</strong>：
+<code>make()</code> 驗事件名在不在集合裡（否則 <code>UnknownEvent</code>）、必填欄位有沒有給（否則 <code>EventFieldsMissing</code>），
+自動補 <code>at</code> 與 <code>event</code>。新事件必須加在這裡，不能在別處自由發明。
+</p>
+
+<h2>14.2　全表</h2>
+<table class="tight">
+<tr><th style="width:23%">事件</th><th style="width:27%">必填欄位</th><th>含義</th></tr>
+
+<tr><td colspan="3" style="background:#f4f4f4"><strong>runtime</strong>（<code>runtime_state/&lt;profile&gt;/events.jsonl</code>）</td></tr>
+<tr><td><code>runtime_start</code></td><td>runtime_ver, profile_hash, pid, machine</td><td>拿到鎖、開始跑</td></tr>
+<tr><td><code>runtime_stop</code></td><td>reason</td><td><code>stop_file</code>／<code>once</code>／<code>reconcile_mismatch</code>／<code>lock_lost</code></td></tr>
+<tr><td><code>lock_lost</code></td><td>owner</td><td>心跳發現鎖不見了或換主 → 下一圈停（exit 3）</td></tr>
+<tr><td><code>reconcile_mismatch</code></td><td>detail</td><td>啟動對帳不一致 → 拒起（exit 2）</td></tr>
+<tr><td><code>config_reloaded</code></td><td>n_strategies</td><td><code>strategies.yaml</code> 內容變了且解析成功</td></tr>
+<tr><td><code>config_invalid</code></td><td>error</td><td>解析失敗或檔不見了 → 沿用上次有效，<strong>不停 runtime</strong></td></tr>
+<tr><td><code>fleet_quiet</code></td><td>quiet_s</td><td>有 inflight 但機隊靜默 → 本 tick 只等、不排程</td></tr>
+<tr><td><code>profile_paused</code></td><td>error_rate, store</td><td>一批 sample 的錯誤率超過門檻 → 暫停整個 profile</td></tr>
+<tr><td><code>profile_resumed</code></td><td>by</td><td>人／AI 用 <code>resume</code> 恢復</td></tr>
+<tr><td><code>index_repaired</code></td><td>n</td><td>啟動時把「磁碟有、索引無」的檔補回索引</td></tr>
+
+<tr><td colspan="3" style="background:#f4f4f4"><strong>策略</strong></td></tr>
+<tr><td><code>strategy_loaded</code> / <code>strategy_rejected</code></td><td>name（＋reason）</td><td>載入成功／<code>COMPATIBLE</code> 不含本 profile</td></tr>
+<tr><td><code>strategy_error</code></td><td>name, tick, error, consecutive</td><td>propose 例外（連敗計數）</td></tr>
+<tr><td><code>strategy_timeout</code></td><td>name, tick, timeout_s</td><td>子行程逾時，已殺</td></tr>
+<tr><td><code>strategy_paused</code> / <code>strategy_resumed</code></td><td>name, after_errors / by</td><td>連敗達上限暫停／人恢復（D9）</td></tr>
+<tr><td><code>strategy_empty</code></td><td>name, tick</td><td>回了空 list（例如資料庫還空）</td></tr>
+<tr><td><code>proposals_validated</code></td><td>name, tick, n_in, n_dup, n_out</td><td>去重的帳——<code>n_dup</code> 高＝「沒貨」（提案都重複）</td></tr>
+
+<tr><td colspan="3" style="background:#f4f4f4"><strong>派工／收結果</strong></td></tr>
+<tr><td><code>batch_dispatched</code></td><td>store, strategy, n, prio, tick, seed, kind</td><td>批已落地、job 已入佇列</td></tr>
+<tr><td><code>dispatch_failed</code></td><td>name, tick, error</td><td>派工本身失敗（<strong>不計策略連敗</strong>）</td></tr>
+<tr><td><code>record_added</code></td><td>id, store, score, kind</td><td>一筆入庫</td></tr>
+<tr><td><code>batch_done</code></td><td>store, n_done, n_error</td><td>批終態、能收的都收了、inflight 移除</td></tr>
+<tr><td><code>batch_failed</code></td><td>store, reason</td><td>worker 判死（<strong>只發一次</strong>；名單外機器可接管）</td></tr>
+<tr><td><code>batch_requeued</code> / <code>batch_abandoned</code></td><td>store, by</td><td>人的介入</td></tr>
+<tr><td><code>profile_tamper</code></td><td>store, expected, got</td><td><strong>結果的 profile_hash 與註冊表不符</strong>——有人改了 registry 或某台在跑舊程式</td></tr>
+
+<tr><td colspan="3" style="background:#f4f4f4"><strong>公證</strong></td></tr>
+<tr><td><code>record_candidate</code></td><td>id, score, prev_best</td><td>破了門檻，準備重測</td></tr>
+<tr><td><code>notarize_dispatched</code></td><td>id, stores</td><td>重測批已派</td></tr>
+<tr><td><code>notarize_pass</code></td><td>id, scores, conservative, spread</td><td>一致 → 寫 pending（<strong>不改榜</strong>）</td></tr>
+<tr><td><code>notarize_reject</code></td><td>id, scores, spread, noise_floor</td><td>不一致＝可能是假象</td></tr>
+
+<tr><td colspan="3" style="background:#f4f4f4"><strong>榜</strong></td></tr>
+<tr><td><code>promoted</code></td><td>id, spec, by</td><td>換王（唯一寫榜路徑）</td></tr>
+<tr><td><code>retired</code></td><td>profile, by</td><td>凍結一個 profile</td></tr>
+<tr><td><code>rescored</code></td><td>spec, n, by</td><td>換評估器建新榜</td></tr>
+<tr><td><code>ledger_tamper</code></td><td>spec, detail</td><td>榜檔 checksum 不符</td></tr>
+
+<tr><td colspan="3" style="background:#f4f4f4"><strong>worker</strong>（<code>queue/log/&lt;tag&gt;.jsonl</code>，單寫者＝該台）</td></tr>
+<tr><td><code>worker_start</code> / <code>worker_stop</code></td><td>worker_ver, machine / reason</td><td>啟動時印版本（I-10）；<code>stop_file</code>／<code>once</code></td></tr>
+<tr><td><code>job_claimed</code></td><td>store, prio</td><td>認領一個 job</td></tr>
+<tr><td><code>sample_done</code> / <code>sample_error</code></td><td>store, id, time_s / error, attempts</td><td>逐筆</td></tr>
+<tr><td><code>job_done</code> / <code>job_failed</code></td><td>store, n_done, n_error / reason</td><td>一批結束</td></tr>
+<tr><td><code>job_yield</code></td><td>store, reason</td><td><code>claim_taken_over</code>／<code>foreground_job_appeared</code>／<code>estop_engaged</code>／<code>device_busy</code></td></tr>
+<tr><td><code>gate_rejected</code></td><td>store, reason</td><td>守門擋下（那批 <code>.fail</code>，worker 繼續）</td></tr>
+<tr><td><code>sim_restart</code></td><td>store, reason</td><td><code>watchdog_timeout</code>／<code>fuse_cooldown</code>／<code>retry_pass</code></td></tr>
+
+<tr><td colspan="3" style="background:#f4f4f4"><strong>儀器</strong>（<code>devices/&lt;tag&gt;/log.jsonl</code>，單寫者＝該台 <code>Instrument</code>）</td></tr>
+<tr><td><code>device_start</code> / <code>device_stop</code></td><td>tag, worker_ver, pid / reason</td><td>儀器行程生命週期</td></tr>
+<tr><td><code>device_fault</code></td><td>tag, error</td><td>open 失敗、或寫狀態字典／說明檔失敗</td></tr>
+<tr><td><code>device_simulate</code></td><td>tag, id, by, status, time_s</td><td><code>simulate_once</code>（ad-hoc 一筆）</td></tr>
+<tr><td><code>device_abort</code></td><td>tag, by</td><td>殺正在跑的那筆</td></tr>
+<tr><td><code>lease_refused</code></td><td>tag, owner, holder</td><td>租約被別人持有</td></tr>
+<tr><td><code>estop_engaged</code> / <code>estop_cleared</code></td><td>tag, scope（＋by, reason）</td><td>急停</td></tr>
+<tr><td><code>device_serve</code></td><td>tag, url, host, port, auth</td><td>MCP server 起來了</td></tr>
+<tr><td><code>device_stop_worker</code> / <code>device_resume_worker</code></td><td>tag, by</td><td>經 MCP 建／刪 <code>STOP.&lt;tag&gt;</code></td></tr>
+</table>
+
+<h2>14.3　單寫者原則與它的一個例外</h2>
+<p>
+三條日誌各自只有一個寫者：runtime 寫自己的 <code>events.jsonl</code>／<code>pending.jsonl</code>；
+每台 worker 寫自己的 <code>queue/log/&lt;tag&gt;.jsonl</code>；每台儀器寫自己的 <code>devices/&lt;tag&gt;/log.jsonl</code>。
+理由在 <code>fs.py</code> 的檔頭：<strong>SMB 上多寫者 <code>O_APPEND</code> 交錯無保證</strong>，
+所以「多方各跑一次」的匯總一律「一方一檔」（I-15 的歸納）。
+</p>
+<div class="note">
+<strong>已知的低頻例外</strong>（<code>docs/implementation.md §12-7</code>）：CLI 的
+<code>promoted</code>／<code>retired</code>／<code>rescored</code>／<code>batch_requeued</code>／<code>batch_abandoned</code>
+會 append 到 runtime 的 <code>events.jsonl</code>，違反單寫者契約。頻率極低（人的操作），
+但在 SMB 上理論上可能與 runtime 的寫入交錯。
+</div>
+
+<h2>14.4　三個觀測面</h2>
+<table>
+<tr><th style="width:18%">面</th><th style="width:26%">怎麼看</th><th>回答什麼問題</th></tr>
+<tr><td><strong>狀態</strong></td><td><code>emforge status --profile P</code>（<code>status.json</code>）</td>
+    <td>「現在在跑什麼？」——tick 號、每策略的 inflight／連敗／派了幾批、每批的收集進度與佇列狀態、待審數、資料庫筆數、機隊摘要</td></tr>
+<tr><td><strong>敘事</strong></td><td><code>emforge events --profile P [--event E --last N]</code></td>
+    <td>「發生過什麼？」——時間序的事件流；<code>--event</code> 可以只看一種（例如只看 <code>profile_tamper</code>）</td></tr>
+<tr><td><strong>成效</strong></td><td><code>emforge report --profile P</code></td>
+    <td>「哪個策略有用？」——每策略的 n／done／best（保守值）／mean／命中率／<code>dup_dropped</code>／P(勝 blind)</td></tr>
+</table>
+<p>
+<code>report</code> 有三道自制的閘：<strong>（a）</strong> blind 樣本 &lt; <code>k_min</code> 時只印數字、不印任何比較（D8）；
+<strong>（b）</strong> <code>notarize</code> 與 <code>cli:*</code> 產出的紀錄標成不可比較，不參與 P(勝 blind)；
+<strong>（c）</strong> 同一個 store 出現兩種 <code>worker_ver</code> 會印警告——那代表有人只 pull 沒重啟（I-10）。
+<code>dup_dropped</code> 與 P(勝 blind) 刻意分開印：前者診斷「沒貨」（提案都重複），後者診斷「排不動」。
+</p>
+<p>
+<strong>機隊</strong>另有 <code>emforge fleet</code>（見 11.9），且它的摘要也被塞進 <code>status.json</code> 的 <code>fleet</code> 欄，
+所以看 runtime 狀態的人同時看得到三台機器在做什麼。
+</p>
+
+<!-- ══════════════ 15 ══════════════ -->
+<h1 id="sec-15">15　品質保證</h1>
+
+<h2>15.1　TDD 與紀律</h2>
+<p><code>CLAUDE.md</code> 的四條硬規則裡有兩條直接關於測試：</p>
+<ul>
+<li><strong>先寫紅測試 → 實作 → 綠。</strong>回歸測試的 docstring 首行固定寫
+<code>回歸 I-N（日期）：防止…</code>，<code>I-N</code> 指向 <code>docs/incidents.md</code>。</li>
+<li><strong>一里程碑一 commit</strong>：<code>python -m pytest</code> 全綠 ＋ <code>python -m pyflakes emforge tests</code> 無 undefined name 才 commit。</li>
+</ul>
+<p>三條測試紀律值得單獨指出，因為它們都是舊系統的教訓：</p>
+<table>
+<tr><th style="width:26%">紀律</th><th>內容</th></tr>
+<tr><td><strong>測試永不碰 NAS</strong></td>
+    <td><code>tests/conftest.py</code> 有一個 session 級 autouse fixture 把 <code>EMFORGE_ROOT</code> 從環境<strong>拿掉</strong>，
+    強迫所有測試走 <code>root</code> fixture。而 <code>root</code> fixture 的路徑刻意是
+    <code>tmp_path/"碩二_x's"/emforge</code>——含中文與撇號，因為真實 NAS 路徑就長這樣，
+    靠字串拼接的路徑處理在這裡就會炸。</td></tr>
+<tr><td><strong>沒有 golden、沒有自動寫回基準</strong></td>
+    <td>來自事故 I-9：本機用 CI 模式（較寬容差）跑測試，比對「通過」後框架把當前值<strong>靜默寫回基準檔</strong>。
+    emforge 完全不用這個機制。決定性只在同 seed 同行程內斷言，而且<strong>雙向</strong>——同 seed 相等、異 seed 不同。</td></tr>
+<tr><td><strong>執行緒例外＝測試失敗</strong></td>
+    <td><code>pyproject.toml</code>：<code>filterwarnings = ["error::pytest.PytestUnhandledThreadExceptionWarning"]</code>。
+    註解說明理由：「執行緒裡的未處理例外不准只是 warning——那正是『寫者死掉、最終值不對』的間歇失敗來源。」</td></tr>
+</table>
+<p class="small">假件一律叫 <code>Fake*</code>（不叫 <code>Mock*</code>），住在 <code>emforge/testing.py</code>，
+使用者寫自己的策略測試也能 import。<code>FakeSimulator</code> 是<strong>確定性</strong>的假儀器：
+同 bits 同響應、不同 bits 不同響應，可以指定哪些 id 失敗、哪些卡住（模仿 COM 偶發例外與看門狗）。</p>
+
+<h2>15.2　476 條測試的分布</h2>
+<table>
+<tr><th style="width:20%">目錄</th><th style="width:10%">條數</th><th>內容</th></tr>
+<tr><td><code>tests/</code>（根）</td><td>199</td>
+    <td><code>test_queue</code> 21・<code>test_cli</code> 30・<code>test_model</code> 15・<code>test_db</code> 15・<code>test_fs</code> 14・
+    <code>test_strategy</code> 12・<code>test_smoke</code> 11・<code>test_paths</code> 10・<code>test_ledger</code> 8・<code>test_report</code> 8・
+    <code>test_profiles</code> 7・<code>test_batches</code> 7・<code>test_specs</code> 6・<code>test_testing</code> 6・<code>test_e2e</code> 5・
+    <code>test_events</code> 5・<code>test_strategies_shipped</code> 4・<code>test_heartbeat</code> 3・<code>test_doctor</code> 2・<code>test_netid</code> 2</td></tr>
+<tr><td><code>tests/depot/</code></td><td>89</td>
+    <td>契約測試 36 條 <strong>× 2 個後端</strong>＝72，加 <code>test_file</code> 13、<code>test_memory</code> 4</td></tr>
+<tr><td><code>tests/runtime/</code></td><td>67</td>
+    <td><code>test_core</code> 20・<code>test_collect</code> 13・<code>test_dispatch</code> 9・<code>test_schedule</code> 9・<code>test_notarize</code> 8・<code>test_reconcile</code> 7</td></tr>
+<tr><td><code>tests/worker/</code></td><td>42</td>
+    <td><code>test_batch</code> 15・<code>test_loop</code> 9・<code>test_guard</code> 6・<code>test_gate</code> 5・<code>test_fuse</code> 4・<code>test_workdir</code> 3</td></tr>
+<tr><td><code>tests/device/</code></td><td>42</td>
+    <td><code>test_instrument</code> 16・<code>test_mcp_server</code> 10・<code>test_limits</code> 5・<code>test_estop</code> 3・
+    <code>test_states</code> 3・<code>test_reference</code> 3・<code>test_mcp_client</code> 2</td></tr>
+<tr><td><code>tests/adapters/</code></td><td>25</td><td><code>test_antenna_pure</code> 19・<code>test_antenna_bound</code> 3・<code>test_antenna_ctor</code> 3</td></tr>
+<tr><td><code>tests/legacy/</code></td><td>12</td><td><code>test_antenna_import</code></td></tr>
+<tr><th>合計</th><th>476</th><th></th></tr>
+</table>
+<p class="small">
+<strong>會 skip 的部分</strong>：<code>tests/adapters/test_antenna_bound.py</code>／<code>test_antenna_ctor.py</code> 需要
+<code>EMFORGE_ANTENNA_REPO</code>（＋<code>pywin32</code>）；<code>tests/device/test_mcp_*.py</code> 需要
+<code>pip install -e .[mcp]</code>；<code>tests/legacy/</code> 需要 <code>torch</code>。
+沒裝就 skip，不算失敗——這正是 optional extra 隔離的目的。
+目前<strong>沒有任何測試會真的開 HFSS</strong>。開發機不設 <code>EMFORGE_ANTENNA_REPO</code> 時，日常的「476 全綠」實際是 470 passed ＋ 6 skipped（adapter 綁定／COM 建構那 6 條）；要把它們算進去就得設該變數（2026-09-07 檢查報告第 44 條）。
+</p>
+
+<h2>15.3　四種測試策略</h2>
+<h3>（a）契約測試——一套規格、多個實作</h3>
+<p>見 6.5。這是「基礎設施解耦」宣稱的<strong>唯一硬證據</strong>：同一組 36 條斷言對 <code>FileDepot</code> 與
+<code>MemoryDepot</code> 各跑一次。沒有這個，「換後端零改 runtime」就只是一句話。</p>
+
+<h3>（b）adapter parity——500 筆逐位元</h3>
+<p>
+<code>tests/adapters/test_antenna_bound.py::test_measure_parity_500_random_responses_bitwise</code>：
+產生 500 筆隨機響應，用 vendored 的 numpy 尺與舊 <code>antenna.losses</code> 各算一次，
+斷言 m1…m6 <strong>逐位元相等</strong>。同一個檔還有兩條：凍結的 targets 與舊 yaml 設定值相等、
+adapter 宣告的 <code>geom_ver</code> 與舊模組的 <code>GEOM_VER</code> 常數相等。
+</p>
+<p>
+這三條是「vendor 一份尺」這個決定的安全網——沒有它們，兩份程式碼會慢慢漂開而沒人知道。
+</p>
+
+<h3>（c）靜態守門——規範的機器版</h3>
+<p>見 4.3。11 條，全部用 AST 掃描，不執行受測程式，所以又快又不受環境影響。</p>
+
+<h3>（d）端到端</h3>
+<p><code>tests/test_e2e.py</code> 五條，每一條驗一個跨模組的性質：</p>
+<ul>
+<li><strong>雙策略全鏈路</strong>：兩個策略 ＋ 假 worker → 資料庫 → 公證 → 待審 → <code>promote</code> → 報表。</li>
+<li><strong>中途重啟續收不重複</strong>：批跑到一半殺掉 runtime，重起之後接著收，不會產生重複紀錄（I-12）。</li>
+<li><strong>核心全程不 import torch</strong>：跑完整條鏈路之後檢查 <code>sys.modules</code>。</li>
+<li><strong>雙實例讀可寫不可</strong>：第二個 profile 的實例讀得到第一個的資料，但寫不進去（D2）。</li>
+<li><strong>整條鏈路在 <code>memory://</code> depot 上跑</strong>：證明沒有任何一步偷偷碰檔案系統。</li>
+</ul>
+
+<h2>15.4　事故 → 防線 → 釘住的測試</h2>
+<p>
+<code>docs/incidents.md</code> 記錄 16 個事故（I-1…I-16），<code>docs/implementation.md §11</code> 把每一個對應到防線與測試。
+這份對照表是這個專案最難重得的資產——<strong>「程式碼結構其實很簡單，價值在知道哪裡會爆」</strong>。
+</p>
+<table class="tight">
+<tr><th style="width:24%">事故</th><th style="width:38%">防線</th><th>代表測試</th></tr>
+<tr><td>I-1 磁碟塞爆</td><td>工作目錄兩道清理；契約無 <code>keep_*</code></td><td><code>worker/test_workdir::sweep_all…</code>、<code>test_model::…no_keep_project_field</code></td></tr>
+<tr><td>I-2 殭屍／壞 claim</td><td>無主 &gt;60 s 清；stale 看批進度；<code>requeue</code> 原子三清</td><td><code>test_queue::pick_clears_ownerless…</code>、<code>requeue_clears…</code></td></tr>
+<tr><td>I-3 佇列並發損壞</td><td><code>Depot.lock</code>（O_EXCL＋破鎖）＋原子寫</td><td><code>test_fs::lock_serializes_counter</code>、<code>test_queue::concurrent_add_loses_no_job</code></td></tr>
+<tr><td>I-4 背景炸機</td><td>策略子行程；連 N 次暫停；runtime 永活</td><td><code>test_strategy::child_exception…parent_alive</code></td></tr>
+<tr><td>I-5 全史掃描撐爆</td><td><code>_index.jsonl</code> append；collect 增量</td><td><code>test_db::index_appended_not_rebuilt</code></td></tr>
+<tr><td>I-6 用錯儀器</td><td>實例綁 profile；manifest 帶 <code>profile_hash</code>；<code>COMPATIBLE</code>；gate 在 open 前</td><td><code>worker/test_gate::gate_order…</code>、<code>adapters::labels_shape…before_construct</code></td></tr>
+<tr><td>I-7 幾何幻影</td><td>era≡profile 進 id；<code>GEOM_VER</code> 雙邊；report 拒跨 profile</td><td><code>test_model::record_id_differs_by_profile</code></td></tr>
+<tr><td>I-8 退出碼被吞</td><td>dispatch 無旁路；每命令回 int、<code>main</code> 不吞</td><td><code>runtime/test_dispatch::no_dedup_bypass</code>、<code>test_cli::main_converts_exceptions</code></td></tr>
+<tr><td>I-9 CI 靜默重錨</td><td>無 golden、無自動寫回</td><td><strong>紀律</strong>（<code>CLAUDE.md</code>）</td></tr>
+<tr><td>I-10 只拉不重啟</td><td><code>worker_ver</code> 蓋每筆；<code>profile_tamper</code>；report 雙版本警告；<code>start_worker.cmd</code> 綁 pull</td><td><code>worker/test_batch::result_stamps…</code>、<code>test_report::two_worker_vers</code></td></tr>
+<tr><td>I-11 基準綁執行緒數</td><td>無位元級基準；bootstrap 帶 seed</td><td><code>test_report::same_seed_equal</code>（＋紀律）</td></tr>
+<tr><td>I-12 harness 殺背景</td><td>狀態全在磁碟、可續跑</td><td><code>worker/test_batch::resumes_skipping_done</code>、<code>test_e2e::restart_mid_batch</code></td></tr>
+<tr><td>I-13 派工沒掛偵測</td><td>inflight 先寫</td><td><code>runtime/test_dispatch::writes_inflight_before_job</code></td></tr>
+<tr><td>I-14 未落地疊工</td><td>啟動 reconcile 不符 → exit 2</td><td><code>runtime/test_reconcile::…run_refuses</code></td></tr>
+<tr><td>I-15 多機覆寫</td><td>一筆一檔永不覆寫；逐筆結果檔</td><td><code>test_db::same_id_same_store_keeps_first</code>、<code>test_batches::per_id_merge_semantics</code></td></tr>
+<tr><td>I-16 自己的錯只有稽核抓到</td><td>§12 已知失效模式清單供稽核 brief；blind 不足只印數字</td><td>紀律</td></tr>
+</table>
+<p>
+<code>docs/incidents.md</code> 末尾把 16 個事故歸納成六條，其中最有價值的是最後一條：
+<strong>「設計時要問的不是『這會不會出錯』，而是『出錯的時候我會不會知道』。」</strong>
+——I-6、I-7、I-8、I-9 都屬於「錯得不報錯」這一類，也是最貴的一類。
+</p>
+
+<h2>15.5　2026-09-05 獨立審查</h2>
+<p>
+2026-09-01 的第一版完成後，做了一次<strong>獨立程式審查</strong>，找出 10 條問題並全數修掉（4 個 commit）。
+這些修正的價值在於它們都是「測試綠但語義錯」的類型：
+</p>
+<table class="tight">
+<tr><th style="width:5%">#</th><th style="width:40%">問題</th><th>修法</th></tr>
+<tr><td>1</td><td>error 結果一入庫就記 <code>collected</code>，擋掉補測輪的翻案</td><td>error 等批 done 才收</td></tr>
+<tr><td>2</td><td><code>.fail</code> 當終態 → 接管機跑出來的結果沒人收</td><td>fail 非終態、新增 <code>abandon</code> 命令</td></tr>
+<tr><td>3</td><td>tick 號在尾端才存 → 重播撞 <code>BatchExists</code>；dispatch 例外殺掉 runtime</td><td>tick 號先存、<code>StoreExists</code> 先擋、<code>dispatch_failed</code> 事件</td></tr>
+<tr><td>4</td><td><code>smoke</code> 用舊快照覆寫跑著的 runtime 的 <code>state.json</code></td><td><code>Runtime(readonly=True)</code></td></tr>
+<tr><td>5</td><td><code>Lock</code> 的破鎖分支忙迴圈（claim 一直 False 而 key 又不在＝權限問題）</td><td>每圈走逾時檢查＋sleep；紅測試真的卡 300 s 重現</td></tr>
+<tr><td>6</td><td>worker 沒有故障邊界：NAS 的 <code>PermissionError</code> 殺掉整個 worker，claim 留 45 分沒人接</td><td><code>_handle</code> try/except、<code>fs.release</code> 重試、接管競賽</td></tr>
+<tr><td>7</td><td>心跳只在 tick 開頭 → 一個 tick 可能長過 stale 門檻而被破鎖</td><td>背景心跳執行緒（30 s）</td></tr>
+<tr><td>8</td><td><code>collected</code> 整批後才落地；索引缺檔</td><td>每筆落地；<code>add</code> 回 False 仍算新收；啟動 <code>refresh</code></td></tr>
+<tr><td>9</td><td>模擬器被 kill 之後仍呼叫舊 <code>end()</code>，觸發 6 次無守門的 reopen</td><td><code>_killed</code> 旗標</td></tr>
+<tr><td>10</td><td>第 0 輪不看 <code>attempts</code> → 毒樣本第 4、5、6 次再跑，每台都吃一次逾時＋重開</td><td><code>attempts &lt; 3</code>（三振）</td></tr>
+</table>
+<p class="small">
+同一輪還砍掉四條：<code>promote</code> 依本榜 spec 重算、公證門檻走 checksum、
+<code>requeue</code> 看批進度＋claim 心跳、<code>watch</code> 在 <code>.fail</code> 被接管刪掉的瞬間不誤判 FAIL。
+每一條都有對應的測試（<code>docs/implementation.md §11b</code> 有完整對照表）。
+</p>
+
+<h2>15.6　已知失效模式（27 條，精簡）</h2>
+<p>
+<code>docs/implementation.md §12</code> 維護一份「給獨立稽核的 brief」——這本身是 I-16 的對策
+（「代理的價值來自我給的先驗，不只是它的獨立性」）。以下按主題歸類：
+</p>
+<table class="tight">
+<tr><th style="width:20%">主題</th><th>條目</th></tr>
+<tr><td><strong>時鐘與租約</strong></td>
+    <td>①stale-claim 接管、runtime 鎖、<code>fleet_quiet</code> 都靠伺服器側 <code>modified_at</code> vs 本機 <code>now()</code>，時鐘不同步會誤判（doctor 在 &gt;30 s 阻擋，但<strong>不修正</strong>）。
+    ⑯心跳吞例外：NAS 斷線超過 stale 門檻，鎖仍可能被第二個實例破掉——M13 之後窗口縮到<strong>一個 tick</strong>，不是消失。
+    ⑱破鎖不是仲裁（見 6.6）；「放回誤搬的新鎖」在微秒窗仍可能失敗（留 <code>.broken.*</code> 證據、回 False）。</td></tr>
+<tr><td><strong>數值未校準</strong></td><td>②所有門檻都是佔位值。③冷啟動時每個「新最好」都觸發重測，前幾 tick 重測比例偏高（<code>notarize_min_score</code> 尚未實作）。</td></tr>
+<tr><td><strong>宣告的可信度</strong></td><td>④single 的 <code>geom_ver</code> 是<strong>單邊</strong>宣告（舊 <code>single_port.py</code> 沒有 <code>GEOM_VER</code>，決定不動舊 repo）——single 幾何換代不會被抓。
+    ⑤<code>arm="blind"</code> 是自我宣告，說謊留紀錄但不被擋。</td></tr>
+<tr><td><strong>可能被誤讀</strong></td><td>⑥背景策略的「佇列空」看<strong>全機共用</strong>佇列，另一個 profile 有 job 排隊時這邊也不派。
+    ⑭一批被所有機器判死會<strong>永遠 inflight</strong>，直到人 <code>abandon</code>——<code>status.json</code> 的 <code>queue_state=fail</code> 是唯一提示。</td></tr>
+<tr><td><strong>單寫者的縫</strong></td><td>⑦CLI 的少數事件 append 到 runtime 的 <code>events.jsonl</code>。
+    ⑧兩個寫者同時 add 同一 profile 會讓 <code>_index.jsonl</code> 有重複行（<code>refresh</code> 以 dict 合併可容忍，但檔會變胖）。
+    ⑮<code>abandon</code> 與 collect 有一個很小的競賽窗（<code>db.add</code> 冪等，只是事件可能各發一次）。</td></tr>
+<tr><td><strong>匯入器</strong></td><td>⑨親代解析只做「legacy id 全域唯一才解」，不重建血統鏈；同 pattern 多 y 靠舊 <code>wm</code> 欄 2 位小數對回，理論上可能對錯。</td></tr>
+<tr><td><strong>效能</strong></td><td>⑩子行程啟動每 tick 每策略 1–2 s。㉖同步 tool 佔 anyio thread pool 一條 100–250 s。㉓每次 <code>open()</code> 都跑體檢與 depot 探針。</td></tr>
+<tr><td><strong>版本戳不完整</strong></td><td>⑪<code>worker_ver</code> 目前只含 emforge sha；adapter（antenna repo）的 sha 由 <code>_bind.antenna_sha()</code> 提供但<strong>尚未</strong>拼進去。</td></tr>
+<tr><td><strong>HFSS 特性</strong></td><td>⑫<code>Simulator.kill()</code> 對 HFSS 是殺<strong>全部</strong> ansysedt.exe——同機第二個 HFSS 使用者會被誤殺（doctor 拒起）。
+    ㉗<code>pythoncom.CoInitialize()</code> 只叫不 uninit；HFSS COM 物件跨執行緒是否成立<strong>未在正式機驗證</strong>。</td></tr>
+<tr><td><strong>無實測</strong></td><td>⑬策略層（N 個策略並行）沒有任何實測資料——「多樣性從策略池湧現」是推論。</td></tr>
+<tr><td><strong>後端假設</strong></td><td>⑲最終一致的後端（S3）：<code>db.refresh</code>、<code>inflight()</code>、<code>Batch.results</code> 都處理了「列到但讀不到」，
+    但 <code>report</code>、<code>profiles()</code> 的列舉呼叫端<strong>還沒逐一審過</strong>。
+    ⑳<code>memory://</code> 只存在本行程。</td></tr>
+<tr><td><strong>儀器與 MCP 安全</strong></td><td>㉑急停沒有簽章；abort 最多晚 5 s；三次急停落在同一筆會三振它。
+    ㉒儀器租約是<strong>行程內</strong>的，跨機看不到；<code>offline</code> 分不出「儀器行程死了」與「NAS 斷線」。
+    ㉔MCP token 一把鑰匙開整個機隊、明文 HTTP。㉕<code>device_abort</code>／<code>device_estop</code> 沒有 nonce（冪等、無害）。</td></tr>
+</table>
+
+<!-- ══════════════ 16 ══════════════ -->
+<h2 id="sec-15-7">15.7　2026-09-07 全面檢查（M12–M16 之後，只檢查、未修）</h2>
+<p>第二輪落地後做了一次六面向的獨立審查（Depot 與資料層／佇列與 runtime 狀態機／儀器層／MCP 與 CLI／文件對帳／測試品質），
+每條發現由彙整者用審查員留下的重現腳本或原始碼位置逐條查證後才收錄；完整清單在 <code>docs/review-2026-09-07.md</code>（commit <code>cfd80e7</code>）。
+去重後 <strong>1 條 S1、24 條 S2、20 條 S3</strong>；本報告其他章節描述的是設計與現行行為，下列問題在修正前仍然存在。</p>
+<table>
+<tr><th style="width:9em">嚴重度</th><th>重點（編號＝檢查報告條目）</th></tr>
+<tr><td>S1</td><td>#1 儀器租約「同 owner 可重入」而 <code>by</code> 有預設值：兩筆 <code>device_simulate</code> 都不帶 <code>by</code> 就同時拿到儀器，先跑完的把對方的模擬器關掉、租約放掉——同機兩個 HFSS session（11.4 的「同機只能一個使用者」在這個路徑上不成立）。</td></tr>
+<tr><td>S2（協調）</td><td>#2 <code>abandon</code> 的守門被 <code>.fail</code> 遮蔽，會把別台正在量的批標 done、量測丟失；#5 心跳一次讀不到鎖檔就永久 <code>lock_lost</code>；#6 急停落在 open 之前被當機器故障寫進 <code>.fail</code>；#7 worker 主迴圈與 tick 對 depot 例外沒有故障邊界。</td></tr>
+<tr><td>S2（資料／研究）</td><td>#3 公證重測被 <code>report</code> 當成獨立 blind 樣本，P(勝 blind) 與 k_min 閘被汙染（實測 0.52 → 0.47）；#4 一個壞 <code>.npz</code> 讓 runtime 起不來；#11 策略拿到的 <code>View</code> 反手可寫、未綁 profile（D7 在實作上未成立）；#12 <code>check_prefix</code> 不擋 <code>..</code>。</td></tr>
+<tr><td>S2（儀器／MCP）</td><td>#8 doctor 探針只綁 pid（殘留永久擋住 <code>open()</code>、同行程並發互相誤報）；#9 confirm token 同窗同值，同一件事十分鐘內做不了第二次；#13 MCP 埠被佔時 daemon thread 靜默死亡但 url 已宣告；#14 <code>EMFORGE_MCP_PORT</code> 空字串讓每個命令 traceback；#15–#19 <code>--once</code> 急停不返回、limits.json 不驗型別、<code>_restart</code> 的 kill 打空、<code>close()</code> 無處決線、磁碟守門量錯碟。</td></tr>
+<tr><td>S2（部署）</td><td>#10 <code>deploy.md</code> 把 <code>EMFORGE_ROOT</code> 設在 NAS，「本機層」急停與 <code>limits.json</code> 其實三台共用，NAS 斷線時三層急停 fail-open（11.5 表中 local 層的「NAS 斷線也擋得住」在該部署下不成立）；#20 機器 tag 靠路由探測、VPN／DHCP 會換身分；#21 <code>device-estop --tag --local</code> 同給時靜默忽略 tag。</td></tr>
+<tr><td>S2（測試）</td><td>#22 正式路徑 <code>propose_in_subprocess(depot=…)</code> 零覆蓋；#23 測試耦合 ansysedt 是否在跑（正式機上 31 條會紅、1 條掛死；也是 M16 那次未重現 flake 的最可能來源）；#24 一條測試沒有終止上限；#25 conftest 沒 pop <code>EMFORGE_DEPOT</code>。</td></tr>
+<tr><td>S3</td><td>20 條：MemoryDepot 與 FileDepot 的三處語義分歧、註冊表永不釋放、<code>file://host/share</code> 被當相對路徑、<code>fs.py</code> 死碼、榜的無鎖讀改寫、<code>estop_cleared</code> 的 scope 永遠 None、401 呈現成 ExceptionGroup、文件與 docstring 過期等。</td></tr>
+</table>
+<p>檢查也確認了幾件本報告依賴的性質確實成立：<code>Queue.pick</code> 的三種接管競賽都動不到新鮮 claim、bearer 中介層對所有路徑全 401、39 個事件名與文件雙向一致、契約測試對 <code>base.py</code> 每個 public 方法都有覆蓋、0.3 s 門檻的計時型測試 20 次零翻。建議的修復順序（P0–P3）在檢查報告文末。</p>
+
+<h1 id="sec-16">16　部署</h1>
+
+<h2>16.1　三台正式機</h2>
+<p>
+機器 tag ＝ IP 末段（<code>emforge/netid.py</code>；釘選比對<strong>完全相等</strong>——舊系統曾因「末段 vs 完整 IP」比對錯而全機略過）。
+三台的「個性」來自舊系統的資料工廠期實測（<code>Antenna/docs/memory/project_machine_profiles.md</code>，2026-07-15，R21 batch4，每台 50 筆）：
+</p>
+<table>
+<tr><th style="width:10%">tag</th><th style="width:20%">中位一筆</th><th style="width:14%">利用率</th><th>個性與派工含義</th></tr>
+<tr><td><strong>216</strong></td><td>135 s</td><td>99%</td><td><strong>最穩</strong>（唯一全程零當機）→ <code>deploy.md</code> 指定它當第一台切換的機器。
+    ⚠ 同一份檔案的 2026-07-14 更新記錄它曾同日三連掛（COM 例外 <code>0x80070223</code>），所以「最穩」是相對的。</td></tr>
+<tr><td><strong>218</strong></td><td><strong>116 s</strong>（最快）</td><td>59%</td><td>HFSS 行程死亡型當機（<code>RPC_S_CALL_FAILED</code>／watchdog timeout）——殺透重開可治理。
+    <code>worker/guard.py</code> 的 <code>#!</code> 註解直接記著「開啟／重開也會卡死（218，2026-07-11）」。</td></tr>
+<tr><td><strong>37</strong></td><td>173 s（218 的 1.5 倍）</td><td>66%</td><td>COM 例外型（<code>RPC_E_SERVERFAULT</code>／<code>DISP_E_EXCEPTION</code>，HFSS 內部炸），批次拖尾常客 → 派小批。</td></tr>
+</table>
+<p class="small">
+這三種個性正好對應 emforge 的三層容錯：看門狗（<code>guard.py</code>，對 218 的卡死）、
+保險絲（<code>fuse.py</code>，對 37 的偶發 COM 例外，<code>#!</code> 註解寫「2026-07-15，216 教訓」）、
+以及 <code>.fail</code> 名單＋接管（對整台機器壞掉）。
+</p>
+
+<h2>16.2　環境變數</h2>
+<table class="tight">
+<tr><th style="width:26%">變數</th><th style="width:20%">預設</th><th>意義</th></tr>
+<tr><td><code>EMFORGE_ROOT</code></td><td>（必要）</td><td>本機程式碼／設定根</td></tr>
+<tr><td><code>EMFORGE_DEPOT</code></td><td><code>FileDepot(EMFORGE_ROOT)</code></td><td>共享狀態後端 spec；<strong>正式機刻意不設</strong>＝NAS 上那棵樹</td></tr>
+<tr><td><code>EMFORGE_ANTENNA_REPO</code></td><td>—</td><td>舊 Antenna clone 的根目錄（adapter 用）</td></tr>
+<tr><td><code>EMFORGE_MACHINE</code></td><td>IP 末段</td><td>機器 tag 覆寫</td></tr>
+<tr><td><code>EMFORGE_WORK</code></td><td><code>%LOCALAPPDATA%\emforge\work</code></td><td>worker 本機工作目錄根</td></tr>
+<tr><td><code>EMFORGE_DEVICE_TOKEN</code></td><td>（隨機）</td><td>MCP bearer ＝ 兩段式 confirm 的 secret。三台＋開發機同一個；<strong>不走旗標</strong>（別進 shell 歷史）</td></tr>
+<tr><td><code>EMFORGE_MCP_HOST</code></td><td><code>127.0.0.1</code></td><td>MCP 綁定位址；非 loopback 無 token → 拒起</td></tr>
+<tr><td><code>EMFORGE_MCP_PORT</code></td><td><code>8765</code></td><td>MCP 埠</td></tr>
+<tr><td><code>MPLBACKEND</code></td><td>（adapter 自動設 <code>Agg</code>）</td><td>舊 <code>antenna.losses</code> 會拉 <code>matplotlib.pyplot</code></td></tr>
+</table>
+
+<h2>16.3　切換步驟摘要（<code>docs/deploy.md</code>）</h2>
+<p><strong>原則：任一步驗收不過就停在該步</strong>，其餘機器繼續跑舊系統——不損失整日機時。</p>
+<ol>
+<li><strong>開發機先做</strong>：全套測試綠（含 adapter parity）；在文件裡釘住舊 repo 的 commit sha；
+    用假根（<code>fake_f1</code> profile ＋ <code>register_fakes</code>）跑 20 tick 端到端，中途 taskkill runtime 再起。</li>
+<li><strong>匯入歷史資料</strong>：<code>import-legacy --verify --dry-run</code> 先看 unmapped 清單 → 正式匯入（零 <code>verify_fail</code>）→
+    <code>rescore --spec dual_v2</code>。驗收點：<strong>首任王應該就是舊系統的現任王，分數一致</strong>。</li>
+<li><strong>一台正式機（先 216）</strong>：安裝 → 停舊 worker（確認本機無 claim、<code>tasklist</code> 無 ansysedt）→
+    <code>doctor</code> 必須 0 → <code>smoke</code> 對現任王派一筆重測 → <code>start_worker.cmd</code> → <code>watch</code>。
+    <strong>驗收：同機 <code>response</code> 與舊量測 <code>np.array_equal</code></strong>（同機噪音地板 0.000）、跨機 <code>|Δm| ≤ 0.75</code>、
+    <code>time_s</code> 100–250 s、C 槽剩餘不變。</li>
+<li><strong>儀器層與 MCP（同台做完 §2 再做）</strong>：<code>pip install -e .[mcp]</code>、產 token、
+    <code>setx</code> 三個 MCP 環境變數、開防火牆規則（<code>remoteip=LocalSubnet</code>）、調 <code>limits.json</code>、
+    <code>start_worker.cmd --serve</code>。</li>
+<li><strong>runtime 一夜</strong>：停舊 <code>grind_loop</code>；<code>emforge run</code> <strong>detach</strong>（不掛在 harness 下，I-12）。
+    早上檢查：tick ≥ 8、每策略 n_records &gt; 0、<code>strategy_error</code> 未達 3、<code>profile_tamper</code> 零、
+    有 <code>record_candidate</code> 就有 <code>notarize_*</code> 鏈、<code>report</code> 印得出 P(勝 blind)。</li>
+<li><strong>其餘兩台</strong>：218、37 各重複第 3 步（各釘一筆 smoke）。</li>
+<li><strong>收尾</strong>：記三台 sha、doctor 輸出、smoke 數值；舊 <code>jobs.json</code> 封存；備份流程增列 <code>emforge/</code>。</li>
+</ol>
+
+<h3><code>start_worker.cmd</code>：把 pull 與 restart 綁在一起</h3>
+<pre><code>git -C %REPO% pull --ff-only  ||  exit 1
+emforge doctor --root "%EMFORGE_ROOT%"  ||  exit 4
+emforge worker --root "%EMFORGE_ROOT%" %*        REM 參數原樣透傳；--serve 同行程起 MCP</code></pre>
+<p class="small">
+<strong>「要拉就一定重啟、要重啟就一定拉」</strong>——這是事故 I-10（已犯兩次）的制度性解法。
+腳本本身不能防「沒重啟」，但 <code>worker_ver</code> 蓋在每一筆結果上，
+加上 <code>report</code> 對同一批出現兩種版本會警告，事後至少看得見。
+</p>
+
+<h2>16.4　儀器層／MCP 驗收清單（<code>docs/deploy.md §6</code>）</h2>
+<p>216 先做；每步照抄，任一步不過就停在該步：</p>
+<ol>
+<li><strong>機隊看得到</strong>：<code>emforge fleet</code> → <code>216 idle</code>、<code>url</code> 非空、estop 空。</li>
+<li><strong>說明檔</strong>：<code>device-describe 216</code> → profile 表含 <code>dual_p01_db075</code>、限制來源是 <code>limits.json</code> 的路徑、體檢「阻擋：無」。</li>
+<li><strong>同機 bit 級</strong>（＝「同一儀器」的實證）：把現任王的 bits 存成檔 → <code>device-simulate</code> 兩段式跑一筆 →
+    <code>devices/216/adhoc/…</code> 的 <code>response</code> 與 db 那筆 <code>np.array_equal</code>；<code>time_s</code> 100–250；
+    <strong>db 沒多一筆</strong>（<code>report</code> 筆數不變）。</li>
+<li><strong>忙碌拒絕</strong>：worker 正在跑批時再下 <code>device-simulate --confirm</code> → stderr <code>device_busy: …</code>、exit 1；
+    批照跑、<strong>同一個 token 稍後還能用</strong>（＝驗證「被拒不燒 token」）。</li>
+<li><strong>急停</strong>：<code>device-estop engage --tag 216</code> → worker log 出現 <code>job_yield reason=estop_engaged</code>
+    （正在跑的那筆 ≤ 5 s 內被殺、記 error）、<code>fleet</code> 顯示 estop <code>device</code>、<code>device-simulate</code> 回 <code>estop_engaged</code>。</li>
+<li><strong>解除只能 CLI</strong>：AI 端叫 <code>device_estop</code>（engage）可以、<strong>找不到任何 clear tool</strong>；
+    <code>device-estop clear --confirm</code> → <code>fleet</code> 回 idle、worker 下一輪重新撿、裝置日誌有 <code>estop_cleared</code>。</li>
+<li><strong>從 MCP 停／續 worker</strong>：<code>device_stop_worker</code>（兩段式）→ <code>queue/STOP.216</code> 出現、
+    worker 跑完當前 job 收工；<code>device_resume_worker</code> 刪檔；重啟。</li>
+<li><strong>記錄</strong>：三台 sha、token 輪替日期、每台 <code>limits.json</code>、第 3 步的比對結果與 <code>time_s</code>。</li>
+</ol>
+<div class="warn">
+<strong>這份清單尚未執行。</strong>（<code>docs/implementation.md §14</code>）第 3 步的 <code>np.array_equal</code>
+是整份驗收裡最關鍵的一條——它同時驗證了「adapter 沒改變量測」「新舊系統跑的是同一個儀器」「MCP 路徑與批次路徑等價」三件事。
+</div>
+
+<!-- ══════════════ 17 ══════════════ -->
+<h1 id="sec-17">17　與舊系統 Antenna 的關係</h1>
+
+<h2>17.1　三個接點，僅此而已</h2>
+<table>
+<tr><th style="width:20%">接點</th><th style="width:26%">方向</th><th>性質</th></tr>
+<tr><td><code>adapters/antenna/</code></td><td>emforge → 舊 repo（<code>import</code>）</td>
+    <td>執行期綁定，靠 <code>EMFORGE_ANTENNA_REPO</code>。<strong>只在正式機需要</strong>——開發機不裝 torch 也能跑 runtime 與全部核心測試。</td></tr>
+<tr><td><code>legacy/antenna_import.py</code></td><td>舊 NAS 樹 → emforge db（一次性）</td>
+    <td><strong>只讀舊樹</strong>；重跑靠 <code>_imported.json</code> 的 store 簽名跳過未變的。</td></tr>
+<tr><td>凍結的量測尺</td><td>舊 <code>antenna/losses.py</code> → vendored numpy 版</td>
+    <td>複製一次、之後不再同步；由 500 筆逐位元 parity 測試守住。</td></tr>
+</table>
+<p>
+除此之外沒有共用程式碼、沒有共用資料格式、沒有共用設定檔。兩個 repo 各自 git、各自測試、各自部署。
+</p>
+
+<h2>17.2　<code>import-legacy</code>：歷史資料怎麼進來</h2>
+<h3>舊樹的形狀</h3>
+<pre><code>&lt;DATASET_PATH&gt;/
+  &lt;store&gt;_input/manifest.json          一批的清單（每項有 id、port、kind、arm、seed、parent…）
+  &lt;store&gt;_input/&lt;legacy_id&gt;.pt         該筆的 pattern（float32 25×25）
+  &lt;store&gt;/results.json                 legacy_id → {wm: [...], geom, time_s, error…}
+  &lt;store&gt;/&lt;sha&gt;.pt                     SampleStore 的 (x, y) tuple，**內容 hash 命名**——無法從 id 反推
+  &lt;store&gt;/hfss_setup.json              這批的求解設定
+  &lt;store&gt;/rad/&lt;legacy_id&gt;.pt           方向圖（single）
+  jobs_state/&lt;store&gt;.done              誰跑的
+  harvest_*/                           只有 tuple 檔，沒有 manifest</code></pre>
+
+<h3>四條規則</h3>
+<table>
+<tr><th style="width:24%">規則</th><th>內容</th></tr>
+<tr><td><strong>profile 自動映射</strong></td>
+    <td>看 <code>hfss_setup.json</code>：把「值等於預設」的求解鍵先扣掉（舊 store 常把預設明寫出來），
+    剩下的若還有<strong>幾何／網格變體</strong>（<code>slot_spec</code>、<code>pixel_count ≠ 25</code>…）就<strong>不映射</strong>——
+    沿用舊規則「永不入鍋」。dual 另外檢查 store 內 <code>geom</code> 是否一致。
+    映射不到的印 <code>✗ unmapped: 原因</code>，可用 <code>--map store=profile</code> 強制。</td></tr>
+<tr><td><strong>pattern-bytes join</strong></td>
+    <td>舊 tuple 檔用內容 hash 命名，沒辦法從 legacy id 找到它。做法是把 <code>&lt;store&gt;/*.pt</code>
+    全部載入、以 <code>packbits(x).tobytes()</code> 建索引，再用 <code>&lt;store&gt;_input/&lt;id&gt;.pt</code> 的 pattern 去查。
+    同一個 pattern 有多筆量測時，用舊 <code>results.json</code> 的 <code>wm</code> 欄（2 位小數）比對挑對的那一筆。</td></tr>
+<tr><td><strong>量測重算，不抄舊值</strong></td>
+    <td>所有 <code>measure</code>／<code>score</code> 都用<strong>新</strong>的凍結尺重算。
+    <code>--verify</code> 把重算結果與舊 <code>wm</code> 欄比對（容差 0.006 ＝ 2 位小數），
+    <strong>零 <code>verify_fail</code> 才算「新尺 ＝ 舊尺」的實證</strong>；有不符 → exit 2。</td></tr>
+<tr><td><strong>可重跑</strong></td>
+    <td><code>db/&lt;profile&gt;/_imported.json</code> 記每個 store 的簽名（<code>results.json</code> 的 mtime ＋ <code>.pt</code> 檔數）；
+    未變的 store 直接 skip。<code>--force</code> 忽略簽名，<code>--dry-run</code> 只印計畫。</td></tr>
+</table>
+<p class="small">
+匯入的紀錄 <code>strategy</code> 欄填 <code>legacy:&lt;store&gt;</code>、<code>worker_ver</code> 填 <code>"legacy"</code>，
+原始的 manifest 與 results entry 整份放進 <code>note.legacy</code>——所以任何一筆都能追回舊系統的來源。
+error 列預設跳過（<code>--include-errors</code> 才收）；方向圖進 <code>Record.extra["radiation"]</code>（<code>--no-rad</code> 可略）。
+</p>
+
+<h2>17.3　資料雙軌與滾動升級</h2>
+<p>
+切換期間兩套系統的狀態<strong>完全不相交</strong>：
+</p>
+<table class="tight">
+<tr><th style="width:16%"></th><th style="width:40%">舊系統 Antenna</th><th>emforge</th></tr>
+<tr><td>佇列</td><td><code>jobs.json</code> ＋ <code>jobs_state/</code>（舊格式）</td><td><code>queue/jobs.json</code> ＋ <code>queue/state/</code></td></tr>
+<tr><td>資料</td><td><code>&lt;store&gt;/results.json</code> ＋ tuple <code>.pt</code></td><td><code>db/&lt;profile&gt;/&lt;id&gt;-&lt;store&gt;.npz</code></td></tr>
+<tr><td>紀錄</td><td><code>docs/records.json</code>／<code>records_dual.json</code></td><td><code>ledger/&lt;profile&gt;/&lt;spec&gt;.json</code></td></tr>
+<tr><td>停機</td><td><code>jobs_state/STOP</code>、<code>tmp/grind_loop.STOP</code></td><td><code>queue/STOP[.&lt;tag&gt;]</code>、<code>runtime_state/&lt;p&gt;/STOP</code></td></tr>
+<tr><td>worker</td><td><code>python -m script.dedust worker</code></td><td><code>emforge worker</code>（或 <code>start_worker.cmd</code>）</td></tr>
+</table>
+<p>
+所以切換是<strong>逐台的</strong>，而且<strong>回滾是一個動作</strong>：
+<code>emforge stop --worker --machine-tag 216</code> → 刪舊 <code>jobs_state/STOP</code> → 桌面重啟舊 worker。
+舊佇列、舊資料全未動（<code>docs/deploy.md §2</code>「回滾」）。
+</p>
+
+<h2>17.4　哪些舊功能刻意沒帶</h2>
+<table>
+<tr><th style="width:20%">功能</th><th style="width:22%">狀態</th><th>理由</th></tr>
+<tr><td><code>deliver</code>（交付打包）</td><td><strong>未實作</strong></td>
+    <td><code>Job</code> 保留 <code>origin</code> 欄與「未知鍵原樣帶著走」的機制，之後要做時不必改契約。
+    決定記在 <code>docs/implementation.md §13</code>：「Ricky：之後實作方要模擬檔時再整理」。</td></tr>
+<tr><td><code>keep_project</code></td><td><strong>刻意不進契約</strong>（D10）</td>
+    <td>它是交付動作不是儀器屬性；放進 Profile／Proposal 等於讓策略能開它 → 重演磁碟塞爆（I-1）。
+    舊系統 2026-08-31 為了保留模擬檔加了這個 opt-in，代價是那些目錄不被自動清、必須人工清。</td></tr>
+<tr><td>rollback（退回舊生成器）</td><td>emforge <strong>沒有對應概念</strong></td>
+    <td>這個機制在<strong>舊 repo 內部</strong>就已於 2026-06-28 移除（三條理由記在 <code>Antenna/antenna/training.py</code>
+    與 <code>Antenna/CLAUDE.md</code>：貪婪規則卡第一個山頭／退回舊 G 配當下變動的代理模型本質矛盾／
+    原實作有 off-by-one 與覆蓋最佳檔兩個 bug、實際近乎 no-op）。emforge 從來沒有「模型狀態」這個概念，
+    最佳解永遠在資料庫與榜裡，所以這個問題在新架構下不存在。<br>
+    <span class="small">（本段的舊系統事實引自 Antenna repo 的文件，不在 emforge repo 內。）</span></td></tr>
+<tr><td>類 GAN 訓練迴圈、代理模型、線上學習</td><td><strong>不在平台裡</strong></td>
+    <td>這些是<strong>策略</strong>，不是平台。舊系統的 <code>smpool</code>（代理模型排序）預計移植成
+    <code>strategies/sm_rank.py</code>，還沒做（<code>docs/implementation.md §14</code>）。</td></tr>
+<tr><td>TensorBoard 監控、<code>app.py</code> 視覺化</td><td>不在平台裡</td>
+    <td>emforge 的可觀測性是 <code>status.json</code> ＋ <code>events.jsonl</code> ＋ <code>report</code> ＋ <code>fleet</code>——
+    純文字、可被任何 harness 消費。（本報告推論：這與「操作＝改檔＋跑命令」的設計一致。）</td></tr>
+</table>
+
+<!-- ══════════════ 18 ══════════════ -->
+<h1 id="sec-18">18　未完成與待決</h1>
+
+<h2>18.1　尚未在真環境驗證的四件事</h2>
+<table>
+<tr><th style="width:28%">項目</th><th>狀況</th></tr>
+<tr><td><strong>三台正式機的切換</strong></td>
+    <td><code>docs/deploy.md §2</code> 全部尚未執行。關鍵驗收點是 <code>smoke</code> 同機 bit 級比對現任王
+    （<code>smp073_d_040</code>）——「同一儀器」的實證。</td></tr>
+<tr><td><strong>儀器層／MCP 的正式機驗收</strong></td>
+    <td><code>deploy.md §6</code> 八步尚未執行。<strong>所有 MCP 測試都是 in-memory</strong>
+    （SDK <code>Client</code> ＋ <code>ASGITransport</code>）；<strong>真 socket ＋ 真 HFSS ＋ 非主執行緒 COM</strong>
+    三件事都要在 216 上第一次見真章（§12-27）。</td></tr>
+<tr><td><strong><code>import-legacy --verify</code> 對真實 NAS 樹</strong></td>
+    <td>本機只跑過合成迷你樹；六萬筆的真實樹還沒跑過。</td></tr>
+<tr><td><strong>策略層（N 個策略並行）</strong></td>
+    <td>沒有任何實測資料。舊專案只跑過「一條批次線 ＋ 一條背景填充 ＋ 一條無人值守迴圈」，
+    從沒跑過 N 個獨立策略並行。「多樣性從策略池湧現」是<strong>推論</strong>，是路線圖裡要最早驗證的一層。</td></tr>
+</table>
+
+<h2>18.2　已知的功能缺口</h2>
+<ul>
+<li><strong><code>worker_ver</code> 拼進 antenna sha</strong>——<code>_bind.antenna_sha()</code> 已經寫好但還沒接進去。
+    目前 <code>worker_ver</code> 只含 emforge 的 sha，所以「adapter 換版本」看不出來。</li>
+<li><strong><code>doctor --hfss</code> 的 COM 連線探測</strong>——旗標存在但目前只印一行「留給 adapter」。</li>
+<li><strong><code>notarize_min_score</code></strong>——冷啟動時資料庫空、榜空，每個「新最好」都會觸發重測，
+    前幾 tick 的重測比例偏高。加一個「低於這個分數不值得公證」的門檻可以解，還沒做。</li>
+<li><strong>代理模型排序策略</strong>（舊 <code>smpool</code> → <code>strategies/sm_rank.py</code>）——還沒移植。</li>
+<li><strong><code>deliver</code></strong>——見 17.4。</li>
+</ul>
+
+<h2>18.3　三個沒被這次實作改變狀態的問號</h2>
+<p><code>docs/architecture.md §12</code> 標了三個 <code>❓</code>，這份實作<strong>沒有</strong>改變它們：</p>
+<ol>
+<li><strong>策略層沒有實作驗證</strong>——見 18.1。</li>
+<li><strong>「換一個模型／harness 接手會得到同一份帳」未經對照實驗</strong>。整個 AI 層的分工建立在
+「判定已下沉到程式」之上，而這是設計意圖不是實驗結果。這件事半天可驗、零機時。</li>
+<li><strong>冷啟動沒有解，只有架構上的緩解</strong>。代理模型在完全沒見過的域選批比亂猜還差
+（舊專案 P(勝隨機) 21–26%）。本設計靠「策略庫常駐 blind 策略」讓新域自然有打底，
+但「多少樣本後模型才能上崗」<strong>沒有數字</strong>。</li>
+</ol>
+<p class="small">
+另外，架構文件本身也聲明：<strong>所有具體數字都來自單一問題域</strong>（毫米波像素化天線／濾波器）。
+配額比例、門檻、樣本數、噪音地板——跨域全部要重調。文件刻意不寫任何數值當預設。
+</p>
+
+<h2>18.4　未來後端（S3／SQL）要做的事</h2>
+<p>Depot 介面已經按「三種後端的最小共同集合」設計（6.1），所以要加一個新後端，工作是：</p>
+<ol>
+<li><strong>實作 <code>Depot</code> 的 17 個抽象方法</strong>（<code>put_bytes</code>／<code>get_bytes</code>／<code>delete</code>／<code>exists</code>／
+    <code>list</code>／<code>modified_at</code>／<code>set_modified_at</code>／<code>append</code>／<code>read_log</code>／<code>rewrite_log</code>／
+    <code>claim</code>／<code>owner</code>／<code>touch</code>／<code>release</code>／<code>break_if_stale</code>／<code>ensure_prefixes</code>／<code>selfcheck</code>）。
+    <code>put_json</code>／<code>require_*</code>／<code>newest</code>／<code>is_stale</code>／<code>lock</code> 是衍生的，不用重寫。</li>
+<li><strong>在 <code>depot/uri.py::open_depot</code> 註冊 scheme</strong>。</li>
+<li><strong>把後端加進契約測試的 fixture params</strong>，36 條全綠。</li>
+<li>把新模組登記進 <code>tests/test_smoke.py</code> 的 <code>LOCAL_LAYER</code>（後端本體本來就認得它的儲存層）。</li>
+</ol>
+<p>已知需要特別處理的兩件事：</p>
+<ul>
+<li><strong>log 語義</strong>：S3 沒有 append。單寫者的日誌在物件儲存上要改成「一寫者一物件」或
+    「每筆一個物件 ＋ 讀時合併」。介面沒有規定實作方式，但 <code>read_log</code> 的順序保證要維持。</li>
+<li><strong>最終一致的 <code>list</code></strong>：<code>db.refresh</code>、<code>Runtime.inflight</code>、<code>Batch.results</code>
+    已經處理了「列到但讀不到」與「列舉回空而索引非空」；但 <code>report</code>、<code>Database.profiles()</code>
+    等其餘列舉呼叫端<strong>還沒逐一審過</strong>（§12-19）。這是換 S3 之前必須補的功課。</li>
+</ul>
+
+<!-- ══════════════ 附錄 A ══════════════ -->
+<h1 id="sec-a">附錄 A　術語表</h1>
+<table class="tight">
+<tr><th style="width:22%">術語</th><th style="width:20%">英文／識別字</th><th>意義</th></tr>
+<tr><td>候選</td><td>candidate / proposal</td><td>一個待評估的設計，＝一個 <code>bool[H,W]</code> 遮罩</td></tr>
+<tr><td>批</td><td>batch / store</td><td>一次派出去的一組候選；<code>store</code> 是它的名字，也是磁碟上的目錄名</td></tr>
+<tr><td>儀器</td><td>Profile / Instrument</td><td><code>Profile</code>＝「一種模擬」的完整定義（幾何、網格、掃頻、尺）；<code>Instrument</code>＝一台正式機上的模擬器實體</td></tr>
+<tr><td>世代</td><td>era ≡ sim_profile</td><td>換了幾何底板之後，舊資料<strong>不是變錯，是變不可比</strong>。era 就是 profile 名（D6）</td></tr>
+<tr><td>量測尺</td><td>measure</td><td>原始響應 → 軸值 dict。<strong>凍結</strong>：改口徑＝註冊新名字</td></tr>
+<tr><td>評估器</td><td>spec</td><td>軸值 → 一個分數。<strong>可換</strong>：換 spec ＝ 新榜，零重量</td></tr>
+<tr><td>分數</td><td>score</td><td><code>min(measure[axis] + offset)</code>；導出值，可被 <code>rescore</code> 重算</td></tr>
+<tr><td>保守值</td><td>conservative</td><td>同一個設計多次量測取 <code>min</code>——榜與 <code>top()</code> 都用它</td></tr>
+<tr><td>榜</td><td>ledger</td><td><code>(profile, spec)</code> 的紀錄檔。<strong>只能經 <code>promote</code>／<code>rescore</code> 寫</strong></td></tr>
+<tr><td>換王</td><td>promote</td><td>把一個候選立為榜首。<strong>只有人或 AI 能做</strong>——迴圈不自己加冕</td></tr>
+<tr><td>公證</td><td>notarize</td><td>破榜候選自動重測 ×N，一致才寫 <code>pending</code>（<strong>不改榜</strong>）</td></tr>
+<tr><td>待審</td><td>pending</td><td>公證通過、等人裁決的候選清單。<strong>不是榜</strong></td></tr>
+<tr><td>噪音地板</td><td>noise_floor</td><td>同一設計多次量測的分數散布，小於它才算「一致」</td></tr>
+<tr><td>對照臂</td><td>arm="blind"</td><td>零演算法對照組。沒有它就說不出「策略 X 比較好」（D8）</td></tr>
+<tr><td>派出未回</td><td>inflight</td><td>已派工但結果還沒收齊的批。派工與登記 inflight 是<strong>同一個動作</strong>（I-13）</td></tr>
+<tr><td>認領</td><td>claim</td><td>worker 對一批的租約。互斥建立、心跳續約、過期可被接管</td></tr>
+<tr><td>租約</td><td>lease</td><td>Depot 的四種語義之一：claim ＋ touch ＋ break_if_stale ＋ release</td></tr>
+<tr><td>倉庫／後端</td><td>Depot</td><td>共享協調狀態的後端無關介面。<code>FileDepot</code>／<code>MemoryDepot</code>（未來 S3／SQL）</td></tr>
+<tr><td>守門</td><td>gate</td><td>開模擬器<strong>之前</strong>的一致性檢查（profile／hash／geom_ver／labels）</td></tr>
+<tr><td>看門狗／處決線</td><td>watchdog / guard</td><td>逾時就 <code>kill()</code>——因為 COM 呼叫可以「無例外地永遠不回來」</td></tr>
+<tr><td>保險絲</td><td>fuse</td><td>連敗 → 冷卻重開 → 循環用盡才判死；<strong>成功一筆就歸零</strong></td></tr>
+<tr><td>毒樣本</td><td>poison sample</td><td>連續 3 次（<code>MAX_ATTEMPTS</code>）都錯的那一筆，之後不再重試，留給人判</td></tr>
+<tr><td>讓位</td><td>yield</td><td>放掉 claim 讓別台接（claim 被搶／前景 job 出現／急停／儀器被占）</td></tr>
+<tr><td>急停</td><td>e-stop</td><td>三層（全機／單機／本機）；<strong>解除只能 CLI</strong></td></tr>
+<tr><td>機隊</td><td>fleet</td><td>所有儀器的狀態字典集合；<code>offline</code> 由讀者用心跳年齡推導</td></tr>
+<tr><td>兩段式確認</td><td>two-step confirm</td><td>先拿 token（含預覽）、再帶 token 執行；token 綁操作與對象、10 分鐘窗、單次使用</td></tr>
+<tr><td>事故疤</td><td><code>#!</code> 註解</td><td>「刪掉或搬動這行，產線會再壞一次」——附日期／事故編號</td></tr>
+<tr><td>設計理由</td><td><code>#?</code> 註解</td><td>「誰決定、為什麼」——可以重新決定</td></tr>
+</table>
+
+<!-- ══════════════ 附錄 B ══════════════ -->
+<h1 id="sec-b">附錄 B　里程碑與 commit</h1>
+<p>
+29 個 commit，三個工作日（第 29 個是 2026-09-07 的全面檢查報告）。里程碑編號 M0–M16 出現在程式碼與文件的註解裡；
+其中 <strong>M12（Depot）、M13–M14（儀器層）、M15（MCP server）、M16（正式機準備）</strong>
+在文件中有明確對應。2026-09-01 的 15 個 commit 對應 M0–M11，但文件只點名 M11
+（＝架構偏差回寫），<strong>其餘的逐一對應本報告未能從文件確認</strong>，故下表只列 commit 本身。
+</p>
+<table class="tight">
+<tr><th style="width:6%">#</th><th style="width:10%">sha</th><th style="width:11%">日期</th><th style="width:10%">里程碑</th><th>內容</th></tr>
+<tr><td>1</td><td><code>0139e40</code></td><td>2026-09-01</td><td rowspan="15">M0–M11</td><td>chore: 專案骨架、CI 與命名規範</td></tr>
+<tr><td>2</td><td><code>584da96</code></td><td>2026-09-01</td><td>feat: 檔案系統協調原語（原子寫入、認領、陳舊判定、鎖）</td></tr>
+<tr><td>3</td><td><code>b9714ac</code></td><td>2026-09-01</td><td>fix: fs 認領容忍 Windows delete-pending；執行緒例外一律當測試失敗</td></tr>
+<tr><td>4</td><td><code>b66c4a9</code></td><td>2026-09-01</td><td>feat: 契約資料類別與一筆一檔資料庫（增量索引、唯讀 View）</td></tr>
+<tr><td>5</td><td><code>ac21782</code></td><td>2026-09-01</td><td>feat: 評估器與 profile 註冊表（append-only、GEOM_VER 比對）與 FakeSimulator</td></tr>
+<tr><td>6</td><td><code>bfa6de9</code></td><td>2026-09-01</td><td>feat: 策略載入、Proposal 驗證、子行程 propose 與內建 blind／top_k_flip</td></tr>
+<tr><td>7</td><td><code>9e19f68</code></td><td>2026-09-01</td><td>feat: 事件白名單、共用佇列與批次檔 IO（逐筆結果檔）</td></tr>
+<tr><td>8</td><td><code>7669c39</code></td><td>2026-09-01</td><td>feat: worker 子套件（守門、看門狗、保險絲、工作目錄、批次迴圈、主迴圈）</td></tr>
+<tr><td>9</td><td><code>e77c2ef</code></td><td>2026-09-01</td><td>feat: runtime 子套件（單例鎖、對帳、派工含去重、收結果入庫、排程、公證、策略暫停）</td></tr>
+<tr><td>10</td><td><code>5e74c15</code></td><td>2026-09-01</td><td>feat: 榜（checksum、promote 唯一寫路徑、history append-only）、待審、rescore 與每策略報表</td></tr>
+<tr><td>11</td><td><code>5b2a549</code></td><td>2026-09-01</td><td>feat: emforge 命令列（16 個子命令）</td></tr>
+<tr><td>12</td><td><code>d67e5f9</code></td><td>2026-09-01</td><td>feat: antenna 轉接層（HFSS 包裝、凍結量測尺與 parity、dual_p01_db075／single_db100）</td></tr>
+<tr><td>13</td><td><code>783efb3</code></td><td>2026-09-01</td><td>feat: 舊 NAS 資料匯入（profile 自動映射、pattern-bytes join、--verify）</td></tr>
+<tr><td>14</td><td><code>9fe48a5</code></td><td>2026-09-01</td><td>test: 端到端（雙策略、中途重啟續收、核心不 import torch、雙實例讀可寫不可）</td></tr>
+<tr><td>15</td><td><code>0e0421f</code></td><td>2026-09-01</td><td>docs: implementation.md／deploy.md／README；architecture.md 回寫偏差</td></tr>
+
+<tr><td>16</td><td><code>917fb98</code></td><td>2026-09-05</td><td rowspan="5">審查修正<br>（review 1–10）</td><td>fix: 收結果的終態語義（review 1、2、8）＋新增 <code>abandon</code></td></tr>
+<tr><td>17</td><td><code>e90440c</code></td><td>2026-09-05</td><td>fix: tick 落地與派工防呆（review 3、4、7）＋背景心跳</td></tr>
+<tr><td>18</td><td><code>2ca0b5c</code></td><td>2026-09-05</td><td>fix: fs／queue／worker 容錯（review 5、6、10）＋毒樣本三振、claim 心跳</td></tr>
+<tr><td>19</td><td><code>615c681</code></td><td>2026-09-05</td><td>fix: adapter 被殺後不叫舊 end、promote 依本榜 spec 重算、公證門檻走 checksum（review 9 ＋砍掉的四條）</td></tr>
+<tr><td>20</td><td><code>4cb9c5b</code></td><td>2026-09-05</td><td>docs: implementation.md 同步審查修正；naming.md 例外清單</td></tr>
+
+<tr><td>21</td><td><code>8f78083</code></td><td>2026-09-06</td><td rowspan="4">M12<br>（a–d）</td><td>feat: Depot 介面（FileDepot／MemoryDepot）與契約測試</td></tr>
+<tr><td>22</td><td><code>0ed6b5c</code></td><td>2026-09-06</td><td>refactor: paths 回傳 key；db／batches／ledger／events／report 改走 Depot</td></tr>
+<tr><td>23</td><td><code>e47b9c3</code></td><td>2026-09-06</td><td>refactor: 佇列與鎖改走 Depot 租約</td></tr>
+<tr><td>24</td><td><code>cf5c97a</code></td><td>2026-09-06</td><td>refactor: runtime／worker／CLI／doctor／匯入器改走 Depot；<code>EMFORGE_DEPOT</code> 與 <code>--root</code> 分工</td></tr>
+
+<tr><td>25</td><td><code>45e25b4</code></td><td>2026-09-06</td><td>M13</td><td>feat: 儀器層——Instrument 狀態機／租約／e-stop／前置檢查，worker 改經儀器跑批</td></tr>
+<tr><td>26</td><td><code>2a1ba38</code></td><td>2026-09-06</td><td>M14</td><td>feat: 機隊狀態字典、儀器說明檔與 <code>emforge fleet</code> 儀表板</td></tr>
+<tr><td>27</td><td><code>04fe3fd</code></td><td>2026-09-06</td><td>M15</td><td>feat: 每台儀器的 MCP server（streamable HTTP、共享 token、兩段式 confirm）</td></tr>
+<tr><td>28</td><td><code>63260ca</code></td><td>2026-09-06</td><td>M16</td><td>feat: 正式機準備——COM apartment、<code>device-simulate</code> 客戶端、<code>start_worker --serve</code>、Limits 設定、deploy.md 驗收清單</td></tr>
+<tr><td>29</td><td><code>cfd80e7</code></td><td>2026-09-07</td><td>檢查</td><td>docs: 2026-09-07 全面檢查報告——六面向獨立審查、逐條查證，1 S1／24 S2／20 S3，只檢查未修</td></tr>
+</table>
+
+<h2>接手閱讀順序（建議）</h2>
+<ol>
+<li><code>README.md</code>（5 分鐘）→ <code>CLAUDE.md</code>（工作規範與邊界）</li>
+<li><code>docs/architecture.md</code>——<strong>為什麼</strong>這樣設計（§2 主圖、§3 一個候選的一生、§11 的 D1–D10、§12 的限制）</li>
+<li><code>docs/implementation.md</code>——<strong>現在怎麼做</strong>（§2 模組地圖、§3 磁碟格式、§5 runtime、§6 worker、
+    §12 已知失效模式、§13 與架構的偏差）</li>
+<li><code>docs/incidents.md</code>——<strong>哪裡會爆</strong>（16 個事故；回歸測試的 <code>I-N</code> 指這裡）</li>
+<li>程式碼：<code>emforge/paths.py</code>（命名真相源）→ <code>emforge/model.py</code>（契約）→
+    <code>emforge/depot/base.py</code>（協調原語）→ <code>emforge/runtime/core.py</code>（tick）→
+    <code>emforge/worker/loop.py</code> → <code>emforge/device/instrument.py</code></li>
+<li><code>tests/test_smoke.py</code>——規範的機器版，讀它就知道哪些界線是硬的</li>
+</ol>
+<p class="small" style="margin-top:1.5em; border-top:1px solid #ccc; padding-top:0.6em;">
+本報告依據 emforge repo commit <code>63260ca</code>（2026-09-06）撰寫，另納入 2026-09-07 全面檢查報告（commit <code>cfd80e7</code>）的結論；報告日期 2026-09-07。
+凡與程式碼衝突之處，以程式碼與 <code>tests/</code> 為準。
+</p>
+
+</body>
+</html>
