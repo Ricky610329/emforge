@@ -107,3 +107,15 @@ request_id 冪等、不同內容重用同 id 拒絕。不可變送件在 inbox/<
 重複候選引用相同量測而非消失；收到但尚未派工、部分派工、已派工、完成、拒絕各有狀態。
 已派工但尚未記進度時，由 inflight/Record.note._submission 重建，不另派。
 算法 log 為 algo_logs/<profile>/<run_id>.jsonl（單寫者）；平台不解讀內容。
+
+## 2026-09-08 HTTP 平台
+platform/service.py 是本機 client、HTTP /rpc、後續 MCP 的共同操作層。
+platform-serve --root R --depot D --host 127.0.0.1 --port 8766 啟動。
+非 loopback 需 EMFORGE_PLATFORM_TOKEN；client/HttpDepot 從環境讀 token，不放 URL。
+submit --endpoint URL --profile P --name S --run-id R --patterns X.npz 回 sid；
+inbox --endpoint URL --profile P 顯示全部送件。Python Client(URL, P, S, run_id=R) 介面相同。
+worker 使用 --depot http://host:8766；仍需本機 registry.py 與 HFSS/Python 相依環境。
+HTTP /depot 只接受固定 Depot 原語，/rpc 只接受固定平台操作。token 為受信任機隊的共享鑰匙，
+具有儲存庫讀写能力，不是多租戶權限隔離；跨不可信網路需外接 TLS。
+HTTP 使用標準函式庫，無新增必要套件；網路故障拋錯，不自動重送副作用命令。
+所有 Depot 契約對真 socket HttpDepot 執行；check_prefix 現在與 check_key 同樣拒絕 .. 路徑。

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 ENV_ISOLATED = ("EMFORGE_ROOT", "EMFORGE_DEPOT", "EMFORGE_WORK", "EMFORGE_MACHINE", "EMFORGE_DEVICE_TOKEN",
-                "EMFORGE_MCP_HOST", "EMFORGE_MCP_PORT")
+                "EMFORGE_MCP_HOST", "EMFORGE_MCP_PORT", "EMFORGE_PLATFORM_TOKEN", "EMFORGE_PLATFORM_PORT")
 
 
 def pytest_report_header(config):

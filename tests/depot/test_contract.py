@@ -16,9 +16,16 @@ from emforge import fs
 from emforge.depot import Depot, FileDepot, MemoryDepot, open_depot
 
 
-@pytest.fixture(params=["file", "memory"])
+@pytest.fixture(params=["file", "memory", "http"])
 def depot(request, root) -> Depot:
-    return FileDepot(root) if request.param == "file" else MemoryDepot(name=f"t-{uuid.uuid4().hex[:8]}")
+    if request.param == "http":
+        from emforge.platform.service import Platform
+        from emforge.platform.http_server import serving
+        from emforge.depot.http import HttpDepot
+        with serving(Platform(FileDepot(root))) as url:
+            yield HttpDepot(url)
+    else:
+        yield FileDepot(root) if request.param == "file" else MemoryDepot(name=f"t-{uuid.uuid4().hex[:8]}")
 
 
 # ── 文件 ────────────────────────────────────────────────────────────────────

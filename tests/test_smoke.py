@@ -29,7 +29,9 @@ BANNED_MODULE_STEMS = {"utils", "util", "misc", "helpers", "common", "dedust", "
 #  換後端＝實作一個 `Depot`；只要有一個模組偷偷開檔，那個保證就是假的。
 DEPOT_ONLY_MODULES = (
     "__init__.py", "__main__.py", "specs.py", "netid.py", "events.py", "profiles.py", "heartbeat.py",
-    "client.py", "submissions.py", "runtime/inbox.py",
+    "client.py", "client_view.py", "submissions.py", "runtime/inbox.py",
+    "platform/__init__.py", "platform/service.py", "platform/wire.py",
+    "platform/transport.py", "platform/http_server.py", "cli/platform.py",
     "db.py", "batches.py", "ledger.py", "queue.py", "report.py",
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
     "runtime/schedule.py",
@@ -60,6 +62,7 @@ LOCAL_LAYER = {
     "paths.py": "磁碟名／本機路徑的唯一來源（回 key 與 Path 兩種）",
     "fs.py": "FileDepot 的實作原語＋本機工作目錄清掃",
     "depot/__init__.py": "後端本體", "depot/base.py": "後端本體", "depot/file.py": "後端本體",
+    "depot/http.py": "遠端後端本體",
     "depot/memory.py": "後端本體", "depot/uri.py": "後端本體",
     "doctor.py": "本機體檢：root 探針、C 槽、ansysedt 行程",
     "worker/workdir.py": "本機工作目錄生命週期（I-1 是本機碟事故）",

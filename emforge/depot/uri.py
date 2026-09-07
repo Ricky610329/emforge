@@ -21,6 +21,9 @@ def open_depot(spec) -> Depot:
     if "://" not in spec:
         return FileDepot(spec)
     scheme, _, rest = spec.partition("://")
+    if scheme in ("http", "https"):
+        from .http import HttpDepot
+        return HttpDepot(spec)
     if scheme == "file":
         return FileDepot(_file_root(rest))
     if scheme == "memory":

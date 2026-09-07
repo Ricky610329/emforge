@@ -4,15 +4,15 @@ import uuid
 
 import numpy as np
 
-from . import profiles, submissions
-from .db import Database
-from .depot import open_depot
-from .model import Record
+from .client_view import ClientView, records
+from .platform.service import Platform
+from .platform.transport import RemotePlatform
 
 
 class Client:
-    def __init__(self, depot, profile, name, *, run_id=None, spec=None):
-        self.depot = open_depot(depot)
+    def __init__(self, depot, profile, name, *, run_id=None, spec=None, token=None):
+        self.platform = (RemotePlatform(depot, token=token)
+                         if isinstance(depot, str) and depot.startswith(("http://", "https://")) else Platform(depot))
         self.profile, self.name = profile, name
         self.run_id = run_id or "run_" + uuid.uuid4().hex
         self.spec = spec
@@ -28,20 +28,16 @@ class Client:
             note = dict(notes[i]) if notes is not None else {}
             if preds is not None:
                 note["pred"] = preds[i]
-            items.append(dict(pattern=np.asarray(pattern), parent=parents[i] if parents else None,
+            items.append(dict(pattern=np.asarray(pattern).tolist(), parent=parents[i] if parents else None,
                               tag=tags[i] if tags else None, note=note, run_id=self.run_id))
-        return submissions.submit(self.depot, self.profile, self.name, self.run_id,
-                                  items, request_id, self.spec)
+        return self.platform.call("submit", profile=self.profile, name=self.name, run_id=self.run_id,
+                                  items=items, request_id=request_id, spec=self.spec)
 
-    def _doc(self, sid):
-        from . import paths
-        doc = self.depot.require_json(paths.submission(self.profile, sid))
-        if (doc["name"], doc["run_id"]) != (self.name, self.run_id):
-            raise ValueError("送件不屬於此算法執行")
-        return doc
+    def _identity(self, sid):
+        return dict(profile=self.profile, name=self.name, run_id=self.run_id, sid=sid)
 
     def status(self, sid):
-        return submissions.resolve(self.depot, self._doc(sid))
+        return self.platform.call("submission_status", **self._identity(sid))
 
     def wait(self, sid, *, timeout_s, poll_s=1, until="completed"):
         if timeout_s < 0 or poll_s <= 0:
@@ -59,20 +55,16 @@ class Client:
             time.sleep(min(poll_s, left))
 
     def results(self, sid):
-        return [Record.from_meta(r["meta"], r["bits"], r["response"])
-                for r in submissions.results(self.depot, self._doc(sid))]
+        return records(self.platform.call("submission_results", **self._identity(sid)))
 
     @property
     def db(self):
-        return Database(self.depot).view(self.profile, strategy=self.name)
+        return ClientView(self.platform, self.profile, self.name)
 
     def log(self, event, **fields):
-        from . import paths
-        from .model import now_iso
-        self.depot.append(paths.algo_log(self.profile, self.run_id),
-                          {**fields, "event": event, "at": now_iso()})
+        return self.platform.call("algorithm_log", profile=self.profile, run_id=self.run_id,
+                                  event=event, fields=fields)
 
     @property
     def description(self):
-        p = profiles.get_profile(self.profile)
-        return {"shape": p.shape, "fixed_on": p.fixed_on, "labels": p.labels}
+        return self.platform.call("description", profile=self.profile)

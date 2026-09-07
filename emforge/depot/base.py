@@ -39,6 +39,8 @@ class Depot(ABC):
         """前綴：空字串（根）或以 "/" 結尾。"""
         if not isinstance(prefix, str) or (prefix and not prefix.endswith("/")) or "\\" in prefix or prefix.startswith("/"):
             raise ValueError(f"壞 prefix（要以 / 結尾）：{prefix!r}")
+        if prefix:
+            Depot.check_key(prefix[:-1])
         return prefix
 
     @staticmethod
