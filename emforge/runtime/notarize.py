@@ -56,7 +56,7 @@ def _open_candidates(rt, nz: dict, cfg, new_records: list) -> None:
         try:
             for n in range(1, cfg.repeat_n + 1):
                 store = paths.notarize_store_name(rt.profile_name, rt.state["tick"], rec.id, n)
-                stores.append(dispatch(rt, "notarize", [Proposal(pattern=rec.bits, parent=rec.id, arm=rec.arm)],
+                stores.append(dispatch(rt, "notarize", [Proposal(pattern=rec.bits, parent=rec.id, tag=rec.tag, run_id=rec.run_id, arm=rec.arm)],
                                        tick=rt.state["tick"], seed=0, prio=cfg.notarize_prio, kind=KIND_REPEAT, store=store))
         except Exception as e:  # noqa: BLE001 — 派不出去就不登記候選（review-3）；派出去的那半批照常收、只是不參與判定
             rt.event("dispatch_failed", name="notarize", tick=rt.state["tick"], error=f"{type(e).__name__}: {e}")

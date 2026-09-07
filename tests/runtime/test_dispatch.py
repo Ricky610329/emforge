@@ -31,7 +31,7 @@ def test_dispatch_writes_inflight_batch_job_and_events(rt):
     inf = fs.read_json(rt.root / paths.inflight_file("fake_f1", store))
     ids = [model.record_id(p.pattern, P.name) for p in props]
     assert inf["ids"] == ids and inf["collected"] == [] and inf["seed"] == 7 and inf["kind"] == "sample"
-    assert inf["items"][ids[1]] == {"parent": None, "arm": "blind", "note": {"i": 1}}
+    assert inf["items"][ids[1]] == {"parent": None, "arm": "blind", "note": {"i": 1}, "tag": None, "run_id": None}
     b = batches.Batch(rt.root, store)
     assert b.ids() == ids and b.manifest()["profile_hash"] == P.profile_hash and b.manifest()["strategy"] == "blind"
     jobs = queue.Queue(rt.root).list()

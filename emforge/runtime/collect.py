@@ -85,7 +85,7 @@ def _to_record(rt, inf: dict, rid: str, res: dict, patterns: dict):
     return Record(id=rid, sim_profile=profile.name, bits=patterns[rid], response=response, measure=measure,
                   score=score, status=status, strategy=inf["strategy"], arm=item.get("arm"), parent=item.get("parent"),
                   tick=inf["tick"], seed=inf["seed"], note=note, kind=inf["kind"], run=run,
-                  extra=dict(res.get("extra") or {}))
+                  extra=dict(res.get("extra") or {}), tag=item.get("tag"), run_id=item.get("run_id"))
 
 
 def _counts(batch: Batch) -> tuple:

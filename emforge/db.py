@@ -18,7 +18,7 @@ from . import paths
 from .depot import FsBusy, FsCorrupt, open_depot
 from .model import STATUS_DONE, Record, pack_bits, record_id, unpack_bits
 
-INDEX_FIELDS = ("id", "sim_profile", "status", "score", "strategy", "arm", "parent", "tick", "kind")
+INDEX_FIELDS = ("id", "sim_profile", "status", "score", "strategy", "arm", "parent", "tick", "kind", "tag", "run_id")
 _UNREADABLE = (OSError, ValueError, KeyError, zipfile.BadZipFile, FsBusy, FsCorrupt)   # 缺檔／壞 zip／非 npz／半截 JSON
 
 
@@ -50,7 +50,7 @@ def _load_npz(depot, key: str) -> Record:
 
 def _index_line(stem: str, meta: dict) -> dict:
     line = {"stem": stem, "store": meta["run"]["store"], "worker_ver": meta["run"].get("worker_ver")}
-    line.update({k: meta[k] for k in INDEX_FIELDS})
+    line.update({k: meta.get(k) for k in INDEX_FIELDS})
     return line
 
 
@@ -186,13 +186,17 @@ class View:
         return [r for r in recs if r is not None]
 
     def query(self, profile: str | None = None, strategy: str | None = None, arm: str | None = None,
-              status=None, since_tick: int | None = None, limit: int | None = None) -> list:
+              status=None, since_tick: int | None = None, limit: int | None = None,
+              tag=None, run_id=None, parent=None) -> list:
         """依 tick 升冪；status 可為字串或 tuple；since_tick 含。"""
         profile = profile or self._profile
         statuses = (status,) if isinstance(status, str) else status
         lines = [ln for ln in self._reader.metas(profile)
                  if (strategy is None or ln["strategy"] == strategy)
                  and (arm is None or ln["arm"] == arm)
+                 and (tag is None or ln.get("tag") == tag)
+                 and (run_id is None or ln.get("run_id") == run_id)
+                 and (parent is None or ln.get("parent") == parent)
                  and (statuses is None or ln["status"] in statuses)
                  and (since_tick is None or (ln["tick"] is not None and ln["tick"] >= since_tick))]
         lines.sort(key=lambda ln: (ln["tick"] if ln["tick"] is not None else -1, ln["stem"]))
@@ -220,11 +224,46 @@ class View:
                 break
         return out
 
-    def mine(self, status=None, since_tick: int | None = None) -> list:
+    def mine(self, status=None, since_tick: int | None = None, run_id=None) -> list:
         """本策略自己產出的紀錄（含 error）；有狀態策略靠這個拿上批回饋。"""
         if not self._strategy:
             raise ValueError("View 未綁定策略，mine() 無意義")
-        return self.query(strategy=self._strategy, status=status, since_tick=since_tick)
+        return self.query(strategy=self._strategy, status=status, since_tick=since_tick, run_id=run_id)
 
     def measurements(self, rec_id: str, profile: str | None = None) -> list:
         return self._reader.measurements(profile or self._profile, rec_id)
+
+    def sample(self, n: int, *, seed: int, **filters) -> list:
+        """過濾後按內容去重取樣；重測不增加抽中機率。"""
+        if n < 0:
+            raise ValueError("n 必須非負")
+        rows = self._unique(self.query(**filters))
+        picks = np.random.default_rng(seed).choice(len(rows), min(n, len(rows)), replace=False)
+        return [rows[i] for i in picks]
+
+    @staticmethod
+    def _unique(records) -> list:
+        out = {}
+        for r in records:
+            if r.kind != "repeat":
+                out.setdefault(r.id, r)
+        return [out[k] for k in sorted(out)]
+
+    def children(self, rec_id: str) -> list:
+        return self._unique(self.query(parent=rec_id))
+
+    def lineage(self, rec_id: str, depth: int = 10) -> list:
+        """包含自身；原始提出關係優先，忽略重測自親代，遇環即停。"""
+        if depth < 0:
+            raise ValueError("depth 必須非負")
+        rows = {r.id: r for r in self._unique(self.query())}
+        out, seen = [], set()
+        while rec_id in rows and rec_id not in seen and len(out) < depth:
+            seen.add(rec_id)
+            r = rows[rec_id]
+            out.append(r)
+            rec_id = r.parent
+        return out
+
+    def runs(self, strategy=None) -> list[str]:
+        return sorted({r.run_id for r in self.query(strategy=strategy) if r.run_id})

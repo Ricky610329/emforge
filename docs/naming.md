@@ -91,3 +91,10 @@
 ## commit
 
 `type: 摘要`（繁中），type ∈ `feat` `fix` `test` `docs` `chore` `refactor`。一里程碑一 commit。
+
+## 2026-09-08 執行身分與歷程
+Proposal / Record 新增可選 tag、run_id；Record.run 仍是模擬來源字典。
+舊紀錄缺欄位讀為 None。策略子行程、dispatch、collect、公證沿用身分。
+View 支援 query(tag/run_id/parent)、mine(run_id)、children、lineage、sample、runs。
+lineage 包含自身，忽略公證自親代並防環；sample 依內容去重且 seed 決定性。
+tag/run_id 使用既有 is_valid_name；算法名稱、執行編號與內容 hash 是不同身分。

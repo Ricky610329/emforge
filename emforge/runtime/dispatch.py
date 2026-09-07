@@ -33,7 +33,7 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
     if not keep:
         return None
     ids = [record_id(p.pattern, profile.name) for p in keep]
-    items = {rid: {"parent": p.parent, "arm": p.arm, "note": dict(p.note)} for rid, p in zip(ids, keep)}
+    items = {rid: {"parent": p.parent, "arm": p.arm, "note": dict(p.note), "tag": p.tag, "run_id": p.run_id} for rid, p in zip(ids, keep)}
     rt.depot.put_json(paths.inflight_file(profile.name, store),
                       {"store": store, "strategy": strategy_name, "tick": tick, "seed": seed, "kind": kind,
                        "prio": prio, "ids": ids, "items": items, "collected": [], "at": now_iso()})

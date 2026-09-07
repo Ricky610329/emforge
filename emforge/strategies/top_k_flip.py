@@ -21,5 +21,5 @@ def propose(ctx):
             q = rec.bits.copy().reshape(-1)
             pos = ctx.rng.choice(free, d, replace=False)
             q[pos] ^= True
-            out.append(dict(pattern=q.reshape(ctx.profile.shape), parent=rec.id, note={"d": d}))
+            out.append(dict(pattern=q.reshape(ctx.profile.shape), parent=rec.id, tag=f"flip_k{k}", note={"d": d}))
     return out[:ctx.budget]

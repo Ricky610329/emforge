@@ -422,3 +422,10 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 - `import-legacy --verify` 對真實 NAS 樹（六萬筆）尚未跑：本機只跑過合成迷你樹。
 - `worker_ver` 拼進 antenna sha；`doctor --hfss` 的 COM 連線探測；`notarize_min_score`；SM 排序策略（舊 smpool）移植成 `strategies/sm_rank.py`；`deliver`。
 - 架構 §12 的三條 `❓`（策略層無實作證據、弱模型化未對照、重訓＝跟上分布）——這份實作沒有改變它們的狀態。
+
+## 2026-09-08 執行身分與歷程
+Proposal / Record 新增可選 tag、run_id；Record.run 仍是模擬來源字典。
+舊紀錄缺欄位讀為 None。策略子行程、dispatch、collect、公證沿用身分。
+View 支援 query(tag/run_id/parent)、mine(run_id)、children、lineage、sample、runs。
+lineage 包含自身，忽略公證自親代並防環；sample 依內容去重且 seed 決定性。
+tag/run_id 使用既有 is_valid_name；算法名稱、執行編號與內容 hash 是不同身分。

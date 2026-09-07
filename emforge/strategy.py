@@ -165,6 +165,10 @@ def validate_proposals(raw, profile: Profile, budget: int) -> list:
     out = []
     for i, item in enumerate(raw):
         p = Proposal.from_dict(item)
+        for key in ("tag", "run_id"):
+            value = getattr(p, key)
+            if value is not None and (not isinstance(value, str) or not paths.is_valid_name(value)):
+                raise ProposalError(f"{key} 名稱不合法：{value!r}")
         pat = np.asarray(p.pattern)
         if pat.shape != profile.shape:
             raise ProposalError(f"#{i}: pattern shape {pat.shape} ≠ profile.shape {profile.shape}")
@@ -174,7 +178,7 @@ def validate_proposals(raw, profile: Profile, budget: int) -> list:
             pat = pat.astype(bool)
         if not pat[profile.fixed_on].all():
             raise ProposalError(f"#{i}: fixed_on 像素（饋墊）必須為 True")
-        out.append(Proposal(pattern=pat, parent=p.parent, arm=p.arm, note=dict(p.note)))
+        out.append(Proposal(pattern=pat, parent=p.parent, arm=p.arm, note=dict(p.note), tag=p.tag, run_id=p.run_id))
     return out
 
 
@@ -205,6 +209,8 @@ def _write_proposals(path: Path, props: list, shape: tuple) -> None:
     pats = np.stack([p.pattern for p in props]) if props else np.zeros((0, *shape), bool)
     notes = [json.dumps(p.note, ensure_ascii=False) for p in props]
     np.savez(path, patterns=pats,
+             tags=np.array([p.tag or "" for p in props], dtype=str),
+             run_ids=np.array([p.run_id or "" for p in props], dtype=str),
              parents=np.array([p.parent or "" for p in props], dtype="<U64"),
              arms=np.array([p.arm or "" for p in props], dtype="<U64"),
              notes=np.array(notes) if notes else np.zeros((0,), dtype="<U1"))
@@ -214,7 +220,8 @@ def _read_proposals(path: Path) -> list:
     with np.load(path, allow_pickle=False) as z:
         pats, parents, arms, notes = z["patterns"], z["parents"], z["arms"], z["notes"]
         return [Proposal(pattern=pats[i], parent=str(parents[i]) or None, arm=str(arms[i]) or None,
-                         note=json.loads(str(notes[i]))) for i in range(len(pats))]
+                         note=json.loads(str(notes[i])), tag=str(z["tags"][i]) or None,
+                         run_id=str(z["run_ids"][i]) or None) for i in range(len(pats))]
 
 
 def propose_in_subprocess(root, profile: Profile, name: str, *, budget: int, seed: int, tick: int,

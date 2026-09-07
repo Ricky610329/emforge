@@ -4,6 +4,8 @@
 內容＝Profile 註冊表（限 allowed）＋Limits＋體檢＋近期 time_s 中位數＋程序清單（＝M15 的 MCP tools 名單）。
 儀器 open 成功與每小時各刷一次；寫失敗不炸。
 """
+from dataclasses import replace
+
 from emforge import doctor, paths
 from emforge.device import reference
 from emforge.device.limits import Limits
@@ -36,6 +38,8 @@ def test_reference_written_on_open_and_hourly(root, monkeypatch):
     inst.bind(P, inst.work.make("s1"), store="s1")
     inst.open()
     assert inst.depot.exists(paths.device_reference_md("216")) and inst.depot.get_json(paths.device_reference_json("216"))["tag"] == "216"
+    simulate = inst.sim.simulate
+    monkeypatch.setattr(inst.sim, "simulate", lambda bits: replace(simulate(bits), time_s=1.25))
     inst.simulate(some_bits())
     inst.depot.delete(paths.device_reference_md("216"))
     t[0] += 100
@@ -44,7 +48,7 @@ def test_reference_written_on_open_and_hourly(root, monkeypatch):
     t[0] += 3600
     inst._beat()
     assert inst.depot.exists(paths.device_reference_md("216"))
-    assert inst.depot.get_json(paths.device_reference_json("216"))["median_time_s"] == 0.0
+    assert inst.depot.get_json(paths.device_reference_json("216"))["median_time_s"] == 1.25
     inst.stop()
 
 

@@ -153,7 +153,10 @@ class Proposal:
     arm: str | None = None
     note: dict = field(default_factory=dict)
 
-    KEYS = frozenset({"pattern", "parent", "arm", "note"})
+    tag: str | None = None
+    run_id: str | None = None
+
+    KEYS = frozenset({"pattern", "parent", "arm", "note", "tag", "run_id"})
 
     @staticmethod
     def from_dict(d) -> "Proposal":
@@ -168,7 +171,7 @@ class Proposal:
         if "pattern" not in d:
             raise ProposalError("missing pattern")
         return Proposal(pattern=np.asarray(d["pattern"]), parent=d.get("parent"), arm=d.get("arm"),
-                        note=dict(d.get("note") or {}))
+                        note=dict(d.get("note") or {}), tag=d.get("tag"), run_id=d.get("run_id"))
 
 
 # ── Context（系統給策略的六＋一樣東西） ──────────────────────────────────────
@@ -238,8 +241,11 @@ class Record:
     run: dict               # {store, machine, worker_ver, profile_hash, time_s}
     extra: dict = field(default_factory=dict)   # 儀器側通道（如 radiation）；永不進 measure/score/report
 
+    tag: str | None = None
+    run_id: str | None = None
+
     META_FIELDS = ("id", "sim_profile", "measure", "score", "status", "strategy", "arm", "parent", "tick", "seed",
-                   "note", "kind", "run", "extra")
+                   "note", "kind", "run", "extra", "tag", "run_id")
 
     def meta(self) -> dict:
         """純 JSON 的部分（陣列另存）。"""
@@ -249,7 +255,7 @@ class Record:
     def from_meta(meta: dict, bits, response) -> "Record":
         return Record(bits=np.asarray(bits, bool),
                       response=None if response is None else np.asarray(response, np.float32),
-                      **{k: meta[k] for k in Record.META_FIELDS})
+                      **{k: meta.get(k) if k in ("tag", "run_id") else meta[k] for k in Record.META_FIELDS})
 
 
 # ── Job（佇列的一筆） ────────────────────────────────────────────────────────
