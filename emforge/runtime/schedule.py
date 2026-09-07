@@ -29,6 +29,12 @@ def schedule(rt) -> None:
             continue
         if sc.prio >= cfg.runtime.background_prio and not _background_allowed(rt, inflight, cfg.runtime.background_prio):
             continue
+        if sc.kind == "inbox":
+            from .inbox import take
+            store = take(rt, sc, sc.batch)
+            if store:
+                inflight.append({"store": store, "strategy": sc.name, "kind": KIND_SAMPLE, "prio": sc.prio})
+            continue
         seed = sc.seed if sc.seed is not None else strategy_seed(rt.state["seed_base"], rt.profile.name, sc.name, tick)
         props = _propose(rt, sc, seed, tick)
         if props is None:

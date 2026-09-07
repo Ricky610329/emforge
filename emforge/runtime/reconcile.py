@@ -17,7 +17,7 @@ def reconcile(rt) -> list:
         if not (rt.depot.exists(paths.batch_manifest(store)) and rt.depot.exists(paths.batch_patterns(store))):
             problems.append(f"inflight_without_batch: {store}")
     for store, job in sorted(jobs.items()):
-        if job.sim_profile != rt.profile_name or job.origin != "runtime" or store in inflight:
+        if job.sim_profile != rt.profile_name or job.origin not in ("runtime", "inbox") or store in inflight:
             continue
         if rt.queue.state(store) in ("done", "fail"):
             continue                                 # 終態且已收尾（inflight 在 collect 收尾時移除）

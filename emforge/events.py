@@ -29,6 +29,8 @@ EVENTS = {
     "strategy_empty": ("name", "tick"),
     "proposals_validated": ("name", "tick", "n_in", "n_dup", "n_out"),
     # ── dispatch / collect ──
+    "inbox_received": ("name", "sid", "n"),
+    "inbox_rejected": ("name", "sid", "reason"),
     "batch_dispatched": ("store", "strategy", "n", "prio", "tick", "seed", "kind"),
     "dispatch_failed": ("name", "tick", "error"),
     "record_added": ("id", "store", "score", "kind"),

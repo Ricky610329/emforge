@@ -61,6 +61,7 @@ class StrategyConfig:
     seed: int | None = None
     propose_timeout_s: int | None = None
     params: dict = field(default_factory=dict)
+    kind: str = "propose"
 
 
 @dataclass
@@ -108,6 +109,8 @@ def parse_strategies_yaml(text: str, profile: str | None = None) -> StrategiesFi
         if sc.name in seen:
             raise ConfigError(f"strategies[{i}]: 策略名重複：{sc.name}")
         seen.add(sc.name)
+        if sc.kind not in ("propose", "inbox") or sc.batch < 1 or sc.max_inflight < 1:
+            raise ConfigError("kind 必須為 propose/inbox，batch/max_inflight 必須大於零")
         sc.params = dict(sc.params or {})
         out.append(sc)
     return StrategiesFile(profile=raw["profile"], runtime=rt, strategies=out)

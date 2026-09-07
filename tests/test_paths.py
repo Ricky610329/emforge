@@ -128,3 +128,10 @@ def test_reserved_strategy_names_are_valid_names_but_reserved():
         assert paths.is_valid_name(n)
     assert {"repeat", "notarize", "runtime", "cli"} <= paths.RESERVED_STRATEGY_NAMES
     assert "blind" not in paths.RESERVED_STRATEGY_NAMES, "blind 是內建策略名（兼保留 arm），可以當策略名"
+
+def test_platform_keys():
+    assert paths.submission("p", "sid") == "inbox/p/sid.json"
+    assert paths.submission_status("p", "sid") == "inbox_status/p/sid.json"
+    assert paths.algo_log("p", "run_a") == "algo_logs/p/run_a.jsonl"
+    with pytest.raises(ValueError):
+        paths.submission("p", "../outside")

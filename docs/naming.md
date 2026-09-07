@@ -98,3 +98,12 @@ Proposal / Record 新增可選 tag、run_id；Record.run 仍是模擬來源字�
 View 支援 query(tag/run_id/parent)、mine(run_id)、children、lineage、sample、runs。
 lineage 包含自身，忽略公證自親代並防環；sample 依內容去重且 seed 決定性。
 tag/run_id 使用既有 is_valid_name；算法名稱、執行編號與內容 hash 是不同身分。
+
+## 2026-09-08 收件與 client
+策略項可設 kind: inbox；batch/max_inflight/prio 沿用。client.submit 回 sid，
+wait 預設等 completed，until="dispatched" 只等派工；results 可讀部分結果。
+request_id 冪等、不同內容重用同 id 拒絕。不可變送件在 inbox/<profile>/<sid>.json，
+進度在 inbox_status/<profile>/<sid>.json；每項保存 index/id/store/shared/state。
+重複候選引用相同量測而非消失；收到但尚未派工、部分派工、已派工、完成、拒絕各有狀態。
+已派工但尚未記進度時，由 inflight/Record.note._submission 重建，不另派。
+算法 log 為 algo_logs/<profile>/<run_id>.jsonl（單寫者）；平台不解讀內容。

@@ -43,241 +43,188 @@ DEVICES = "devices/"
 _RECORD_EXT = ".npz"
 _RESULT_EXT = ".json"
 
-
 def is_valid_name(name: str) -> bool:
     """profile／spec／策略／機器 tag 等名字：小寫開頭、小寫字母數字底線。`-` 留給 store 名當欄位分隔。"""
     return bool(NAME_RE.match(name or ""))
-
 
 # ── 資料庫 ──────────────────────────────────────────────────────────────────
 def db_dir(profile: str) -> str:
     return f"{DB}{profile}/"
 
-
 def record_stem(rec_id: str, store: str) -> str:
     """紀錄檔主幹（不含副檔名）＝索引行的主鍵。"""
     return f"{rec_id}-{store}"
 
-
 def record_by_stem(profile: str, stem: str) -> str:
     return f"{db_dir(profile)}{stem}{_RECORD_EXT}"
-
 
 def record_file(profile: str, rec_id: str, store: str) -> str:
     """一筆一檔；同 id 不同 store（公證重測）是不同檔。"""
     return record_by_stem(profile, record_stem(rec_id, store))
 
-
 def db_index(profile: str) -> str:
     return f"{db_dir(profile)}_index.jsonl"
-
 
 def db_imported(profile: str) -> str:
     """匯入器的 store 簽名帳（`import-legacy` 重跑跳過未變的 store）。"""
     return f"{db_dir(profile)}_imported.json"
 
-
 def retired_marker(profile: str) -> str:
     return f"{db_dir(profile)}RETIRED"
-
 
 # ── 榜 ──────────────────────────────────────────────────────────────────────
 def ledger_file(profile: str, spec: str) -> str:
     return f"{LEDGER}{profile}/{spec}.json"
 
-
 # ── 佇列 ────────────────────────────────────────────────────────────────────
 def queue_dir() -> str:
     return QUEUE
 
-
 def jobs_file() -> str:
     return f"{QUEUE}jobs.json"
-
 
 def jobs_lock() -> str:
     return f"{QUEUE}jobs.lock"
 
-
 def queue_state_dir() -> str:
     return f"{QUEUE}state/"
-
 
 def queue_log_dir() -> str:
     return f"{QUEUE}log/"
 
-
 def claim_file(store: str) -> str:
     return f"{queue_state_dir()}{store}.claim"
-
 
 def done_file(store: str) -> str:
     return f"{queue_state_dir()}{store}.done"
 
-
 def fail_file(store: str) -> str:
     return f"{queue_state_dir()}{store}.fail"
-
 
 def queue_stop(tag: str | None = None) -> str:
     """`STOP` 全機收工；`STOP.<tag>` 只停一台。"""
     return QUEUE + ("STOP" if tag is None else f"STOP.{tag}")
 
-
 def worker_log(tag: str) -> str:
     return f"{queue_log_dir()}{tag}.jsonl"
-
 
 def estop_fleet() -> str:
     """全機隊急停（CLI 建／清；儀器 open／simulate 前硬檢查）。"""
     return f"{QUEUE}ESTOP"
 
-
 def estop_device(tag: str) -> str:
     """單機急停。"""
     return f"{QUEUE}ESTOP.{tag}"
-
 
 # ── 儀器（M13） ──────────────────────────────────────────────────────────────
 def devices_dir() -> str:
     return DEVICES
 
-
 def device_dir(tag: str) -> str:
     return f"{DEVICES}{tag}/"
-
 
 def device_state(tag: str) -> str:
     """狀態字典（只有該台 Instrument 寫；轉換即寫＋心跳）。"""
     return f"{device_dir(tag)}state.json"
 
-
 def device_reference_md(tag: str) -> str:
     return f"{device_dir(tag)}reference.md"
 
-
 def device_reference_json(tag: str) -> str:
     return f"{device_dir(tag)}reference.json"
-
 
 def device_log(tag: str) -> str:
     """裝置日誌（單寫者＝該台 Instrument）。"""
     return f"{device_dir(tag)}log.jsonl"
 
-
 def adhoc_dir(tag: str) -> str:
     return f"{device_dir(tag)}adhoc/"
-
 
 def adhoc_result(tag: str, rec_id: str, stamp: str) -> str:
     """`simulate_once` 的結果檔（與批結果同格式、**不入 db**）。"""
     return f"{adhoc_dir(tag)}{stamp}-{rec_id}{_RESULT_EXT}"
 
-
 # ── 批次 ────────────────────────────────────────────────────────────────────
 def batch_dir(store: str) -> str:
     return f"{BATCHES}{store}/"
 
-
 def batch_manifest(store: str) -> str:
     return f"{batch_dir(store)}manifest.json"
-
 
 def batch_patterns(store: str) -> str:
     return f"{batch_dir(store)}patterns.npz"
 
-
 def batch_results_dir(store: str) -> str:
     return f"{batch_dir(store)}results/"
-
 
 def batch_result(store: str, rec_id: str) -> str:
     """逐筆結果檔＝合併語義（I-15）：兩台先後寫同一批也不會整份覆蓋。"""
     return f"{batch_results_dir(store)}{rec_id}{_RESULT_EXT}"
 
-
 # ── runtime ─────────────────────────────────────────────────────────────────
 def runtime_dir(profile: str) -> str:
     return f"{RUNTIME_STATE}{profile}/"
 
-
 def runtime_lock(profile: str) -> str:
     return f"{runtime_dir(profile)}lock"
-
 
 def strategies_yaml(profile: str) -> str:
     return f"{runtime_dir(profile)}strategies.yaml"
 
-
 def state_json(profile: str) -> str:
     return f"{runtime_dir(profile)}state.json"
-
 
 def status_json(profile: str) -> str:
     return f"{runtime_dir(profile)}status.json"
 
-
 def events_jsonl(profile: str) -> str:
     return f"{runtime_dir(profile)}events.jsonl"
-
 
 def pending_jsonl(profile: str) -> str:
     return f"{runtime_dir(profile)}pending.jsonl"
 
-
 def runtime_stop(profile: str) -> str:
     return f"{runtime_dir(profile)}STOP"
-
 
 def control_json(profile: str) -> str:
     """CLI → runtime 的單向控制檔（resume 等）；runtime 每 tick 開頭消費並刪除。"""
     return f"{runtime_dir(profile)}control.json"
 
-
 def inflight_dir(profile: str) -> str:
     return f"{runtime_dir(profile)}inflight/"
 
-
 def inflight_file(profile: str, store: str) -> str:
     return f"{inflight_dir(profile)}{store}.json"
-
 
 # ── 由列舉結果反推名字 ──────────────────────────────────────────────────────
 def stem_of(key: str) -> str:
     """key → 最後一段去掉副檔名（`db/p/<id>-<store>.npz` → `<id>-<store>`）。"""
     return key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
 
-
 def record_stems(keys) -> set:
     """`list(db_dir(p))` 的結果 → 紀錄檔主幹集合（索引檔／子前綴自動略過）。"""
     return {stem_of(k) for k in keys if k.endswith(_RECORD_EXT)}
-
 
 def result_ids(keys) -> set:
     """`list(batch_results_dir(s))` 的結果 → 結果 id 集合。"""
     return {stem_of(k) for k in keys if k.endswith(_RESULT_EXT)}
 
-
 def dir_names(keys) -> list:
     """列舉結果 → 子前綴（目錄）名，排序。"""
     return sorted(k.rstrip("/").rsplit("/", 1)[-1] for k in keys if k.endswith("/"))
-
 
 # ── store 名 ────────────────────────────────────────────────────────────────
 def store_name(profile: str, strategy: str, tick: int) -> str:
     """`<profile>-<strategy>-t<tick:05d>`；`-` 是欄位分隔，欄位內只有 snake。"""
     return f"{profile}-{strategy}-t{tick:05d}"
 
-
 def notarize_store_name(profile: str, tick: int, rec_id: str, n: int) -> str:
     """公證重測：`<profile>-notarize-t<tick:05d>-<id[:8]>-r<n>`。"""
     return f"{profile}-notarize-t{tick:05d}-{rec_id[:8]}-r{n}"
 
-
 def smoke_store_name(profile: str, rec_id: str, n: int, stamp: str) -> str:
     """人下的 smoke 重測：`<profile>-smoke-<id[:8]>-<YYYYmmddHHMMSS>-r<n>`（沒有 tick，用時間戳）。"""
     return f"{profile}-smoke-{rec_id[:8]}-{stamp}-r{n}"
-
 
 # ── 本機路徑（不是 depot key：這些東西不抽象） ──────────────────────────────
 #? registry.py／strategies/*.py 是**程式碼**，要 runpy／importlib 從本機檔案系統載入；
@@ -285,30 +232,24 @@ def smoke_store_name(profile: str, rec_id: str, n: int, stamp: str) -> str:
 def registry_py(root) -> Path:
     return Path(root) / "registry.py"
 
-
 def user_strategies_dir(root) -> Path:
     return Path(root) / "strategies"
 
-
 def strategy_workdir(root, profile: str, strategy: str) -> Path:
     return Path(root) / "runtime_state" / profile / "strategies" / strategy
-
 
 def estop_local(root) -> Path:
     """本機急停（第三層）：這台機器自己的檔——前提是 root 在本機碟（deploy.md §2；root 指 NAS 就變成三台共用，檢查 #10）。"""
     return Path(root) / "ESTOP"
 
-
 def limits_json(root) -> Path:
     """儀器 `Limits` 的部署設定（M16）：每台自己的上限（allowed_profiles／max_sample_s／min_free_gb…），本機檔、不經 depot；沒有＝預設。"""
     return Path(root) / "limits.json"
-
 
 # ── 整體 ────────────────────────────────────────────────────────────────────
 def layout_prefixes() -> tuple:
     """`emforge init` 要 `ensure_prefixes` 的前綴（不含 per-profile 子前綴，那些第一次用到才建）。"""
     return (DB, LEDGER, QUEUE, queue_state_dir(), queue_log_dir(), BATCHES, RUNTIME_STATE, DEVICES)
-
 
 def snapshot(*, profile: str, store: str, rec_id: str, spec: str, tag: str, stamp: str = "20260906120000") -> dict:
     """所有 key 函式的一次性展開——tests/test_paths.py 用它釘快照。"""
@@ -353,7 +294,6 @@ def snapshot(*, profile: str, store: str, rec_id: str, spec: str, tag: str, stam
         "estop_device": estop_device(tag),
     }
 
-
 def local_snapshot(root, *, profile: str, strategy: str) -> dict:
     """本機路徑那一節的展開（回 `Path`，不是 key）。"""
     return {
@@ -363,3 +303,29 @@ def local_snapshot(root, *, profile: str, strategy: str) -> dict:
         "estop_local": estop_local(root),
         "limits_json": limits_json(root),
     }
+
+# 算法送件與執行的 key（新欄位另有快照測試）。
+def platform_key(kind: str, *parts: str) -> str:
+    roots = {"submissions": "inbox", "status": "inbox_status", "logs": "algo_logs",
+             "runs": "algo_runs", "nodes": "algo_nodes", "packages": "algo_packages",
+             "algorithms": "algorithms", "locks": "platform_locks", "release": "releases"}
+    if kind not in roots:
+        raise ValueError("未知平台 key 類型")
+    if any(not isinstance(x, str) or not NAME_RE.fullmatch(x) for x in parts):
+        raise ValueError("平台 key 名稱不合法")
+    return "/".join((roots[kind], *parts))
+
+def submissions_dir(profile):
+    return platform_key("submissions", profile) + "/"
+
+def submission(profile, sid):
+    return platform_key("submissions", profile, sid) + ".json"
+
+def submission_status(profile, sid):
+    return platform_key("status", profile, sid) + ".json"
+
+def submission_lock(profile, sid):
+    return platform_key("locks", profile, sid) + ".lock"
+
+def algo_log(profile, run_id):
+    return platform_key("logs", profile, run_id) + ".jsonl"
