@@ -328,3 +328,41 @@ def test_run_starts_despite_corrupt_record_file_and_emits_db_unreadable(rt_root,
     assert rt.run(once=True) == 0
     ev = [e for e in rt.depot.read_log(rt.events_key) if e["event"] == "db_unreadable"]
     assert len(ev) == 1 and ev[0]["n"] == 1 and ev[0]["stems"] == ["deadbeefdeadbeef-bad"] and ev[0]["profile"] == "fake_f1"
+
+
+def test_run_survives_transient_tick_error_and_records_it(rt_root, rt, monkeypatch):
+    """檢查 #7：tick 裡的 depot 例外以前穿出 run()（一次瞬斷＝整晚停）；現在記 tick_error、睡一輪續跑。"""
+    real_tick, calls = core.Runtime.tick, {"n": 0}
+
+    def flaky(self):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError(64, "指定的網路名稱無法再使用")
+        real_tick(self)
+        self.depot.put_bytes(paths.runtime_stop("fake_f1"), b"")
+
+    monkeypatch.setattr(core.Runtime, "tick", flaky)
+    assert rt.run(once=False) == 0
+    ev = rt.depot.read_log(rt.events_key)
+    errs = [e for e in ev if e["event"] == "tick_error"]
+    assert len(errs) == 1 and errs[0]["consecutive"] == 1 and "OSError" in errs[0]["error"]
+    assert ev[-1]["event"] == "runtime_stop" and ev[-1]["reason"] == "stop_file"
+
+
+def test_run_exits_1_after_ten_consecutive_tick_errors(rt_root, rt, monkeypatch):
+    def boom(self):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(core.Runtime, "tick", boom)
+    assert rt.run(once=False) == 1
+    ev = rt.depot.read_log(rt.events_key)
+    assert sum(e["event"] == "tick_error" for e in ev) == core.TICK_ERROR_LIMIT
+    assert ev[-1]["event"] == "runtime_stop" and ev[-1]["reason"] == "tick_error"
+
+
+def test_run_once_returns_1_on_tick_error(rt_root, rt, monkeypatch):
+    def boom(self):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(core.Runtime, "tick", boom)
+    assert rt.run(once=True) == 1

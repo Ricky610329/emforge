@@ -12,6 +12,7 @@ EVENTS = {
     "runtime_start": ("runtime_ver", "profile_hash", "pid", "machine"),
     "runtime_stop": ("reason",),
     "lock_lost": ("owner",),
+    "tick_error": ("tick", "error", "consecutive"),        # 檢查 #7：tick 裡的例外記下來、續跑
     "reconcile_mismatch": ("detail",),
     "config_reloaded": ("n_strategies",),
     "config_invalid": ("error",),
@@ -58,6 +59,7 @@ EVENTS = {
     "job_yield": ("store", "reason"),
     "gate_rejected": ("store", "reason"),
     "sim_restart": ("store", "reason"),
+    "worker_error": ("error", "consecutive"),          # 檢查 #7：主迴圈一圈裡的例外（pick／log／release）
     "worker_stop": ("reason",),
     # ── 儀器（devices/<tag>/log.jsonl；單寫者＝該台 Instrument） ──
     "device_start": ("tag", "worker_ver", "pid"),

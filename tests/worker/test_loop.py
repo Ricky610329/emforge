@@ -196,3 +196,59 @@ def test_loop_estop_between_pick_and_open_yields_and_same_machine_picks_again_af
     assert not any(e["event"] == "job_failed" for e in log)
     estop.clear(q.depot, None)
     assert q.pick("216") is not None and q.claim_owner("s1") == "216", "解除後同一台再撿"
+
+
+# ── 檢查 #7／#15（2026-09-07） ────────────────────────────────────────────────
+def test_loop_survives_depot_error_in_pick_and_continues(root, monkeypatch):
+    """檢查 #7（repro_blip B 段）：pick 讀 jobs.json 遇 OSError(64)（SMB 斷線）以前直接穿出 worker_loop、行程結束；
+    現在記 worker_error、睡一輪續跑。"""
+    testing.make_fake_root(root)
+    make_batch(root, "s1")
+    q = queue.Queue(root)
+    q.add(make_job("s1"))
+    real_pick, calls = queue.Queue.pick, {"n": 0}
+
+    def flaky_pick(self, tag):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise OSError(64, "指定的網路名稱無法再使用")
+        return real_pick(self, tag)
+
+    monkeypatch.setattr(queue.Queue, "pick", flaky_pick)
+    polls = []
+    rc = loop.worker_loop(root, "216", once=True, work_root=root / "work", sleep=polls.append, poll_s=5)
+    assert rc == 0 and q.state("s1") == "done" and polls[:2] == [5, 5]
+    ev = [e for e in q.depot.read_log(paths.worker_log("216")) if e["event"] == "worker_error"]
+    assert [e["consecutive"] for e in ev] == [1, 2] and "OSError" in ev[0]["error"]
+
+
+def test_loop_exits_1_after_ten_consecutive_errors(root, monkeypatch):
+    """檢查 #7：不是無限吞——連續 WORKER_ERROR_LIMIT 圈都炸就收工回 1（人要看得到）。"""
+    testing.make_fake_root(root)
+    q = queue.Queue(root)
+
+    def always_raise(self, tag):
+        raise OSError(64, "x")
+
+    monkeypatch.setattr(queue.Queue, "pick", always_raise)
+    polls = []
+    rc = loop.worker_loop(root, "216", once=False, work_root=root / "work", sleep=polls.append, poll_s=3)
+    assert rc == 1 and len(polls) == loop.WORKER_ERROR_LIMIT - 1, "第 10 次不再睡、直接收工"
+    ev = q.depot.read_log(paths.worker_log("216"))
+    assert sum(e["event"] == "worker_error" for e in ev) == loop.WORKER_ERROR_LIMIT
+    assert ev[-1]["event"] == "worker_stop" and ev[-1]["reason"] == "worker_error"
+
+
+def test_loop_once_returns_when_estop_stays_engaged(root):
+    """檢查 #15（t4_once）：`--once` 遇急停以前無限空轉；現在給一個 poll 的寬限（急停可能只是瞬間），仍在就收工 rc 0。"""
+    from emforge.device import estop
+    testing.make_fake_root(root)
+    make_batch(root, "s1")
+    q = queue.Queue(root)
+    q.add(make_job("s1"))
+    estop.engage(q.depot, None, by="ricky", reason="全停")
+    polls = []
+    rc = loop.worker_loop(root, "216", once=True, work_root=root / "work", sleep=polls.append, poll_s=7)
+    assert rc == 0 and polls == [7] and q.state("s1") == "queued"
+    stops = [e for e in q.depot.read_log(paths.worker_log("216")) if e["event"] == "worker_stop"]
+    assert stops[-1]["reason"] == "estop"

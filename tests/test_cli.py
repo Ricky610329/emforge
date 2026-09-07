@@ -525,3 +525,23 @@ def test_mcp_port_env_bad_value_only_bites_serve_commands_via_argparse(fake, mon
     monkeypatch.setenv("EMFORGE_MCP_PORT", "9123")
     from emforge.cli import build_parser
     assert build_parser().parse_args(["worker", "--root", str(fake)]).port == 9123
+
+
+def test_worker_warns_when_machine_tag_comes_from_ip_probe(fake, monkeypatch, capsys):
+    """檢查 #20：沒 --machine-tag 也沒 EMFORGE_MACHINE → 照舊用 IP 末段，但 stderr 要警告（VPN／DHCP 換 IP 會換身分）。"""
+    monkeypatch.delenv("EMFORGE_MACHINE", raising=False)
+    monkeypatch.setattr(cli.loops, "local_tag", lambda: "77")
+    assert _main("worker", "--root", fake, "--once", "--work-root", fake / "work") == 0
+    e = capsys.readouterr().err
+    assert "EMFORGE_MACHINE" in e and "77" in e
+    assert _main("worker", "--root", fake, "--once", "--work-root", fake / "work", "--machine-tag", "216") == 0
+    assert "EMFORGE_MACHINE" not in capsys.readouterr().err
+
+
+def test_device_estop_tag_and_local_are_mutually_exclusive_and_clear_nothing_exits_1(fake, capsys):
+    """檢查 #21：--tag 與 --local 同給以前靜默忽略 --tag、印「已按下（本機）」卻沒對 216 做事；clear 沒東西可清以前回 0。"""
+    with pytest.raises(SystemExit) as ei:
+        _main("device-estop", "engage", "--root", fake, "--tag", "216", "--local", "--by", "r", "--reason", "x")
+    assert ei.value.code == 2
+    assert _main("device-estop", "clear", "--root", fake, "--tag", "216", "--confirm") == 1
+    assert "本來就沒有" in capsys.readouterr().err

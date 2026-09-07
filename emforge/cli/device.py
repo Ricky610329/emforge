@@ -101,7 +101,10 @@ def cmd_device_estop(args) -> int:
         err(f"解除急停（{target}）要 --confirm：先確認機器已經安全（ansysedt 沒殘留、磁碟夠、人已離開）")
         return EXIT_REFUSED
     cleared = estop.clear_local(root) if args.local else estop.clear(depot, args.tag)
-    print(f"ESTOP 已解除（{target}）" if cleared else f"（{target} 本來就沒有急停）")
+    if not cleared:
+        err(f"{target} 本來就沒有急停——什麼都沒清（要清別層請指定 --tag／--local；檢查 #21）")
+        return EXIT_ERROR
+    print(f"ESTOP 已解除（{target}）")
     return EXIT_OK
 
 
@@ -109,8 +112,9 @@ def _add_device_estop(sub) -> None:
     s = sub.add_parser("device-estop", help="急停：engage [--tag T | --local] --by WHO --reason R；clear 要 --confirm（唯一解除路徑）")
     s.add_argument("action", choices=("engage", "clear"))
     add_root(s)
-    s.add_argument("--tag", help="單機（不給＝全機）")
-    s.add_argument("--local", action="store_true", help="本機層 <root>/ESTOP（NAS 斷線也擋得住）")
+    layer = s.add_mutually_exclusive_group()               # 檢查 #21：以前 --local 靜默蓋掉 --tag
+    layer.add_argument("--tag", help="單機（不給＝全機）")
+    layer.add_argument("--local", action="store_true", help="本機層 <root>/ESTOP（root 在本機碟時 NAS 斷線也擋得住）")
     s.add_argument("--by", default="cli")
     s.add_argument("--reason")
     s.add_argument("--confirm", action="store_true")

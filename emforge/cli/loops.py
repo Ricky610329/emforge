@@ -61,6 +61,9 @@ def cmd_worker(args) -> int:
     root = root_of(args)
     depot = depot_of(args, root)
     tag = args.machine_tag or local_tag()
+    if not args.machine_tag and not os.environ.get("EMFORGE_MACHINE"):
+        err(f"警告：沒給 --machine-tag 也沒設 EMFORGE_MACHINE，機器 tag 用 IP 末段「{tag}」——VPN／DHCP 換 IP 會換身分，"
+            "單機急停／STOP／claim 都對不上（deploy.md §2 要每台 setx EMFORGE_MACHINE）")   # 檢查 #20
     loop_kw = dict(depot=depot, poll_s=args.poll_s, once=args.once, work_root=args.work_root, background_prio=args.bg_prio,
                    max_fail=args.max_fail, cooldown_s=args.cooldown_s, max_blowout=args.max_blowout,
                    retry_passes=args.retry_passes)

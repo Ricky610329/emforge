@@ -35,6 +35,7 @@ def default_strategy_state() -> dict:
 
 
 LOCK_UNREADABLE_BEATS = 3   #? 心跳連續幾拍讀不到鎖才算丟（30 s × 3；一拍瞬斷不停整晚）
+TICK_ERROR_LIMIT = 10       #? 連續幾個 tick 例外才收工（一次 SMB 瞬斷不停整晚；檢查 #7）
 
 class Runtime:
     def __init__(self, root, profile_name: str, *, depot=None, sleep=time.sleep, propose_fn=None,
@@ -121,6 +122,13 @@ class Runtime:
     # ── 事件／設定／狀態 ────────────────────────────────────────────────
     def event(self, event: str, /, **fields) -> None:
         events.emit(self.depot, self.events_key, event, **fields)
+
+    def _event_quiet(self, event: str, /, **fields) -> None:
+        """故障邊界裡用：連事件都寫不進去（depot 斷線）也不能讓 run() 死在 except 裡。"""
+        try:
+            self.event(event, **fields)
+        except Exception:  # noqa: BLE001
+            pass
 
     def reload_config(self) -> None:
         """yaml **內容** 變了才重讀（sha1，不靠 mtime）；無效 → config_invalid 事件、沿用上次有效（不停 runtime）。"""
@@ -240,7 +248,8 @@ class Runtime:
 
     # ── run ─────────────────────────────────────────────────────────────
     def run(self, once: bool = False) -> int:
-        """0＝正常停；2＝對帳不一致拒起（I-14）；3＝鎖丟了（被破／被清）。鎖被占直接拋 RuntimeLocked（CLI 轉 3）。"""
+        """0＝正常停；1＝連續 TICK_ERROR_LIMIT 個 tick 例外（或 --once 時一次）；2＝對帳不一致拒起（I-14）；3＝鎖丟了（被破／被清）。
+        鎖被占直接拋 RuntimeLocked（CLI 轉 3）。"""
         self.acquire_lock()
         try:
             self.start_heartbeat()
@@ -257,6 +266,7 @@ class Runtime:
                 self.event("reconcile_mismatch", detail="; ".join(problems))
                 self.event("runtime_stop", reason="reconcile_mismatch")
                 return 2
+            errors = 0
             while True:
                 self.heartbeat()
                 if self.lock_lost():
@@ -266,7 +276,17 @@ class Runtime:
                 if self.depot.exists(paths.runtime_stop(self.profile_name)):
                     self.event("runtime_stop", reason="stop_file")
                     return 0
-                self.tick()
+                try:
+                    self.tick()
+                except Exception as e:  # noqa: BLE001 — 檢查 #7：tick 裡的 depot 例外以前穿出 run()、一次瞬斷＝整晚停
+                    errors += 1
+                    self._event_quiet("tick_error", tick=self.state["tick"], error=f"{type(e).__name__}: {e}", consecutive=errors)
+                    if once or errors >= TICK_ERROR_LIMIT:
+                        self._event_quiet("runtime_stop", reason="tick_error")
+                        return 1
+                    self._sleep(self.config.runtime.tick_s)
+                    continue
+                errors = 0
                 if once:
                     self.event("runtime_stop", reason="once")
                     return 0

@@ -29,6 +29,7 @@ emforge report --root "<EMFORGE_ROOT>" --profile dual_p01_db075
 git clone <emforge remote> C:\Users\<u>\Documents\GitHub\emforge
 pip install -e C:\Users\<u>\Documents\GitHub\emforge
 setx EMFORGE_ANTENNA_REPO C:\Users\<u>\Documents\GitHub\Antenna
+setx EMFORGE_MACHINE 216                                             # 每台各自（218／37）；不設 start_worker.cmd 拒起（檢查 #20）
 setx EMFORGE_ROOT C:\emforge_root
 setx EMFORGE_DEPOT "file://T:/碩二_鄒穎麒's/antenna/emforge"
 setx MPLBACKEND Agg

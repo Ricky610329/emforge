@@ -2,6 +2,7 @@
 
 啟動：載入 `<root>/registry.py`（與 runtime 同源）、印 worker_ver（I-10）、清工作目錄（I-1）、寫 worker_start、儀器 start。
 守門不過＝那**批**判死（.fail），worker 繼續；保險絲熔斷＝那批判死，worker 也繼續（別台會接管）；
+一圈裡的 depot 例外（SMB 瞬斷）記 worker_error 續跑、連續 WORKER_ERROR_LIMIT 圈才收工（檢查 #7）；
 只有 STOP 檔讓 worker 收工，且在 job **之間**生效（不中斷單筆）。
 M13：worker 經 `Instrument` 跑批——急停中 job 之間不撿（等 poll_s 再看）；儀器租約被 MCP 持有 → 放掉 claim、下一輪再撿。
 """
@@ -80,29 +81,58 @@ def worker_loop(root, machine_tag: str, *, depot=None, poll_s: float = 30.0, onc
             inst.stop()
 
 
+WORKER_ERROR_LIMIT = 10   #? 連續幾圈例外才收工：一次 SMB 瞬斷（OSError 64／59／1231、FsBusy）不能殺整夜的 worker（檢查 #7）
+
+
 def _loop(q, inst, work, log, ver, machine_tag, sleep, poll_s, once, opts) -> int:
+    """外圈＝故障邊界。以前只有 `_handle`（gate 之後）有 try——pick／log／release 的 depot 例外直接穿出、行程結束，
+    而 start_worker.cmd 沒有重啟迴圈。現在一圈裡任何例外：記 worker_error、睡一輪續跑；連續 WORKER_ERROR_LIMIT 圈才回 1。
+    KeyboardInterrupt／SystemExit 不吞。"""
+    errors, st = 0, {"estop_waited": False}
     while True:
-        if q.stop_requested(machine_tag):
-            log("worker_stop", reason="stop_file")
-            return 0
-        if inst.estop_engaged() is not None:
-            sleep(poll_s)                                     # 急停中：job 之間不撿
-            continue
-        job = q.pick(machine_tag)
-        if job is None:
-            if once:
-                log("worker_stop", reason="once")
-                return 0
+        try:
+            rc = _iteration(q, inst, work, log, ver, machine_tag, sleep, poll_s, once, opts, st)
+        except Exception as e:  # noqa: BLE001
+            errors += 1
+            _log_quiet(log, "worker_error", error=f"{type(e).__name__}: {e}", consecutive=errors)
+            if errors >= WORKER_ERROR_LIMIT:
+                _log_quiet(log, "worker_stop", reason="worker_error")
+                return 1
             sleep(poll_s)
             continue
-        log("job_claimed", store=job.store, prio=job.prio)
-        ran = _handle(q, inst, job, work, log, ver, machine_tag, sleep, opts)
-        if ran is None:
-            sleep(poll_s)                                     # 儀器被 MCP 持有：claim 放掉了，等一輪
-            continue
-        if once and ran:
+        errors = 0
+        if rc is not None:
+            return rc
+
+
+def _iteration(q, inst, work, log, ver, machine_tag, sleep, poll_s, once, opts, st) -> int | None:
+    """一圈：STOP → 急停 → pick → handle。回 None＝繼續；int＝收工碼。"""
+    if q.stop_requested(machine_tag):
+        log("worker_stop", reason="stop_file")
+        return 0
+    if inst.estop_engaged() is not None:
+        if once and st["estop_waited"]:
+            log("worker_stop", reason="estop")                # 檢查 #15：--once 給一個 poll 的寬限，仍急停就收工（以前無限空轉）
+            return 0
+        st["estop_waited"] = True
+        sleep(poll_s)                                         # 急停中：job 之間不撿
+        return None
+    job = q.pick(machine_tag)
+    if job is None:
+        if once:
             log("worker_stop", reason="once")
             return 0
+        sleep(poll_s)
+        return None
+    log("job_claimed", store=job.store, prio=job.prio)
+    ran = _handle(q, inst, job, work, log, ver, machine_tag, sleep, opts)
+    if ran is None:
+        sleep(poll_s)                                         # 儀器被 MCP 持有：claim 放掉了，等一輪
+        return None
+    if once and ran:
+        log("worker_stop", reason="once")
+        return 0
+    return None
 
 
 def _handle(q, inst, job, work, log, ver, machine_tag, sleep, opts: _Opts):
