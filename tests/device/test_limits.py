@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""tests/device/test_limits.py — `emforge/device/limits.py`：MHS 第 2–4 層——硬限制、前置檢查（重用 gate＋doctor）、兩段式 confirm。"""
+"""tests/device/test_limits.py — `emforge/device/limits.py`：MHS 第 2–4 層——硬限制、前置檢查（重用 gate＋doctor）；confirm token 在 test_instrument。"""
 from emforge import doctor, profiles, testing
 from emforge.depot import MemoryDepot
 from emforge.device import limits as L
@@ -28,31 +28,6 @@ def test_preconditions_reject_not_allowed_retired_timeout_and_blocking_health(ro
     assert any("ansysedt" in p for p in L.check_preconditions(P, limits=L.Limits(), depot=d, root=root, health=h))
 
 
-def test_confirm_token_is_stable_within_window_and_single_use():
-    t0 = 1_700_000_000.0
-    tok = L.confirm_token("s3cret", "simulate", "fake_f1/abc", now=t0)
-    assert len(tok) == 8 and tok == L.confirm_token("s3cret", "simulate", "fake_f1/abc", now=t0 + 100)
-    assert tok != L.confirm_token("s3cret", "abort", "fake_f1/abc", now=t0)
-    assert tok != L.confirm_token("other", "simulate", "fake_f1/abc", now=t0)
-    used = set()
-    assert L.confirm_ok("s3cret", "simulate", "fake_f1/abc", tok, used=used, now=t0 + 100) is True
-    assert L.confirm_ok("s3cret", "simulate", "fake_f1/abc", tok, used=used, now=t0 + 100) is False, "單次使用"
-    assert L.confirm_ok("s3cret", "simulate", "fake_f1/abc", "00000000", used=set(), now=t0) is False
-    prev = L.confirm_token("s3cret", "simulate", "fake_f1/abc", now=t0 - 600)
-    assert L.confirm_ok("s3cret", "simulate", "fake_f1/abc", prev, used=set(), now=t0) is True, "上一窗還收（窗邊界）"
-    old = L.confirm_token("s3cret", "simulate", "fake_f1/abc", now=t0 - 1200)
-    assert L.confirm_ok("s3cret", "simulate", "fake_f1/abc", old, used=set(), now=t0) is False, "兩窗前過期"
-
-
-def test_confirm_valid_checks_without_consuming():
-    """M15：驗證與消費分開——操作真的開始才記 used；被拒（busy／急停）不燒 token。"""
-    t0 = 1_700_000_000.0
-    tok = L.confirm_token("s3cret", "simulate", "k", now=t0)
-    used = set()
-    assert L.confirm_valid("s3cret", "simulate", "k", tok, used=used, now=t0) is True and used == set()
-    assert L.confirm_valid("s3cret", "simulate", "k", "00000000", used=used, now=t0) is False
-    used.add(tok)
-    assert L.confirm_valid("s3cret", "simulate", "k", tok, used=used, now=t0) is False
 
 
 def test_load_limits_from_root_file_default_when_missing_and_loud_when_broken(root):

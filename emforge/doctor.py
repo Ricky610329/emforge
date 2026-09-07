@@ -8,6 +8,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from . import _version, fs, model, netid
@@ -33,15 +34,21 @@ def ansysedt_running() -> bool:
 
 
 def probe_root(root) -> tuple:
-    """try_claim 一個探針檔再刪——驗可寫與 O_EXCL。回 (ok, 說明)。"""
-    probe = Path(root) / f".doctor_probe_{os.getpid()}"
+    """try_claim 一個探針檔再刪——驗可寫與 O_EXCL。回 (ok, 說明)。
+    #! 檢查 #8（2026-09-07）：探針名以前只綁 pid——同行程並發（worker 主執行緒／心跳刷說明檔／MCP thread pool 同時 health()）
+    #  互撞成假的「root 不可寫」；殘留（Ctrl-C 落在 claim 與 release 之間）永久擋住同 pid 的 open()。名字加隨機成分、finally 釋放，
+    #  殘留不再擋任何人。"""
+    probe = Path(root) / f".doctor_probe_{os.getpid()}_{uuid.uuid4().hex[:8]}"
     try:
         if not fs.try_claim(probe, {"at": model.now_iso()}):
-            return False, "探針檔已存在（上次 doctor 沒清？）"
-        fs.release(probe)
-        return True, "可寫、O_EXCL 正常"
+            return False, "探針檔已存在（同名撞檔？）"
     except OSError as e:
         return False, f"不可寫：{e}"
+    try:
+        fs.release(probe)
+    except (OSError, fs.FsBusy):
+        pass                                        # 探針名獨一，殘留不擋人
+    return True, "可寫、O_EXCL 正常"
 
 
 def _free_gb(path: Path) -> float:

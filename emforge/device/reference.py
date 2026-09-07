@@ -66,7 +66,7 @@ def _markdown(d: dict) -> str:
     lines += [f"- `{p['name']}`{'（會改狀態）' if p['mutating'] else ''}：{p['description']}" for p in d["procedures"]]
     lines += ["", "## 安全", "",
               "1. tool 允許名單＋`allowed_profiles`；2. `Limits` 硬限制；3. 前置檢查＝守門（profile_hash／geom_ver／labels）＋體檢；",
-              "4. 兩段式 confirm（token 10 分鐘窗、單次）；5. 急停三層（全機／單機／本機），open／simulate 前硬檢查，正在跑的那筆 abort。",
+              "4. 兩段式 confirm（token 每次不同、10 分鐘到期、單次）；5. 急停三層（全機／單機／本機），open／simulate 前硬檢查，正在跑的那筆 abort。",
               "", f"key：state `{d['keys']['state']}`、log `{d['keys']['log']}`、adhoc `{d['keys']['adhoc']}`、"
               f"急停 `{d['keys']['estop_fleet']}`／`{d['keys']['estop_device']}`。", ""]
     return "\n".join(lines)

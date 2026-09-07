@@ -241,3 +241,69 @@ def test_selfcheck_reports_depot_health_and_state(inst, monkeypatch):
     inst.start()
     sc = inst.selfcheck()
     assert sc["depot"] == [] and sc["health"]["blocking"] == [] and sc["state"] == "idle" and sc["problems"] == []
+
+
+# ── 檢查 #1（2026-09-07）：MCP 租約不重入 ─────────────────────────────────────
+def test_mcp_lease_never_reenters_only_queue_owner_may_resume(inst):
+    assert inst.acquire("queue:s1") and inst.acquire("queue:s1"), "worker 同一批續跑可重入"
+    assert inst.release("queue:s1")
+    assert inst.acquire("mcp:ricky") is True and inst.acquire("mcp:ricky") is False, "MCP 同名不重入"
+    assert inst.release("mcp:ricky")
+
+
+def test_concurrent_simulate_once_with_default_by_runs_exactly_one(root):
+    """repro t2_lease：兩個呼叫者都不帶 by（LLM 一輪並行兩個 tool call）→ 以前同 owner 重入、同機兩個模擬器、
+    先跑完的把對方的關掉、租約放掉。現在：恰一筆跑、另一筆 DeviceBusy、只建一個模擬器、每個開過的都被 close。"""
+    sims = []
+
+    def factory(wd, p):
+        s = testing.FakeSimulator(workdir=str(wd), profile=p, delay_s=0.4)
+        sims.append(s)
+        return s
+
+    inst = make_inst(root, sim_factory=factory)
+    inst.start()
+    b1, b2 = some_bits(11), some_bits(12)
+    t1 = inst.simulate_once(P.name, b1, by="mcp")["token"]
+    t2 = inst.simulate_once(P.name, b2, by="mcp")["token"]
+    out, go = {}, threading.Barrier(2)
+
+    def run(name, b, tok):
+        go.wait()
+        try:
+            out[name] = inst.simulate_once(P.name, b, by="mcp", confirm=tok)["status"]
+        except I.DeviceBusy:
+            out[name] = "busy"
+
+    ts = [threading.Thread(target=run, args=("A", b1, t1)), threading.Thread(target=run, args=("B", b2, t2))]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(out.values()) == ["busy", "done"], out
+    assert len(sims) == 1 and sims[0].calls["open"] == 1 and sims[0].calls["close"] == 1, "只開一個、而且關了"
+    assert inst.state.owner is None and inst.sim is None and inst._bound is None
+    inst.stop()
+
+
+# ── 檢查 #9（2026-09-07）：confirm token 每次不同、綁 op/key、會過期 ─────────────
+def test_confirm_tokens_unique_per_issue_bound_to_op_key_and_expire(root):
+    """以前 token＝sha1(secret|op|key|10 分鐘窗)：同窗同值、用過即燒 → 同一片十分鐘內量不了第二次，錯誤訊息還叫人「重拿」（拿回同一個）。
+    現在每次發的 token 帶 nonce：各自有效、消費即失效、綁 op/key、10 分鐘到期。"""
+    clock = [1_000.0]
+    inst = make_inst(root, clock=lambda: clock[0])
+    inst.start()
+    bits = some_bits(13)
+    t1 = inst.simulate_once(P.name, bits, by="ricky")["token"]
+    t2 = inst.simulate_once(P.name, bits, by="ricky")["token"]
+    assert t1 != t2 and len(t1) == len(t2) == 8, "同 op/key 每次發的 token 都不同"
+    assert inst.simulate_once(P.name, bits, by="ricky", confirm=t1)["status"] == "done"
+    assert inst.simulate_once(P.name, bits, by="ricky", confirm=t2)["status"] == "done", "同一片十分鐘內量第二次"
+    with pytest.raises(I.ConfirmRejected):
+        inst.simulate_once(P.name, bits, by="ricky", confirm=t2)                       # 重放
+    stop_tok = inst.issue_confirm("stop_worker", "queue/STOP.216")
+    assert inst.check_confirm("resume_worker", "queue/STOP.216", stop_tok) is False, "stop 的 token 不能拿去 resume"
+    assert inst.check_confirm("stop_worker", "queue/STOP.216", stop_tok) is True
+    clock[0] += inst.limits.confirm_window_s + 1
+    assert inst.check_confirm("stop_worker", "queue/STOP.216", stop_tok) is False, "過期"
+    inst.stop()

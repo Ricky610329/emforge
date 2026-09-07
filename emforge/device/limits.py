@@ -1,9 +1,9 @@
-"""emforge/device/limits.py — MHS 第 2–4 層：硬限制（`Limits`）、前置檢查（重用 `worker/gate.check`＋`doctor.health`）、
-兩段式確認（`confirm_token`／`confirm_ok`：sha1(secret|op|key|10 分鐘窗)[:8]，單次使用）。
+"""emforge/device/limits.py — MHS 第 2–4 層：硬限制（`Limits`）、前置檢查（重用 `worker/gate.check`＋`doctor.health`）。
+兩段式確認的 token 由 `Instrument.issue_confirm／check_confirm／consume_confirm` 管（每次不同、綁 op/key、`confirm_window_s` 到期，
+檢查 #9）；這裡只留窗長的預設值。
 
 限制是機制不含政策：值由 profile／doctor 現有常數與部署設定 `<root>/limits.json`（本機檔，`load_limits`；M16）來。
 """
-import hashlib
 import json
 from dataclasses import asdict, dataclass
 
@@ -71,34 +71,3 @@ def check_preconditions(profile, *, limits: Limits, depot, root, health: dict | 
     if h.get("free_gb") is not None and float(h["free_gb"]) < limits.min_free_gb and not any("GB" in p for p in problems):
         problems.append(f"系統碟剩餘 {h['free_gb']:.1f} GB 低於 min_free_gb {limits.min_free_gb:.0f}")
     return problems
-
-
-def _window(now: float, window_s: float) -> int:
-    return int(now // window_s)
-
-
-def _token(secret: str, op: str, key: str, window: int) -> str:
-    return hashlib.sha1(f"{secret}|{op}|{key}|{window}".encode("utf-8")).hexdigest()[:8]
-
-
-def confirm_token(secret: str, op: str, key: str, now: float, window_s: float = DEFAULT_CONFIRM_WINDOW_S) -> str:
-    """兩段式確認的 token：綁操作與對象（op／key），10 分鐘窗；同窗內穩定。"""
-    return _token(secret, op, key, _window(now, window_s))
-
-
-def confirm_valid(secret: str, op: str, key: str, token: str, *, used: set, now: float,
-                  window_s: float = DEFAULT_CONFIRM_WINDOW_S) -> bool:
-    """只驗不消費：本窗或上一窗（窗邊界寬限）的 token、且沒用過。操作真的開始才 `used.add`——被拒不燒 token。"""
-    if not token or token in used:
-        return False
-    w = _window(now, window_s)
-    return token in (_token(secret, op, key, w), _token(secret, op, key, w - 1))
-
-
-def confirm_ok(secret: str, op: str, key: str, token: str, *, used: set, now: float,
-               window_s: float = DEFAULT_CONFIRM_WINDOW_S) -> bool:
-    """驗證＋消費（記進 `used`，單次使用）。"""
-    if not confirm_valid(secret, op, key, token, used=used, now=now, window_s=window_s):
-        return False
-    used.add(token)
-    return True

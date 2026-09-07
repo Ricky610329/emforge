@@ -3,13 +3,16 @@
   states      idle ─open→ opening ─ok→ ready ─simulate→ busy ─→ ready ─close→ idle；open 失敗 → fault（close → idle）；
               任一層急停 → estop（open／simulate 拋 EstopEngaged；解除後 → idle）
   procedures  bind／open／simulate／kill／close（Simulator 協定直傳：run_batch 把 Instrument 當 sim 用）、abort、selfcheck、simulate_once
-  lease       acquire(owner)／release(owner)：非阻塞、一次一件；worker 用 `queue:<store>`、MCP 用 `mcp:<by>`；撞到＝拒＋lease_refused
-  safety      Limits／check_preconditions（open 前）／e-stop 硬檢查／兩段式 confirm（simulate_once）
+  lease       acquire(owner)／release(owner)：非阻塞、一次一件；worker 用 `queue:<store>`（同一批續跑可重入）、
+              MCP 用一次性 `mcp:<by>:<rand>`（**不重入**）；撞到＝拒＋lease_refused
+  safety      Limits／check_preconditions（open 前）／e-stop 硬檢查／兩段式 confirm（token 每次不同、綁 op/key、10 分鐘到期、單次）
 
 session 全程同一執行緒（COM apartment）；`kill()` 不經鎖、可跨執行緒。狀態字典只有這裡寫（轉換即寫＋心跳）；
 裝置日誌單寫者（`devices/<tag>/log.jsonl`）。`simulate_once` 結果與批結果同格式、**不入 db**（要 provenance 用 `smoke`）。
 """
+import hashlib
 import os
+import secrets
 import statistics
 import threading
 import time
@@ -25,7 +28,7 @@ from ..model import now_iso, record_id
 from ..worker.guard import guarded_call, open_with_retries
 from ..worker.workdir import WorkDir, default_work_root
 from . import estop, reference
-from .limits import Limits, check_preconditions, confirm_token, confirm_valid, load_limits
+from .limits import Limits, check_preconditions, load_limits
 from .states import DeviceState, write_state
 
 HISTORY_MAX = 50
@@ -69,7 +72,7 @@ class Instrument:
         self._owner: str | None = None
         self.sim = None
         self._bound: tuple | None = None         # (profile, workdir, store)
-        self._used_tokens: set = set()
+        self._issued: dict = {}                  # confirm token → (op, key, expires_at)；消費即移除
         self._hb: Heartbeat | None = None
         self._opened_once = False
         self._reference_at: float | None = None
@@ -122,8 +125,11 @@ class Instrument:
 
     # ── 租約 ────────────────────────────────────────────────────────────────
     def acquire(self, owner: str) -> bool:
+        """非阻塞、一次一件。同 owner 重入只給 worker 的 `queue:<store>`（同一批續跑）。
+        #! 檢查 #1（2026-09-07）：以前任何同名 owner 都可重入，而 MCP 的 owner＝`mcp:<by>`、`by` 有預設值——兩個呼叫者都不帶 by
+        #  就同時拿到儀器、同機開兩個 HFSS、先跑完的關掉對方的。現在 MCP owner 一次性且永不重入。"""
         with self._lock:
-            if self._owner is not None and self._owner != owner:
+            if self._owner is not None and (self._owner != owner or not owner.startswith("queue:")):
                 self.log("lease_refused", owner=owner, holder=self._owner)
                 return False
             self._owner = owner
@@ -144,15 +150,28 @@ class Instrument:
 
     # ── 兩段式確認（simulate_once／MCP 的 stop_worker 等共用） ─────────────
     def issue_confirm(self, op: str, key: str) -> str:
-        return confirm_token(self._secret, op, key, self._clock(), self.limits.confirm_window_s)
+        """發一個 token：sha1(secret|op|key|nonce|到期)[:8]，記在 `_issued`。
+        #! 檢查 #9（2026-09-07）：以前 token＝sha1(secret|op|key|10 分鐘窗)——同窗同值、用過即燒 → 同一件事十分鐘內做不了第二次，
+        #  錯誤訊息還叫人「重拿」（拿回同一個）。現在每次發的都不同（nonce）、消費即失效、綁 op/key、confirm_window_s 後到期。"""
+        now = self._clock()
+        expires_at = now + float(self.limits.confirm_window_s)
+        nonce = secrets.token_hex(4)
+        token = hashlib.sha1(f"{self._secret}|{op}|{key}|{nonce}|{expires_at:.0f}".encode("utf-8")).hexdigest()[:8]
+        with self._lock:
+            self._issued = {t: v for t, v in self._issued.items() if v[2] >= now}      # 順手清過期
+            self._issued[token] = (op, key, expires_at)
+        return token
 
     def check_confirm(self, op: str, key: str, token: str | None) -> bool:
-        """只驗不消費：操作真的開始再 `consume_confirm`——被拒（busy／急停）不燒 token（同窗同值，燒了＝十分鐘內不能重試）。"""
-        return confirm_valid(self._secret, op, key, token or "", used=self._used_tokens, now=self._clock(),
-                             window_s=self.limits.confirm_window_s)
+        """只驗不消費：發過、op/key 相符、未到期、未消費。操作真的開始再 `consume_confirm`——被拒（busy／急停）不燒 token。"""
+        with self._lock:
+            rec = self._issued.get(token or "")
+        return rec is not None and rec[0] == op and rec[1] == key and self._clock() <= rec[2]
 
     def consume_confirm(self, token: str) -> None:
-        self._used_tokens.add(token)
+        """消費＝從 `_issued` 移除；之後重放即 ConfirmRejected。"""
+        with self._lock:
+            self._issued.pop(token, None)
 
     # ── 急停 ────────────────────────────────────────────────────────────────
     def estop_engaged(self) -> dict | None:
@@ -275,7 +294,7 @@ class Instrument:
         if not self.check_confirm("simulate", op_key, confirm):
             raise ConfirmRejected(f"token {confirm!r} 不對、過期或用過（先不帶 confirm 拿新 token）")
         self._check_estop()                      # 急停：不燒 token、不搶租約
-        owner = f"mcp:{by}"
+        owner = f"mcp:{by}:{secrets.token_hex(4)}"    # 一次性 owner：兩個 MCP 呼叫永遠不同名，不可能「重入」（檢查 #1）
         if not self.acquire(owner):
             raise DeviceBusy(f"儀器 {self.tag} 被 {self._owner} 持有")
         stamp = time.strftime("%Y%m%d%H%M%S")
