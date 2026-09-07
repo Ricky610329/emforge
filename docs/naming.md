@@ -144,3 +144,15 @@ EMFORGE_PLATFORM_TOKEN 只經環境傳遞，不寫程式包、參數或執行紀
 冪等 request_id 限定在 run_id 內；sid 是平台對兩者的雜湊，不同算法可各用 round_0。
 client 等到 runtime 入庫才算完成，worker.done 只是前一個階段。
 已驗證兩個真算法子行程、兩個假模擬端、真 socket 三輪迴圈。
+
+
+## Release 與維護
+- 共享 runtime_state/<profile>/MAINTENANCE.json：停止新派工的 owner 控制。
+- inflight.intent：原子落地的派工意圖，含固定 manifest、job、patterns。
+- releases-root 的 releases/<rel_sha256>/manifest.json 與 source/：驗證紀錄與程式快照。
+- releases-root 的 service_state.json、service_request.json、service_child.json：行程狀態、更新要求、ready 證據。
+- service.lock、release.lock：本機 supervisor 所有權及快照序列化鎖。
+- service_logs/<launch_id>.log：每個平台子行程 stdout；不清除歷史。
+- state.notarize_deferred：維護期间尚未派出的公證候選 id/store。
+- identity.spec_snapshot、submission.spec_snapshot：固定評估定義，舊格式可缺。
+所有磁碟名透過 paths.py；不使用通用任意檔案寫入 MCP。

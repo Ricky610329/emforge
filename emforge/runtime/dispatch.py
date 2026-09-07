@@ -34,15 +34,17 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
         return None
     ids = [record_id(p.pattern, profile.name) for p in keep]
     items = {rid: {"parent": p.parent, "arm": p.arm, "note": dict(p.note), "tag": p.tag, "run_id": p.run_id} for rid, p in zip(ids, keep)}
-    rt.depot.put_json(paths.inflight_file(profile.name, store),
-                      {"store": store, "strategy": strategy_name, "tick": tick, "seed": seed, "kind": kind,
-                       "prio": prio, "ids": ids, "items": items, "collected": [], "at": now_iso()})
     manifest = {"store": store, "sim_profile": profile.name, "profile_hash": profile.profile_hash,
                 "strategy": strategy_name, "tick": tick, "seed": seed, "prio": prio, "kind": kind,
                 "items": [{"id": rid, **items[rid]} for rid in ids]}
+    job = Job(store=store, sim_profile=profile.name, profile_hash=profile.profile_hash, prio=prio,
+              n=len(ids), machine=machine, origin=origin, by=origin, at=now_iso())
+    intent = {"manifest": manifest, "job": job.to_dict(), "patterns": [p.pattern.astype(int).tolist() for p in keep]}
+    rt.depot.put_json(paths.inflight_file(profile.name, store),
+                      {"store": store, "strategy": strategy_name, "tick": tick, "seed": seed, "kind": kind,
+                       "prio": prio, "ids": ids, "items": items, "collected": [], "at": now_iso(), "intent": intent})
     Batch(rt.depot, store).write(manifest, np.stack([p.pattern for p in keep]), ids)
-    rt.queue.add(Job(store=store, sim_profile=profile.name, profile_hash=profile.profile_hash, prio=prio,
-                     n=len(ids), machine=machine, origin=origin, by=origin))
+    rt.queue.add(job)
     rt.event("batch_dispatched", store=store, strategy=strategy_name, n=len(ids), prio=prio, tick=tick, seed=seed,
              kind=kind)
     if kind == KIND_SAMPLE:

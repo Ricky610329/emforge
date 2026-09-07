@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 
+from dataclasses import asdict
 from . import paths, profiles, specs
 from .db import Database
 from .depot import open_depot
@@ -11,7 +12,7 @@ from .model import canonical_json, now_iso, record_id, sha1_hex
 from .strategy import validate_proposals
 
 
-def submit(depot, profile, name, run_id, items, request_id=None, spec=None):
+def submit(depot, profile, name, run_id, items, request_id=None, spec=None, spec_snapshot=None):
     depot = open_depot(depot)
     p = profiles.get_profile(profile)
     for value in (name, run_id):
@@ -20,7 +21,8 @@ def submit(depot, profile, name, run_id, items, request_id=None, spec=None):
     if name in paths.RESERVED_STRATEGY_NAMES:
         raise ValueError("算法名稱為保留字")
     spec = spec or p.spec
-    if specs.get_spec(spec).measure != p.measure:
+    evaluator = specs.frozen(spec, spec_snapshot)
+    if evaluator.measure != p.measure:
         raise ValueError("評估器與量測 profile 不相容")
     props = validate_proposals(items, p, len(items))
     if not props:
@@ -31,12 +33,13 @@ def submit(depot, profile, name, run_id, items, request_id=None, spec=None):
            if request_id else "s_" + uuid.uuid4().hex)
     key = paths.submission(profile, sid)
     data = {"profile": profile, "profile_hash": p.profile_hash, "name": name,
-            "run_id": run_id, "sid": sid, "spec": spec,
+            "run_id": run_id, "sid": sid, "spec": spec, "spec_snapshot": asdict(evaluator),
             "items": [encode(p, profile) for p in props]}
     with depot.lock(paths.submission_lock(profile, sid), owner=uuid.uuid4().hex):
         old = depot.get_json(key)
         if old is not None:
-            if canonical_json({k: v for k, v in old.items() if k not in ("at", "order")}) != canonical_json(data):
+            compared = data if "spec_snapshot" in old else {k: v for k, v in data.items() if k != "spec_snapshot"}
+            if canonical_json({k: v for k, v in old.items() if k not in ("at", "order")}) != canonical_json(compared):
                 raise ValueError("同 request_id 已存在不同送件內容")
             return sid
         depot.put_json(key, {**data, "at": now_iso(), "order": time.time_ns()})
@@ -113,7 +116,7 @@ def results(depot, doc):
         rec = db.try_load(doc["profile"], paths.record_stem(ref["id"], ref["store"]))
         if rec:
             meta = rec.meta()
-            meta["score"] = specs.score(doc["spec"], rec.measure) if rec.status == "done" else None
+            meta["score"] = specs.frozen(doc["spec"], doc.get("spec_snapshot")).score(rec.measure) if rec.status == "done" else None
             out.append({"index": ref["index"], "meta": meta, "bits": rec.bits.astype(int).tolist(),
                         "response": rec.response.tolist() if rec.response is not None else None})
     return out

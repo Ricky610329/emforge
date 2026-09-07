@@ -6,7 +6,7 @@
 
 分數只在 runtime 算（策略自評＝離線考，C-17 三度失敗）。
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 import numpy as np
 
@@ -109,3 +109,14 @@ def measure(name: str, response, labels) -> dict:
 
 def score(spec_name: str, measured: dict) -> float | None:
     return get_spec(spec_name).score(measured)
+
+
+def snapshot(name):
+    return asdict(get_spec(name))
+
+
+def frozen(name, definition=None):
+    spec = Spec(**definition) if definition else get_spec(name)
+    if spec.name != name:
+        raise ValueError("spec 快照名稱不一致")
+    return spec

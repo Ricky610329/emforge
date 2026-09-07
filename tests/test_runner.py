@@ -182,3 +182,33 @@ def test_algorithm_cli_register_start_stop(root, tmp_path, capsys):
         assert main(["algorithm-start","--endpoint",url,"--name","anneal","--version",version,
                      "--run-id","cli_run","--node","gpu_a","--environment","ant","--profile","fake_f1"]) == 0
         assert main(["algorithm-stop","--endpoint",url,"--run-id","cli_run"]) == 0
+
+
+def test_hosted_anneal_example_three_rounds(root, tmp_path):
+    import json
+    from pathlib import Path
+    import emforge
+    from emforge import testing, paths
+    from emforge.runtime import collect
+    rt = setup(root)
+    service = Platform(rt.depot)
+    source = Path(emforge.__file__).parent.parent / "examples" / "anneal" / "main.py"
+    version = register(service, code=source.read_text(encoding="utf-8"))
+    with serving(service) as url, Runner(tmp_path / "node", url, "gpu_a", {"ant": sys.executable}) as runner:
+        runner.tick()
+        service.call("run_start", name="anneal", version=version, run_id="example_run", node="gpu_a",
+                     environment="ant", profile="fake_f1", budget=5, params={"rounds": 3})
+        deadline = time.monotonic()+20
+        while time.monotonic() < deadline:
+            runner.tick()
+            rt.tick()
+            testing.run_all_jobs(root)
+            collect.collect(rt)
+            state = service.call("run_status", run_id="example_run")
+            if state["state"] in ("completed", "failed"):
+                break
+            time.sleep(.03)
+        assert state["state"] == "completed", state
+        work = paths.runner_work(tmp_path / "node", "example_run")
+        assert json.loads((work / "checkpoint.json").read_text())["step"] == 3
+        assert len(service.call("run_logs", run_id="example_run")["algorithm"]) == 3

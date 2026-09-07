@@ -143,3 +143,13 @@ def test_algorithm_paths_snapshot(root):
     assert paths.algorithm_version("anneal", "pkg_a") == "algorithms/anneal/pkg_a.json"
     assert paths.runner_work(root,"run_a") == root / "runs" / "run_a" / "work"
     assert paths.runner_source_file(root,"run_a","main.py") == root / "runs" / "run_a" / "source" / "main.py"
+
+
+def test_release_and_maintenance_paths(tmp_path):
+    assert paths.maintenance("fake_f1") == "runtime_state/fake_f1/MAINTENANCE.json"
+    assert paths.release_manifest("rel_a") == "releases/rel_a/manifest.json"
+    assert paths.release_host(tmp_path, "rel_a") == tmp_path / "releases/rel_a/source/emforge/release/host.py"
+    assert paths.algorithm_nodes_dir() == "algo_nodes/"
+    assert paths.service_key("state") == "service_state.json"
+    assert paths.service_key("request") == "service_request.json"
+    assert paths.service_stdout(tmp_path, "launch_a") == tmp_path / "service_logs/launch_a.log"

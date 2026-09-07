@@ -41,3 +41,30 @@ def test_metrics_gate_denominator_includes_missing():
     assert result["gate_pass_rate"] == pytest.approx(1/3)
     assert result["metrics"]["a"]["mean"] == 3
     assert result["metrics"]["c"]["best"] == 2
+
+
+def test_frozen_run_and_submission_survive_registry_spec_change(root, monkeypatch):
+    from emforge import specs, testing
+    from emforge.client import Client
+    from emforge.platform.service import Platform
+    from emforge.runtime import collect
+    from tests.test_client import setup, patterns
+    rt = setup(root)
+    service = Platform(rt.depot)
+    service.call("node_heartbeat", node="node_a", session="session", environments=["ant"], max_runs=1)
+    version = service.call("algorithm_register", name="anneal", files={"main.py": "pass"}, entrypoint="main.py")
+    service.call("run_start", name="anneal", version=version, run_id="frozen", node="node_a",
+                 environment="ant", profile="fake_f1")
+    client = Client(rt.depot, "fake_f1", "anneal", run_id="frozen")
+    sid = client.submit(patterns(1))
+    rt.tick()
+    testing.run_all_jobs(root)
+    collect.collect(rt)
+    original = client.results(sid)[0].score
+    old = specs.get_spec(rt.profile.spec)
+    monkeypatch.setitem(specs._SPECS, old.name, replace(old, offsets=tuple(x+100 for x in old.offsets)))
+    assert client.results(sid)[0].score == original
+    assert service.call("evaluate", profile="fake_f1", run_id="frozen")["result"][-1]["best"] == original
+    another = client.submit(patterns(1))
+    rt.tick()
+    assert client.results(another)[0].score == original

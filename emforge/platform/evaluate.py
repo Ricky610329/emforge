@@ -1,6 +1,7 @@
 """HTTP／CLI／MCP 的共同評估服務，從原始 measure 重算同一 spec。"""
 from .. import costs, evaluation, paths, profiles, report, specs
 from ..db import Database
+from ..device.states import read_fleet
 
 EVALUATION_OPERATIONS = {"evaluate", "report", "run_usage", "platform_state"}
 
@@ -13,7 +14,7 @@ class EvaluationOperations:
         frozen = run["identity"]["spec"] if run else None
         if frozen and spec and spec != frozen:
             raise ValueError("run 評估須使用執行時固定的 spec")
-        evaluator = specs.get_spec(frozen or spec or p.spec)
+        evaluator = specs.frozen(frozen or spec or p.spec, run["identity"].get("spec_snapshot") if run else None)
         if evaluator.measure != p.measure:
             raise ValueError("spec 與 profile 的 measure 不相容")
         records = Database(self.depot).view(profile).query()
@@ -42,4 +43,7 @@ class EvaluationOperations:
         return costs.usage(self.depot, profile, run_id)
 
     def platform_state(self):
-        return {"runs": self.run_list(), "profiles": self.db_profiles()}
+        nodes = [self.depot.get_json(k) for k in self.depot.list(paths.algorithm_nodes_dir()) if k.endswith(".json")]
+        return {"runs": self.run_list(), "profiles": self.db_profiles(), "fleet": read_fleet(self.depot),
+                "nodes": [{**n, "offline": self.depot.now()-n["heartbeat"] >= 90} for n in nodes if n],
+                "runtimes": {p.name: self.depot.get_json(paths.status_json(p.name)) for p in profiles.all_profiles()}}

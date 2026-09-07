@@ -59,3 +59,21 @@ def test_submit_and_inbox_cli_over_network(root, tmp_path, capsys):
         assert capsys.readouterr().out.strip().startswith("s_")
         assert main(["inbox", "--endpoint", url, "--profile", "fake_f1"]) == 0
         assert "run_cli" in capsys.readouterr().out
+
+
+def test_platform_overview_includes_idle_nodes_runtime_and_spec(root):
+    from emforge.platform.service import Platform
+    from emforge.platform.http_server import serving
+    from emforge.platform.transport import RemotePlatform
+    from tests.test_client import setup
+    rt = setup(root)
+    rt.write_status()
+    with serving(Platform(rt.depot)) as url:
+        remote = RemotePlatform(url)
+        remote.call("node_heartbeat", node="idle_node", session="session", environments=["ant"], max_runs=1)
+        state = remote.call("platform_state")
+        assert state["nodes"][0]["node"] == "idle_node"
+        assert not state["nodes"][0]["offline"]
+        assert state["runtimes"]["fake_f1"]["profile"] == "fake_f1"
+        assert state["fleet"] == []
+        assert remote.call("description", profile="fake_f1")["spec_snapshot"]["aggregate"] == "min"

@@ -1,5 +1,5 @@
 """平台語意操作；HTTP、MCP 與本機 client 共用，寫量測仍只有 runtime。"""
-from .. import paths, profiles, submissions
+from .. import paths, profiles, submissions, specs
 from ..db import Database
 from ..depot import open_depot
 from ..model import now_iso
@@ -28,9 +28,11 @@ class Platform(RunOperations, EvaluationOperations):
     def description(self, profile):
         p = profiles.get_profile(profile)
         return {"name": p.name, "shape": list(p.shape), "fixed_on": p.fixed_on.astype(int).tolist(),
-                "labels": list(p.labels), "spec": p.spec, "profile_hash": p.profile_hash}
+                "labels": list(p.labels), "spec": p.spec, "profile_hash": p.profile_hash,
+                "measure": p.measure, "spec_snapshot": specs.snapshot(p.spec)}
 
     def submit(self, profile, name, run_id, items, request_id=None, spec=None):
+        spec_snapshot = None
         run = self.depot.get_json(paths.algorithm_run(run_id))
         if run:
             identity = run["identity"]
@@ -39,9 +41,10 @@ class Platform(RunOperations, EvaluationOperations):
             if spec is not None and spec != identity["spec"]:
                 raise ValueError("執行固定評估版本，不能中途換 spec")
             spec = identity["spec"]
+            spec_snapshot = identity.get("spec_snapshot")
             if run["desired"] != "running":
                 raise ValueError("執行已停止接收新送件")
-        return submissions.submit(self.depot, profile, name, run_id, items, request_id, spec)
+        return submissions.submit(self.depot, profile, name, run_id, items, request_id, spec, spec_snapshot)
 
     def _doc(self, profile, name, run_id, sid):
         doc = self.depot.require_json(paths.submission(profile, sid))

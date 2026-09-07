@@ -59,11 +59,13 @@ class RunOperations:
         if not isinstance(budget, int) or isinstance(budget, bool) or budget < 1:
             raise ValueError("budget 必須為正整數")
         identity = dict(name=name, version=version, run_id=run_id, node=node, environment=environment,
-                        profile=profile, params=params or {}, seed=seed, budget=budget, spec=spec, resume_from=resume_from)
+                        profile=profile, params=params or {}, seed=seed, budget=budget, spec=spec, resume_from=resume_from,
+                        spec_snapshot=specs.snapshot(spec))
         with self.depot.lock(paths.platform_lock(run_id), owner=uuid.uuid4().hex):
             old = self.depot.get_json(paths.algorithm_run(run_id))
             if old:
-                if canonical_json(old["identity"]) != canonical_json(identity):
+                compared = identity if "spec_snapshot" in old["identity"] else {k: v for k, v in identity.items() if k != "spec_snapshot"}
+                if canonical_json(old["identity"]) != canonical_json(compared):
                     raise ValueError("相同 run_id 不可換版本或參數；請建立新執行")
                 return self.run_status(run_id)
             host = self.depot.get_json(paths.algorithm_node(node))

@@ -4,6 +4,10 @@
 只看本 profile、origin=runtime 的 job；別的實例、cli:smoke 之類不歸這個 runtime 管。
 """
 from .. import paths
+from . import recovery
+
+def recover(rt):
+    return recovery.recover(rt)
 
 
 def reconcile(rt) -> list:

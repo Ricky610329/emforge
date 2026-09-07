@@ -37,7 +37,8 @@ DEPOT_ONLY_MODULES = (
     "algorithms.py", "costs.py", "platform/runs.py", "runner/__init__.py",
     "db.py", "batches.py", "ledger.py", "queue.py", "report.py",
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
-    "runtime/schedule.py",
+    "cli/release.py", "release/__init__.py", "release/host.py",
+    "runtime/schedule.py", "runtime/recovery.py",
     "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py",
     "device/__init__.py", "device/states.py", "device/reference.py", "device/mcp_server.py", "device/mcp_client.py",
     "cli/__init__.py", "cli/__main__.py", "cli/control.py", "cli/show.py", "cli/verdict.py", "cli/loops.py",
@@ -62,6 +63,9 @@ DEPOT_ONLY_PARTIAL = {
 }
 #? LOCAL_LAYER：本機層／後端本體，本來就認得檔案系統。值＝理由；新增模組不准隨手放這裡。
 LOCAL_LAYER = {
+    "release/store.py": "本機 release 快照及隔離 Python 驗證",
+    "release/supervisor.py": "本機平台行程與版本切換",
+    "release/probe.py": "建立隔離假資料目錄做端到端探針",
     "cli/algorithm.py": "讀取使用者指定程式碼目錄、啟動本機算法節點",
     "runner/node.py": "算法本機行程、工作目錄與輸出",
     "runner/environment.py": "本機 Python 環境與程式碼展開",

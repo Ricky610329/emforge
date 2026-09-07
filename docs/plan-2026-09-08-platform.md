@@ -19,6 +19,6 @@ agent 驗證後可自動發布；不 push、不部署真 HFSS、不修改 Antenn
 ## 進度
 基線 634a48c：519 passed。
 里程碑一 2d4c7c5：523 passed；二 2324e35：528 passed；三 df14ed0：568 passed。
-里程碑四：算法節點/固定版本/預算/續跑/兩算法兩模擬端三輪驗收完成，完整測試執行中。
-
-里程碑四 822b1f8：577 passed。里程碑五：評估、門檻與平台 MCP 已實作，完整驗證中。
+里程碑四 822b1f8：577 passed；五 9aa2a69：582 passed。
+里程碑六：release/supervisor、派工意圖恢復、評估快照與退火範例完成；595 passed，pyflakes 全綠。
+操作說明見 platform-quickstart.md。

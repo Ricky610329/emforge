@@ -210,9 +210,12 @@ class Runtime:
         self.apply_control()
         self.reload_config()
         new = _collect.collect(self)
-        _notarize.notarize_step(self, new)
+        maintenance = self.depot.get_json(paths.maintenance(self.profile_name))
+        _notarize.notarize_step(self, new, dispatch_new=not maintenance)
         self.save_state()                    # 公證登記不能只在記憶體（死在 schedule 裡會丟）
-        if self.fleet_quiet():
+        if maintenance:
+            pass
+        elif self.fleet_quiet():
             self.event("fleet_quiet", quiet_s=self.config.runtime.quiet_s)
         else:
             _schedule.schedule(self)
@@ -233,6 +236,8 @@ class Runtime:
         status = {
             "profile": self.profile_name, "profile_hash": self.profile.profile_hash, "runtime_ver": _version.describe(),
             "pid": os.getpid(), "machine": self.machine_tag, "tick": self.state["tick"], "last_tick_at": now_iso(),
+            "release_version": os.environ.get("EMFORGE_RELEASE_VERSION"),
+            "maintenance": self.depot.get_json(paths.maintenance(self.profile_name)),
             "paused_profile": self.state.get("paused_profile"), "strategies": strategies,
             "inflight": [{"store": i["store"], "strategy": i["strategy"], "kind": i["kind"], "n": len(i["ids"]),
                           "n_collected": len(i["collected"]), "queue_state": self.queue.state(i["store"]),
@@ -247,7 +252,7 @@ class Runtime:
         self.depot.put_json(paths.status_json(self.profile_name), status)
 
     # ── run ─────────────────────────────────────────────────────────────
-    def run(self, once: bool = False) -> int:
+    def run(self, once: bool = False, ready=None) -> int:
         """0＝正常停；1＝連續 TICK_ERROR_LIMIT 個 tick 例外（或 --once 時一次）；2＝對帳不一致拒起（I-14）；3＝鎖丟了（被破／被清）。
         鎖被占直接拋 RuntimeLocked（CLI 轉 3）。"""
         self.acquire_lock()
@@ -261,11 +266,13 @@ class Runtime:
             if self.db.unreadable:                             # 檢查 #4：壞檔不停實例，但要點名
                 self.event("db_unreadable", profile=self.profile_name, n=len(self.db.unreadable),
                            stems=[stem for _, stem in self.db.unreadable])
-            problems = _reconcile.reconcile(self)
+            problems = _reconcile.recover(self) + _reconcile.reconcile(self)
             if problems:
                 self.event("reconcile_mismatch", detail="; ".join(problems))
                 self.event("runtime_stop", reason="reconcile_mismatch")
                 return 2
+            if ready is not None:
+                ready()
             errors = 0
             while True:
                 self.heartbeat()

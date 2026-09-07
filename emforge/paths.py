@@ -287,3 +287,35 @@ def runner_stdout(root, run_id):
     return runner_dir(root, run_id) / "stdout.log"
 def runner_stop(root, run_id):
     return runner_dir(root, run_id) / "STOP"
+
+
+def maintenance(profile):
+    return f"{runtime_dir(profile)}MAINTENANCE.json"
+
+
+def release_manifest(version):
+    return platform_key("release", version) + "/manifest.json"
+
+def release_source(root, version):
+    return Path(root) / platform_key("release", version) / "source"
+
+def release_source_file(root, version, name):
+    from .algorithms import check_source_path
+    return release_source(root, version) / check_source_path(name)
+
+def service_key(kind):
+    names = {"state": "service_state.json", "request": "service_request.json", "lock": "service.lock",
+             "child": "service_child.json", "release_lock": "release.lock"}
+    return names[kind]
+
+def service_stdout(root, launch):
+    platform_key("release", launch)
+    return Path(root) / "service_logs" / (launch + ".log")
+
+
+def release_host(root, version):
+    return release_source_file(root, version, "emforge/release/host.py")
+
+
+def algorithm_nodes_dir():
+    return platform_key("nodes") + "/"

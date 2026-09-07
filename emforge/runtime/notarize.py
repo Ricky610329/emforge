@@ -12,11 +12,17 @@ from ..model import KIND_REPEAT, KIND_SAMPLE, STATUS_DONE, Proposal, now_iso
 from .dispatch import dispatch
 
 
-def notarize_step(rt, new_records: list) -> None:
+def notarize_step(rt, new_records: list, dispatch_new=True) -> None:
     cfg = rt.config.runtime
     nz = rt.state.setdefault("notarize", {})
     _complete_ongoing(rt, nz, cfg)
-    _open_candidates(rt, nz, cfg, new_records)
+    deferred = rt.state.setdefault("notarize_deferred", [])
+    if not dispatch_new:
+        deferred.extend([r.id, r.run["store"]] for r in new_records if r.kind == KIND_SAMPLE)
+        return
+    saved = [rt.db.try_load(rt.profile_name, paths.record_stem(rid, store)) for rid, store in deferred]
+    _open_candidates(rt, nz, cfg, [r for r in saved if r is not None] + new_records)
+    rt.state["notarize_deferred"] = []
 
 
 def _complete_ongoing(rt, nz: dict, cfg) -> None:

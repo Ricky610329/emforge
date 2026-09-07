@@ -491,3 +491,20 @@ platform-mcp --endpoint http://127.0.0.1:8766 --port 8767，端點 /mcp；
 platform_query 只准唯讀操作；inbox_submit 的單次短效 token 綁定整個 payload。
 agent 可自行完成兩次呼叫，不需人工逐筆批准；送件以 run 內 request_id 冪等。
 algorithm_start／algorithm_stop 只操作已註冊版本及指定節點；沒有改碼、promote 或解除急停工具。
+
+
+## 更新與恢復（平台里程碑六）
+release/store.py 凍結候選、用指定既有 Python 跑完整測試/pyflakes/fake 探針；
+release/supervisor.py 為穩定啟停端，release/host.py 是被替換的 HTTP/runtime 行程。
+release/cli 接線在 cli/release.py。完整操作見 platform-quickstart.md。
+runtime/recovery.py 驗證 inflight.intent 的 manifest/job/patterns，補完未發布的派工；
+既有 manifest、patterns、job 任一對不上即拒絕。舊 inflight 缺意圖時維持原對帳限制。
+MAINTENANCE 期間仍 collect，notarize_deferred 保存新公證候選，沒有新派工。
+新版本啟動後先恢復/對帳再公布 ready，HTTP 健康檢查成功才移除維護旗標。
+停止/鎖清理只匹配本 supervisor 的 owner 與本行程的 runtime_owner；不動獨立模擬行程。
+已驗證真行程版本切換、進行中量測保留、啟動失败回退，以及 runner 的三輪退火範例。
+更新只支援相容 schema，不回滾量測資料、不熱換 bootstrap 或模擬端程式。
+run 與 submission 現存完整 spec_snapshot；新版本不改變舊執行評估定義。
+runtime status 額外提供 release_version；無 supervisor 的舊入口回 null。
+
+platform_state 同時列出所有算法節點（含 idle/offline）、run、runtime 狀態與模擬機 fleet；description 提供 spec_snapshot。
