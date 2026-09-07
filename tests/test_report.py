@@ -12,12 +12,12 @@ from emforge import events, model, paths, report, testing
 P = testing.FAKE_PROFILE
 
 
-def _rec(seed, strategy, arm, score, store="s", worker_ver="v1", profile=P.name):
+def _rec(seed, strategy, arm, score, store="s", worker_ver="v1", profile=P.name, kind="sample"):
     b = np.random.default_rng(seed).random(P.shape) > 0.5
     b[P.fixed_on] = True
     return model.Record(id=model.record_id(b, profile), sim_profile=profile, bits=b, response=np.zeros((2, 17), np.float32),
                         measure={"m1": score}, score=score, status="done", strategy=strategy, arm=arm, parent=None,
-                        tick=1, seed=seed, note={}, kind="sample",
+                        tick=1, seed=seed, note={}, kind=kind,
                         run={"store": store, "machine": "216", "worker_ver": worker_ver, "profile_hash": "h", "time_s": 1.0})
 
 
@@ -101,3 +101,23 @@ def test_report_warns_when_store_has_two_worker_vers(root):
     warns = report.worker_ver_warnings(d, P.name)
     assert warns and "t1" in warns[0] and "v1" in warns[0] and "v2" in warns[0]
     assert "⚠" in report.report(root, [P.name], k_min=1)
+
+
+def test_report_blind_reference_excludes_notarize_repeats(root):
+    """檢查 #3（2026-09-07）：公證重測沿用 arm=blind、kind=repeat——同一片的三次重複量測不是三個獨立 blind 樣本：
+    不進參考分佈、不灌 blind_n（k_min 閘）；P(勝 blind) 公證前後不變。notarize 列照列、仍不可比。"""
+    testing.make_fake_root(root)
+    d = dbm.Database(root)
+    for i in range(25):
+        d.add(_rec(100 + i, "blind", "blind", -float(i), store="b1"))              # blind 冠軍＝seed 100、score 0.0
+    for i in range(25):
+        d.add(_rec(200 + i, "top_k_flip", None, -float(i) + 0.5, store="t1"))
+    before = {r["strategy"]: r for r in report.strategy_rows(d, P.name, k_min=20)}
+    assert report.blind_count(d, P.name) == 25 and 0.4 < before["top_k_flip"]["p_beats_blind"] < 0.6, "分佈要重疊測試才有意義"
+    for n in range(3):
+        d.add(_rec(100, "notarize", "blind", 0.0, store=f"nz{n}", kind="repeat"))
+    after = {r["strategy"]: r for r in report.strategy_rows(d, P.name, k_min=20)}
+    assert report.blind_count(d, P.name) == 25, "重測不灌 blind_n"
+    assert after["top_k_flip"]["p_beats_blind"] == before["top_k_flip"]["p_beats_blind"], "重測不改 P"
+    assert after["notarize"]["n_done"] == 3 and after["notarize"]["comparable"] is False
+

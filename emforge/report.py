@@ -9,7 +9,7 @@ import numpy as np
 from . import paths, strategy
 from .db import Database
 from .depot import open_depot
-from .model import ARM_BLIND, STATUS_DONE
+from .model import ARM_BLIND, KIND_REPEAT, STATUS_DONE
 
 DEFAULT_K_MIN = 20
 NON_COMPARABLE = {"notarize"}              # runtime 自己產出的重測
@@ -48,14 +48,22 @@ def _dup_dropped(depot, profile: str) -> dict:
     return out
 
 
+def _blind_reference(metas) -> list:
+    """blind 參考分佈：arm=blind 的 done 樣本，**排除公證重測**。
+    #! 檢查 #3（2026-09-07）：notarize 的重測沿用 arm、kind=repeat——同一片重量三次不是三個獨立樣本，以前灌水 blind_n 過 k_min
+    #  閘、把三筆同值塞進分佈頂端，P(勝 blind) 零新增樣本就翻盤（實測 0.52 → 0.47）。"""
+    return [m for m in metas if m["status"] == STATUS_DONE and m["score"] is not None
+            and m["arm"] == ARM_BLIND and m.get("kind") != KIND_REPEAT]
+
+
 def blind_count(db: Database, profile: str) -> int:
-    return sum(1 for m in db.metas(profile) if m["status"] == STATUS_DONE and m["score"] is not None and m["arm"] == ARM_BLIND)
+    return len(_blind_reference(db.metas(profile)))
 
 
 def strategy_rows(db: Database, profile: str, *, k_min: int = DEFAULT_K_MIN) -> list:
     metas = db.metas(profile)
     done = [m for m in metas if m["status"] == STATUS_DONE and m["score"] is not None]
-    blind = [m["score"] for m in done if m["arm"] == ARM_BLIND]
+    blind = [m["score"] for m in _blind_reference(done)]
     dup = _dup_dropped(db.depot, profile)
     conservative: dict = {}
     for m in done:
