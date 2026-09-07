@@ -143,7 +143,7 @@ state.tick += 1 → save_state     #! tick 號一加就落地：中途死掉重�
 ```
 `run(once)`：acquire_lock（`Depot.claim`；stale → `break_if_stale`，沒破到＝別人先破，重試 claim 決勝負）→ 背景心跳執行緒（每 `heartbeat_s`=30 s touch 鎖；一個 tick 超過 stale 門檻也不會被第二個實例破鎖，review-7）
 → runtime_start → `db.refresh`（索引 append 前死掉的檔補回去，事件 index_repaired）→ `reconcile()` 不一致 → 事件 reconcile_mismatch、**return 2**（I-14）
-→ 迴圈：heartbeat（鎖不見了或換主 → 事件 lock_lost、runtime_stop、**return 3**，M13 收 §12-16）→ STOP 檔 → runtime_stop；tick；sleep(tick_s)。
+→ 迴圈：heartbeat（鎖不見了或換主 → 事件 lock_lost、runtime_stop、**return 3**，M13 收 §12-16）→ STOP 檔 → runtime_stop；tick（例外 → `tick_error` 續跑，連續 `TICK_ERROR_LIMIT`＝10 次或 `--once` → **return 1**，檢查 #7）；sleep(tick_s)。起動時 `db.refresh` 跳過讀不到的紀錄並發 `db_unreadable`（檢查 #4）。
 `status.json["fleet"]`＝`device.states.read_fleet` 摘要（tag／state／owner／store／n_done／offline…）。
 `Runtime(readonly=True)`（CLI smoke／abandon 用）：不拿鎖、`save_state` 拋——別用舊快照覆寫跑著的 runtime（review-4）。
 
@@ -204,7 +204,7 @@ strategies:
 每筆前急停 → `job_yield reason=estop_engaged` 並放掉**自己的** claim（急停可能只停這台，別台可續跑）；正在跑的那筆由 `guard.guarded_call(abort_if=急停, poll_s=5)` 殺掉 → 結果 `error: aborted: estop_engaged`（吃一次 attempts、不重開、不算保險絲）。
 `Instrument.open()` 前：急停硬檢查 → `limits.check_preconditions`（allowed_profiles → `gate.check` → timeout_s ≤ max_sample_s → `doctor.health` 阻擋；開過一次後「ansysedt 在跑」不算阻擋——那是自己的）。
 `inst` 沒給就自建、收工時 `stop()`；M15 的 MCP server 與迴圈共用同一台。
-**故障邊界**（review-6）：gate 之後的任何例外（FsBusy／PermissionError／FileNotFoundError…）→ 那批 `.fail` 記 `worker_exception:…`、claim 釋放、工作目錄清掉、**worker 繼續**下一個 job；`fs.release` 對 sharing violation 退避重試；接管 `.fail` 時檔已被別台搶走＝輸了競賽、跳過。
+**故障邊界**（外圈，檢查 #7）：一圈裡（STOP／急停／pick／log／release）的任何例外 → `worker_error` 事件、睡一輪續跑，連續 `WORKER_ERROR_LIMIT`＝10 圈才收工回 1；`--once` 遇急停給一個 poll 寬限再 `worker_stop reason=estop`（檢查 #15）。**故障邊界**（內圈，review-6）：gate 之後的任何例外（FsBusy／PermissionError／FileNotFoundError…）→ 那批 `.fail` 記 `worker_exception:…`、claim 釋放、工作目錄清掉、**worker 繼續**下一個 job；`fs.release` 對 sharing violation 退避重試；接管 `.fail` 時檔已被別台搶走＝輸了競賽、跳過。
 
 `gate`（順序固定、不建構不 open）：profile 註冊且未退役 → job.profile_hash == 註冊表 → 載入類別、geom_ver（模擬器宣告 None＝單邊跳過）→ labels。
 
@@ -257,18 +257,18 @@ def propose(ctx):
 | `device-simulate --url U --profile P --bits B\|@file [--confirm T --by WHO --timeout-s S]` | 經 MCP 對一台儀器跑一筆（兩段式：先印 token，再帶 `--confirm`）；token 讀 `EMFORGE_DEVICE_TOKEN`；結果印 JSON、不入 db | 0；tool 錯誤（`device_busy:…` 等）1 |
 | `device-state <tag>`／`device-describe <tag> [--json]` | 一台的狀態字典／說明檔（open 成功後才有） | 0；尚無 1 |
 | `device-estop engage [--tag T \| --local] --by WHO --reason R` | 按急停（全機／單機／本機層）；儀器 open／simulate 硬擋、正在跑的那筆 abort、worker 不撿 | 0；缺 --reason 1 |
-| `device-estop clear [--tag T \| --local] --confirm` | **唯一**解除急停的路徑（MCP 沒有） | 0；沒 --confirm 2 |
+| `device-estop clear [--tag T \| --local] --confirm` | **唯一**解除急停的路徑（MCP 沒有）；--tag／--local 互斥 | 0；沒 --confirm 2；沒東西可清 1 |
 
 任何未預期例外 → stderr `emforge: <Type>: <msg>`、exit 1。
 
 ## 9. 事件（`events.py`，封閉集合）
 
-runtime：`runtime_start runtime_stop lock_lost reconcile_mismatch config_reloaded config_invalid fleet_quiet profile_paused profile_resumed index_repaired`
+runtime：`runtime_start runtime_stop lock_lost tick_error reconcile_mismatch config_reloaded config_invalid fleet_quiet profile_paused profile_resumed index_repaired db_unreadable`
 策略：`strategy_loaded strategy_rejected strategy_error strategy_timeout strategy_paused strategy_resumed strategy_empty proposals_validated(n_in,n_dup,n_out)`
 派收：`batch_dispatched dispatch_failed record_added batch_done batch_failed batch_abandoned batch_requeued profile_tamper`
 公證：`record_candidate notarize_dispatched notarize_pass notarize_reject`
 榜：`promoted retired rescored ledger_tamper`
-worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample_error job_done job_failed job_yield(reason: claim_taken_over|foreground_job_appeared|estop_engaged|device_busy) gate_rejected sim_restart worker_stop`
+worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample_error job_done job_failed job_yield(reason: claim_taken_over|foreground_job_appeared|estop_engaged|device_busy) gate_rejected sim_restart worker_error worker_stop`
 儀器（devices/<tag>/log.jsonl，單寫者＝該台 Instrument）：`device_start device_stop device_fault device_simulate device_abort lease_refused estop_engaged estop_cleared device_serve(url,host,port,auth) device_stop_worker device_resume_worker`（後三個＝M15 MCP）
 
 ## 10. AI 加值層怎麼接
@@ -316,9 +316,9 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | 10 第 0 輪不看 attempts | attempts<3 | worker/test_batch::pass0_skips_poison_samples… |
 | 砍掉的 | promote 依本榜 spec 重算；_threshold 走 checksum；requeue 看進度＋claim 心跳；watch 接管瞬間；匯入器預設鍵；例外改名 | test_ledger::promote_with_other_spec…；runtime/test_notarize::threshold_on_tampered_ledger…；test_queue::requeue_refuses_when_batch_has_recent_progress…、touch_claim…、watch_treats_vanishing_fail…；legacy::map_profile_ignores_solver_keys… |
 
-## 11c. 2026-09-07 全面檢查 → P0 修正 → 釘住的測試
+## 11c. 2026-09-07 全面檢查 → P0／P1／P2 修正 → 釘住的測試
 
-完整清單 `docs/review-2026-09-07.md`（1 S1／24 S2／20 S3）；P0 十條已修，其餘照該檔的 P1–P3 順序。
+完整清單 `docs/review-2026-09-07.md`（1 S1／24 S2／20 S3）；P0 十條、P1 十條、P2 七條已修（同日兩輪），剩 P3 與 #12。
 
 | 檢查 # | 修了什麼 | commit | 測試 |
 |---|---|---|---|
@@ -332,6 +332,22 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 | 10 deploy 把 EMFORGE_ROOT 指 NAS | deploy.md §2：本機 root ＋ `EMFORGE_DEPOT=file://T:/…`；start_worker 警告 | 本 commit | —（文件；fail-closed 留 P1，§12-28） |
 | 13 MCP 埠撞靜默死、url 已宣告 | `server.started` 才 announce；綁不上 → RuntimeError → CLI exit 1 | `8502f8a` | device/test_mcp_server::serve_in_thread_raises_and_does_not_announce…、…real_socket_announces_after_bind…；test_cli::worker_serve_reports_mcp_bind_failure…、device_serve_reports_bind_failure… |
 | 14 EMFORGE_MCP_PORT 壞值全命令 traceback | `--port` 走 argparse 型別（只在用到時轉） | `8502f8a` | test_cli::mcp_port_env_bad_value_only_bites_serve_commands_via_argparse |
+| 4 一個壞 .npz 讓 run 起不來；索引真清空不壓實 | `Reader.try_load` 跳過並記 `unreadable`、refresh／View 走它、索引剔除靠 `exists()`；起動發 `db_unreadable` | `1799a8f` | test_db::refresh_skips_unreadable_record…、refresh_skips_record_listed_but_gone…、view_skips_record_whose_file_became_unreadable、refresh_drops_index_line_only_when_file_confirmed_missing；runtime/test_core::run_starts_despite_corrupt_record_file… |
+| 11 策略的 View 反手可寫、未綁 profile | 讀的一半拆 `Reader`，View 只持 Reader；`make_context` 綁 `write_profile`；refresh 也過守門 | `1799a8f` | test_db::view_holds_no_database_reference、refresh_refuses_other_profile_when_write_bound；test_strategy::make_context_database_is_write_bound… |
+| 7 worker 主迴圈／tick 沒有故障邊界 | `_loop` 外圈 try：`worker_error` 續跑、連續 10 才回 1；`Runtime.run` 的 tick 同（`tick_error`） | `7e83a76` | worker/test_loop::loop_survives_depot_error_in_pick…、loop_exits_1_after_ten_consecutive_errors；runtime/test_core::run_survives_transient_tick_error…、run_exits_1_after_ten_consecutive_tick_errors、run_once_returns_1_on_tick_error |
+| 15 急停中 --once 不返回 | 一個 poll 寬限後 `worker_stop reason=estop` | `7e83a76` | worker/test_loop::loop_once_returns_when_estop_stays_engaged |
+| 20 機器 tag 靠 IP 探測 | 沒 --machine-tag／EMFORGE_MACHINE → stderr 警告；start_worker.cmd 拒起；deploy §2 setx | `7e83a76` | test_cli::worker_warns_when_machine_tag_comes_from_ip_probe |
+| 21 device-estop --tag 與 --local 同給、clear 沒東西回 0 | 互斥組（argparse exit 2）；沒東西可清 exit 1 | `7e83a76` | test_cli::device_estop_tag_and_local_are_mutually_exclusive… |
+| 16 limits.json 不驗型別 | `Limits.__post_init__` 驗型別／範圍，`load_limits` 指名檔案與欄位 | `203b32f` | device/test_limits::limits_json_rejects_wrong_types_naming_the_file_and_field |
+| 17 _restart 的 kill 打空 | kill→close→open | `203b32f` | worker/test_batch::restart_via_instrument_kills_before_close… |
+| 18 close 無處決線 | `guard.close_quiet`（60 s 逾時 kill）；Instrument.close 與批收尾都走它 | `203b32f` | device/test_instrument::close_has_a_watchdog…；worker/test_batch::close_quiet_has_a_watchdog… |
+| 19 磁碟守門量錯碟 | `doctor.health(work_root=)`；儀器傳 `self.work.root` | `203b32f` | test_doctor::health_measures_the_given_work_root…；device/test_instrument::open_checks_free_space_of_the_instrument_work_root |
+| 22 子行程 depot 路徑零覆蓋 | 兩條真子行程測試 | `8777f07` | test_strategy::propose_in_subprocess_reopens_file_depot_under_cjk_root；runtime/test_core::run_once_with_default_subprocess_propose |
+| 23／25 測試耦合真機狀態與環境變數 | conftest autouse 釘體檢、pop 整組 EMFORGE_* | `8777f07` | test_smoke::suite_is_pinned_against_live_machine_state_and_env |
+| 24 一條測試無終止上限 | sleep 計數超過 20 就 request_stop | `8777f07` | worker/test_loop::loop_stop_file_finishes_current_job_then_exits |
+| 31（＋#27）MemoryDepot 註冊表 | 匿名不註冊、同名拋、`clear_registry`、未註冊的 `memory://` 拋 | `8777f07` | depot/test_memory::open_depot_memory_same_name_same_instance |
+| 44 六條靜默 skip | pytest 表頭印啟用／跳過；README／CLAUDE 註明 | `8777f07` | —（表頭） |
+| 45 Queue 鎖 owner 非每實例獨一 | 加 urandom 後綴；契約補 lock 層測試 | `8777f07` | test_queue::queue_lock_owner_is_unique_per_instance；depot/test_contract::lock_holder_broken_and_reclaimed_does_not_delete_the_new_lock_on_exit |
 
 ## 12. 已知失效模式（給獨立稽核的 brief 用）
 
@@ -353,8 +369,8 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 16. 心跳執行緒與主迴圈共用 `Depot.touch`。讀到**別人的** owner → 立刻 `lost`、主迴圈下一圈 `lock_lost`＋停（回 3；正在跑的 tick 跑完）。讀不到（缺／SMB 瞬斷）＝不知道：連續 `LOCK_UNREADABLE_BEATS`＝3 拍（30 s × 3）仍讀不到才算丟（檢查 #5：以前一拍讀不到就永久停）。代價：鎖真的被清掉後最多再跑約 2 個 tick；那段時間第二個實例若拿到鎖，兩邊各跑一個 tick（dispatch 去重靠 db／inflight）。
 17. `promote --spec` 的分數重算用 `Record.measure`（量測凍結）；spec 若換了 measure 名（＝換儀器）`rescore` 會拒，但 promote 不會——它只認 spec 名有沒有註冊。
 18. `FileDepot.break_if_stale` 不是仲裁：Windows 上兩個並發 rename 可以都成功（契約測試實抓）；破鎖後一律接 `claim`，claim 才決勝負。mtime 身分檢查把誤搬的新鎖放回去，但「放回」在第三方剛好又 claim 到的微秒窗會失敗（留 `.broken.*` 證據、回 False）。
-19. `list` 可最終一致的後端（S3）：`db.refresh` 對「列舉回空而索引非空」不壓實；`inflight()` 對「列到但讀不到」跳過；`Batch.results` 同。其餘列舉呼叫端（`report`、`profiles()`）還沒逐一審過。
-20. `memory://` depot 只存在本行程：`run` 自動 in-process；`worker --depot memory://…` 會什麼都撿不到（另一個行程的 runtime 看不見）——只給測試與單行程 demo。
+19. `list` 可最終一致的後端（S3）：`db.refresh` 索引剔除只在 `exists()` 確認缺檔時做（不靠列舉為空）、列到但讀不到／解不開的跳過並記 `unreadable`（View 的 query／top／measurements 同；起動發 `db_unreadable`，檢查 #4）；`inflight()`、`Batch.results` 對「列到但讀不到」跳過。其餘列舉呼叫端（`report`、`profiles()`）還沒逐一審過。
+20. `memory://` depot 只存在本行程：`run` 自動 in-process；未註冊的名字 `open_depot` 直接拋（另一個行程永遠拿不到、也不會靜默開出空庫，檢查 #31／#27）——只給測試與單行程 demo，用前要在本行程 `MemoryDepot(name=…)`。
 21. 急停的三層都是「檔存在即真」，**沒有簽章**：任何能寫 depot 的人都能 engage／clear（clear 走 CLI 只是流程約束，不是權限）。正在跑的那筆被殺是 `abort_if` 每 `estop_poll_s`（5 s）查一次 depot——急停到真的殺掉最多晚 5 s；殺完那筆算 error（attempts+1），三次急停剛好落在同一筆會把它三振成毒樣本。
 22. 儀器租約（`Instrument.acquire`）是**行程內**的鎖（同機只能一個 HFSS 使用者、MCP 與 worker 同一行程），不在 depot——換機器看不到；跨機協調仍靠 queue 的 claim。`status.json["fleet"]`／`fleet` 的 `offline` 只是「心跳年齡 > 90 s」，儀器行程死掉與 NAS 斷線分不出來。MCP 的 owner 是一次性 `mcp:<by>:<rand>`、永不重入；只有 worker 的 `queue:<store>` 可重入（同一批續跑）（檢查 #1）。
 23. `check_preconditions` 每次 `open()` 都跑 `doctor.health`（含 `tasklist`，~0.1 s）與 `depot.selfcheck()`（建一個探針檔）；重開頻繁（保險絲冷卻）時會多幾次 NAS 往返。「開過一次後 ansysedt 在跑不算阻擋」假設殘留的 ansysedt 是自己的——同機有人手開 HFSS 就抓不到。
@@ -364,6 +380,7 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 27. `pythoncom.CoInitialize()` 只在 `open()` 叫、從不 `CoUninitialize`：SDK 的 thread pool 執行緒重用，同一條 thread 多次 open 重複 CoInitialize（無害，回 S_FALSE）；HFSS COM 物件跨執行緒（開在 thread A、下一筆在 thread B）是否成立**未在正式機驗證**——`simulate_once` 一筆一開一關（同一條 thread 內）刻意避開這個問題。
 28. **depot 讀不到時急停 fail-open**：三層急停都靠 `exists`，`FileDepot.exists` 對 OSError 回 False → NAS 斷線時 fleet／device 層讀成「沒有急停」；本機層只有在 `EMFORGE_ROOT` 真的在本機碟時才擋得住（deploy.md §2 已改兩個根分開）。「讀不到就當 engaged」（fail-closed）尚未做——P1，檢查 #10。
 29. `worker --serve`／`device-serve` 綁不上埠 → exit 1、不跑 worker（檢查 #13）；預綁檢查與 uvicorn 真正綁定之間有微秒級 TOCTOU，撞到會以 RuntimeError 收場、不會靜默。
+30. 故障邊界是「續跑」不是「修好」：worker 一圈／runtime 一個 tick 的例外會吞掉續跑，連續 10 次才停（`worker_error`／`tick_error` 事件是唯一線索）；depot 長時間斷線＝10 個 poll／tick 後行程結束，仍然沒有 supervisor（start_worker.cmd 是一次性）。`close()` 的處決線 60 s：quit() 卡住會被 kill，HFSS 專案可能沒存乾淨（我們本來就不留專案）。
 
 ## 13. 與 architecture.md 的偏差
 
