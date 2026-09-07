@@ -67,6 +67,19 @@ def guarded_call(fn, timeout_s: float, on_timeout, *, abort_if=None, poll_s: flo
             raise
 
 
+CLOSE_TIMEOUT_S = 60.0   #? quit() 的處決線：COM 呼叫可以無例外地永遠不回來（檢查 #18）
+
+
+def close_quiet(sim, timeout_s: float | None = None) -> None:
+    """關模擬器帶處決線：逾時就 kill 再往下走；任何例外吞掉（關不掉就殺，殺不掉也不能讓收尾炸）。
+    #! 檢查 #18（2026-09-07）：以前只有 open／simulate 有看門狗，close 裸奔——quit() 卡住＝worker 主迴圈永遠卡在 finally、
+    #  simulate_once 的租約永不釋放（fleet 還顯示線上）。"""
+    try:
+        guarded_call(sim.close, timeout_s or CLOSE_TIMEOUT_S, sim.kill)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def open_with_retries(sim, *, attempts: int = 3, timeout_s: float = 300.0, sleep=time.sleep,
                       retry_wait_s: float = 15.0, fatal: tuple = ()) -> None:
     """開模擬器最多 attempts 次，每次帶看門狗；失敗就 kill、等 retry_wait_s 再試；用盡拋 SimulatorOpenFailed。

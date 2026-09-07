@@ -1,7 +1,7 @@
 """emforge/worker/batch.py — `run_batch`：一批的逐筆迴圈。只組裝 guard／fuse／workdir／儀器，不認得領域。
 
 流程：建工作目錄 → 建＋開模擬器（三試）→ 第 0 輪跑「還沒 done 的」（續跑）→ 補測輪跑「error 且 attempts<3 的」
-（每輪前殺透重開）→ 每筆：看門狗下 simulate → 逐筆結果檔 → 保險絲 → 讓位檢查 → 結束一律關模擬器、刪工作目錄。
+（每輪前殺透重開：kill→close→open）→ 每筆：看門狗下 simulate → 逐筆結果檔 → 保險絲 → 讓位檢查 → 結束一律關模擬器（帶處決線）、刪工作目錄。
 回傳 "done"（跑完；殘留 error 記在結果檔）／"yield"（claim 被搶、讓位給前景、急停）／"fail"（熔斷或開不起來）。
 結果檔只有原始響應與戳記；量測與評分是 runtime 的事。
 
@@ -16,6 +16,7 @@ from ..batches import error_result, make_result, result_base
 from ..device.estop import EstopEngaged
 from ..device.instrument import PreconditionFailed
 from .fuse import Fuse
+from . import guard
 from .guard import Aborted, SimulatorOpenFailed, WatchdogTimeout, guarded_call, open_with_retries
 from .workdir import WorkDir
 
@@ -178,17 +179,16 @@ def _yield_reason(run: _Run) -> str | None:
 
 
 def _restart(run: _Run, reason: str) -> None:
+    """殺透重開：kill → close → open。
+    #! 檢查 #17（2026-09-07）：以前 close→kill——經 Instrument 時 close() 先把 sim 設 None，kill 打空（殘留 ansysedt 沒人收）。"""
     run.log("sim_restart", store=run.job.store, reason=reason)
-    _close_quiet(run.sim)
     try:
         run.sim.kill()
     except Exception:  # noqa: BLE001
         pass
+    _close_quiet(run.sim)
     open_with_retries(run.sim, sleep=run.sleep, fatal=OPEN_FATAL)
 
 
 def _close_quiet(sim) -> None:
-    try:
-        sim.close()
-    except Exception:  # noqa: BLE001 — 關不掉就殺，殺不掉也不能讓收尾炸
-        pass
+    guard.close_quiet(sim)          # 帶處決線（檢查 #18）

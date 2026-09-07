@@ -43,3 +43,22 @@ def test_load_limits_from_root_file_default_when_missing_and_loud_when_broken(ro
     with pytest.raises(ValueError, match="limits.json"):
         L.load_limits(root)
     assert set(L.LIMITS_TEMPLATE) == set(L.Limits().to_dict()), "init 範本欄位＝Limits 欄位"
+
+
+def test_limits_json_rejects_wrong_types_naming_the_file_and_field(root):
+    """檢查 #16：`{"allowed_profiles": "dual_p01_db075"}`（少一對中括號）以前逐字元變 tuple → 所有 profile 都不准；
+    `{"max_sample_s": "1800"}` 以前開機時 TypeError 被當機器卡住重試三次判死整批。現在跟壞 JSON 一樣指名檔案與欄位拒起。"""
+    import pytest
+    from emforge import paths
+    p = paths.limits_json(root)
+    for text, field in (('{"allowed_profiles": "dual_p01_db075"}', "allowed_profiles"),
+                        ('{"max_sample_s": "1800"}', "max_sample_s"),
+                        ('{"min_free_gb": -1}', "min_free_gb"),
+                        ('{"confirm_window_s": true}', "confirm_window_s"),
+                        ('{"allowed_profiles": [1, 2]}', "allowed_profiles")):
+        p.write_text(text, encoding="utf-8")
+        with pytest.raises(ValueError, match="limits.json") as ei:
+            L.load_limits(root)
+        assert field in str(ei.value), text
+    with pytest.raises(ValueError, match="allowed_profiles"):
+        L.Limits(allowed_profiles="x")

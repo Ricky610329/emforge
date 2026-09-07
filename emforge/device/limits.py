@@ -23,7 +23,17 @@ class Limits:
     confirm_window_s: float = DEFAULT_CONFIRM_WINDOW_S
 
     def __post_init__(self):
-        object.__setattr__(self, "allowed_profiles", tuple(self.allowed_profiles))
+        #! 檢查 #16（2026-09-07）：以前只擋壞 JSON、不驗型別——"allowed_profiles": "dual"（少一對中括號）逐字元變 tuple＝全部 profile 不准；
+        #  "max_sample_s": "1800" 開機時 TypeError 被當機器卡住。現在指名欄位拒。
+        ap = self.allowed_profiles
+        if isinstance(ap, str) or not isinstance(ap, (list, tuple)) or not all(isinstance(x, str) and x for x in ap):
+            raise ValueError(f"allowed_profiles 要是 profile 名字的 list，拿到 {ap!r}")
+        object.__setattr__(self, "allowed_profiles", tuple(ap))
+        for name in ("max_sample_s", "min_free_gb", "confirm_window_s"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
+                raise ValueError(f"{name} 要是正數，拿到 {v!r}")
+            object.__setattr__(self, name, float(v))
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -51,7 +61,10 @@ def load_limits(root) -> tuple:
         raise ValueError(f"{p}：limits.json 不是合法 JSON（{e}）") from None
     if not isinstance(d, dict):
         raise ValueError(f"{p}：limits.json 頂層要是物件")
-    return Limits.from_dict(d), str(p)
+    try:
+        return Limits.from_dict(d), str(p)
+    except ValueError as e:
+        raise ValueError(f"{p}：limits.json 欄位不對——{e}") from None
 
 
 def check_preconditions(profile, *, limits: Limits, depot, root, health: dict | None = None) -> list:

@@ -313,3 +313,40 @@ def test_run_batch_via_instrument_precondition_failed_is_fail_without_retries(ro
     assert out == "fail" and res == {} and failed and failed[0]["reason"].startswith("precondition_failed")
     assert 15.0 not in sleeps and "sim_restart" not in [e for e, _ in events]
     inst.stop()
+
+
+def test_restart_via_instrument_kills_before_close_so_kill_reaches_the_sim(root, claimed):
+    """檢查 #17：_restart 以前 close→kill——Instrument.close() 先把 sim 設 None，kill 打空（殺不透，殘留 ansysedt 累積）。
+    現在 kill→close→open，殺透那一下打在舊模擬器上。"""
+    q, b, job, ids = claimed
+    sims = []
+
+    def factory(wd, p):
+        s = testing.FakeSimulator(workdir=str(wd), profile=p, hang_ids={ids[0]} if not sims else ())
+        sims.append(s)
+        return s
+
+    inst = _inst(root, q, factory=factory)
+    inst.start()
+    out, res, events, _ = _run(root, claimed, instrument=inst, timeout_s=0.3, retry_passes=0)
+    inst.stop()
+    assert out == "done" and res[ids[0]]["error"].startswith("watchdog_timeout")
+    assert ("sim_restart", {"store": job.store, "reason": "watchdog_timeout"}) in events
+    assert len(sims) == 2, "重開＝新的模擬器"
+    assert sims[0].calls["kill"] == 2 and sims[0].calls["close"] == 1, "看門狗一次＋重開前殺透一次，都打在舊模擬器上"
+
+
+def test_close_quiet_has_a_watchdog_that_kills_a_hung_close(root, monkeypatch):
+    """檢查 #18：COM 的 quit() 可以無例外地永遠不回來——以前 _close_quiet 只有 try/except，卡住抓不到。"""
+    from emforge.worker import guard
+    monkeypatch.setattr(guard, "CLOSE_TIMEOUT_S", 0.3)
+
+    class _HangClose(testing.FakeSimulator):
+        def close(self):
+            self.calls["close"] += 1
+            self._killed.wait(5)
+
+    sim = _HangClose(workdir=str(root / "w"), profile=P)
+    t0 = time.time()
+    wb._close_quiet(sim)
+    assert time.time() - t0 < 3 and sim.calls["kill"] == 1 and sim.calls["close"] == 1

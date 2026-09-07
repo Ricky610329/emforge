@@ -43,3 +43,12 @@ def test_probe_root_is_concurrency_safe_and_ignores_leftover_probes(root):
         t.join()
     assert len(results) == 8 and all(ok for ok, _ in results), results
     assert [p.name for p in root.iterdir() if p.name.startswith(".doctor_probe_")] == [leftover.name], "自己的探針不留"
+
+
+def test_health_measures_the_given_work_root_not_the_default(root, monkeypatch):
+    """檢查 #19：health(work_root=…) 量指定的碟；沒給才量 default_work_root()。"""
+    seen = []
+    monkeypatch.setattr(doctor, "_free_gb", lambda p: seen.append(str(p)) or 100.0)
+    monkeypatch.setattr(doctor, "ansysedt_running", lambda: False)
+    h = doctor.health(root, work_root=root / "scratch")
+    assert seen == [str(root / "scratch")] and h["work_root"] == str(root / "scratch")

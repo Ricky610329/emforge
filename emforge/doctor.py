@@ -58,11 +58,12 @@ def _free_gb(path: Path) -> float:
     return shutil.disk_usage(p).free / 1e9
 
 
-def health(root, *, depot=None) -> dict:
+def health(root, *, depot=None, work_root=None) -> dict:
     """機器事實（純函式、不印）：儀器層前置檢查與 `run` 共用。`blocking` 非空＝不准起 worker／開儀器。
-    `depot` 給就跑 `selfcheck()`（時鐘偏移＝阻擋：租約全靠伺服器側 modified_at vs 本機 now）。"""
+    `depot` 給就跑 `selfcheck()`（時鐘偏移＝阻擋：租約全靠伺服器側 modified_at vs 本機 now）。
+    `work_root`＝實際會寫 HFSS 專案的碟（檢查 #19：`--work-root D:\\…` 時 I-1 的守門以前量錯碟）；沒給才用預設。"""
     root_ok, root_msg = probe_root(root)
-    work = default_work_root()
+    work = Path(work_root) if work_root else default_work_root()
     free = _free_gb(work)
     hfss = ansysedt_running()
     problems = [] if depot is None else list(open_depot(depot).selfcheck())

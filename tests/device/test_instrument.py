@@ -307,3 +307,37 @@ def test_confirm_tokens_unique_per_issue_bound_to_op_key_and_expire(root):
     clock[0] += inst.limits.confirm_window_s + 1
     assert inst.check_confirm("stop_worker", "queue/STOP.216", stop_tok) is False, "過期"
     inst.stop()
+
+
+def test_close_has_a_watchdog_that_kills_a_hung_quit(root, monkeypatch):
+    """檢查 #18：quit() 不回來以前讓 simulate_once 卡在 finally、租約永不釋放；現在 close 帶處決線（逾時 kill 再往下走）。"""
+    from emforge.worker import guard
+    monkeypatch.setattr(guard, "CLOSE_TIMEOUT_S", 0.3)
+
+    class _HangClose(testing.FakeSimulator):
+        def close(self):
+            self.calls["close"] += 1
+            self._killed.wait(5)
+
+    inst = make_inst(root, sim_factory=lambda wd, p: _HangClose(workdir=str(wd), profile=p))
+    inst.start()
+    inst.bind(P, inst.work.make("s1"), store="s1")
+    inst.open()
+    sim = inst.sim
+    t0 = time.time()
+    inst.close()
+    assert time.time() - t0 < 3 and sim.calls["kill"] == 1 and inst.state.state == "idle"
+    inst.stop()
+
+
+def test_open_checks_free_space_of_the_instrument_work_root(root, monkeypatch):
+    """檢查 #19：`--work-root D:\\scratch` 時 I-1 的磁碟守門以前量的是預設工作碟（%LOCALAPPDATA%），不是 HFSS 真正寫的那顆。"""
+    from emforge import doctor
+    monkeypatch.setattr(doctor, "ansysedt_running", lambda: False)
+    monkeypatch.setattr(doctor, "_free_gb", lambda p: 100.0 if str(p) == str(root / "w2") else 0.1)
+    inst = make_inst(root, work_root=root / "w2")
+    inst.start()
+    inst.bind(P, inst.work.make("s1"), store="s1")
+    inst.open()
+    assert inst.state.state == "ready" and inst.state.free_gb == 100.0
+    inst.stop()

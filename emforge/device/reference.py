@@ -34,7 +34,7 @@ def render(inst) -> tuple:
     d = {"tag": inst.tag, "worker_ver": inst.state.worker_ver, "state": inst.state.state, "pid": inst.state.pid,
          "url": inst.state.url, "generated_at": now_iso(), "profiles": prof, "limits": inst.limits.to_dict(),
          "limits_source": inst.limits_source,
-         "health": doctor.health(inst.root, depot=inst.depot), "median_time_s": inst.median_time_s(),
+         "health": doctor.health(inst.root, depot=inst.depot, work_root=inst.work.root), "median_time_s": inst.median_time_s(),
          "estop": inst.estop_engaged(), "procedures": [dict(p) for p in PROCEDURES],
          "keys": {"state": paths.device_state(inst.tag), "log": paths.device_log(inst.tag),
                   "adhoc": paths.adhoc_dir(inst.tag), "estop_device": paths.estop_device(inst.tag),

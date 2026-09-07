@@ -25,7 +25,7 @@ from ..batches import error_result, make_result, result_base
 from ..depot import FileDepot, open_depot
 from ..heartbeat import Heartbeat
 from ..model import now_iso, record_id
-from ..worker.guard import guarded_call, open_with_retries
+from ..worker.guard import close_quiet, guarded_call, open_with_retries
 from ..worker.workdir import WorkDir, default_work_root
 from . import estop, reference
 from .limits import Limits, check_preconditions, load_limits
@@ -205,7 +205,7 @@ class Instrument:
             raise RuntimeError("open() 前先 bind(profile, workdir)")
         profile, workdir, store = self._bound
         self._check_estop()
-        h = doctor.health(self.root, depot=self.depot)
+        h = doctor.health(self.root, depot=self.depot, work_root=self.work.root)   # 量儀器真正用的碟（檢查 #19）
         if self._opened_once:
             #? 冷啟動才把「ansysedt 已在跑」當阻擋（舊 worker 沒停）；這台開過一次之後，殘留的 ansysedt 是自己的（kill()／重開會收）。
             h["blocking"] = [b for b in h["blocking"] if "ansysedt" not in b]
@@ -255,10 +255,7 @@ class Instrument:
     def close(self) -> None:
         sim, self.sim = self.sim, None
         if sim is not None:
-            try:
-                sim.close()
-            except Exception:  # noqa: BLE001 — 關不掉就算了（kill 已做過或呼叫端會做）
-                pass
+            close_quiet(sim)              # 帶處決線：quit() 卡住就 kill 再往下走（檢查 #18）
         self._set("idle" if self.state.state != "estop" else None, profile=None, profile_hash=None, store=None,
                   current_id=None, sample_started_at=None)
 
@@ -276,7 +273,7 @@ class Instrument:
 
     def selfcheck(self) -> dict:
         problems = list(self.depot.selfcheck())
-        h = doctor.health(self.root, depot=self.depot)
+        h = doctor.health(self.root, depot=self.depot, work_root=self.work.root)   # 量儀器真正用的碟（檢查 #19）
         return {"depot": problems, "health": h, "state": self.state.state, "owner": self._owner,
                 "estop": self.estop_engaged(), "problems": problems + list(h["blocking"])}
 
