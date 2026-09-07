@@ -14,7 +14,6 @@ import numpy as np
 from .. import paths, specs
 from ..batches import Batch
 from ..model import KIND_SAMPLE, STATUS_DONE, STATUS_ERROR, Record, now_iso
-from ..queue import DEFAULT_STALE_S
 
 
 def collect(rt) -> list:
@@ -118,8 +117,10 @@ def abandon(rt, store: str, *, by: str) -> dict:
     inf = rt.depot.get_json(key)
     if inf is None:
         raise ValueError(f"{store} 不在 {rt.profile_name} 的 inflight")
-    if rt.queue.state(store) == "claimed" and not rt.depot.is_stale(paths.claim_file(store), DEFAULT_STALE_S):
-        raise ValueError(f"{store} 有新鮮 claim（{rt.queue.claim_owner(store)} 正在跑）——先 stop 那台")
+    #! 檢查 #2（2026-09-07）：接管後原主的 mark_fail 讓 .fail 與新鮮 claim 並存，`state()` 回 fail——只看 state()=="claimed"
+    #  會放行、把正在量的批標 done、之後的結果沒人收。與 requeue 同一把尺：is_live（有主 claim 且新鮮或批有進度）。
+    if rt.queue.is_live(store):
+        raise ValueError(f"{store} 有人正在跑（{rt.queue.claim_owner(store)}）——先 stop 那台再 abandon")
     batch = Batch(rt.depot, store)
     collected = set(inf["collected"])
     results = batch.results(known_ids=collected)

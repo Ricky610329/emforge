@@ -34,6 +34,8 @@ def default_strategy_state() -> dict:
     return {"errors_consecutive": 0, "paused": False, "n_dispatched": 0, "last_dispatch_tick": None}
 
 
+LOCK_UNREADABLE_BEATS = 3   #? 心跳連續幾拍讀不到鎖才算丟（30 s × 3；一拍瞬斷不停整晚）
+
 class Runtime:
     def __init__(self, root, profile_name: str, *, depot=None, sleep=time.sleep, propose_fn=None,
                  machine_tag: str | None = None, readonly: bool = False, heartbeat_s: float = 30.0):
@@ -57,7 +59,7 @@ class Runtime:
         self.config = strategy.parse_strategies_yaml(text.decode("utf-8"), profile=profile_name)
         self._config_sha = sha1_hex(text)
         self.state = self.depot.get_json(paths.state_json(profile_name)) or default_state()
-        self._locked, self._lost = False, False
+        self._locked, self._lost, self._lock_unreadable = False, False, 0
 
     # ── 鎖（租約；心跳＝touch） ───────────────────────────────────────────
     def acquire_lock(self) -> None:
@@ -76,11 +78,21 @@ class Runtime:
             raise RuntimeLocked(f"profile {self.profile_name} 已有 runtime 在跑（{self.depot.owner(key)}）——一實例一 profile")
         raise RuntimeLocked(f"profile {self.profile_name} 的鎖搶不到：{self.depot.spec}/{key}")
 
-    def heartbeat(self) -> bool:
-        """鎖還是自己的才 touch；缺／換主 → False 並立 lost（M13：鎖丟了就停，§12-16）。`touch` 缺即 no-op、不重建鎖。"""
+    def heartbeat(self):
+        """鎖還是自己的才 touch（M13：鎖丟了就停，§12-16）。回 True＝活著、False＝確定丟了（立 lost）、None＝這一拍不知道。
+        #! 檢查 #5（2026-09-07）：`owner()` 回 None＝缺／讀不到（SMB 瞬斷在 CPython 是 FileNotFoundError），不是「被別人拿走」——
+        #  以前一拍讀不到就永久 lock_lost、runtime 整夜停擺。現在：讀到**別人的** owner 才立刻 lost；None 連續 LOCK_UNREADABLE_BEATS 拍
+        #  （＝心跳 30 s × 3）才算丟；中間讀到自己的就歸零。`touch` 缺即 no-op、不重建鎖。"""
         key = paths.runtime_lock(self.profile_name)
         cur = self.depot.owner(key)
-        if cur is None or cur.get("owner") != self._lock_owner:
+        if cur is None:
+            self._lock_unreadable += 1
+            if self._lock_unreadable < LOCK_UNREADABLE_BEATS:
+                return None
+            self._lost = True
+            return False
+        self._lock_unreadable = 0
+        if cur.get("owner") != self._lock_owner:
             self._lost = True
             return False
         return self.depot.touch(key)

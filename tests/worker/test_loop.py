@@ -171,3 +171,28 @@ def test_loop_releases_claim_when_instrument_lease_is_held(root):
     log = fs.read_jsonl(root / paths.worker_log("216"))
     assert any(e["event"] == "job_yield" and e["reason"] == "device_busy" for e in log)
     assert inst.state.owner is None, "跑完放掉租約"
+
+
+def test_loop_estop_between_pick_and_open_yields_and_same_machine_picks_again_after_clear(root, monkeypatch):
+    """檢查 #6（repro_estop_fail）：急停在 pick 之後才按下 → 讓位、不進 .fail；解除後**同一台**能再撿。"""
+    from emforge.device import estop
+    testing.make_fake_root(root)
+    make_batch(root, "s1")
+    q = queue.Queue(root)
+    q.add(make_job("s1"))
+
+    class PickThenEstop(queue.Queue):
+        def pick(self, tag, **kw):
+            job = super().pick(tag, **kw)
+            if job is not None:
+                estop.engage(self.depot, None, by="ricky", reason="驗收")
+            return job
+
+    monkeypatch.setattr(loop, "Queue", PickThenEstop)
+    rc = loop.worker_loop(root, "216", once=True, work_root=root / "work", sleep=lambda s: None)
+    assert rc == 0 and q.state("s1") == "queued" and not (root / paths.fail_file("s1")).exists()
+    log = fs.read_jsonl(root / paths.worker_log("216"))
+    assert any(e["event"] == "job_yield" and e["reason"] == "estop_engaged" for e in log)
+    assert not any(e["event"] == "job_failed" for e in log)
+    estop.clear(q.depot, None)
+    assert q.pick("216") is not None and q.claim_owner("s1") == "216", "解除後同一台再撿"

@@ -223,16 +223,17 @@ def test_quiet_fleet_waits(rt_root, rt):
 
 # ── M13：鎖丟了就停 ─────────────────────────────────────────────────────────
 def test_runtime_stops_after_lock_lost(rt_root):
-    """M13（收 §12-16）：鎖被破／被清後，下一圈發 lock_lost 並停（回 3），不再 tick。"""
+    """M13（收 §12-16）：鎖被清後發 lock_lost 並停（回 3）。檢查 #5 之後「讀不到」要連續 LOCK_UNREADABLE_BEATS 拍才算丟
+    （一拍瞬斷不停整晚），所以是第 3 個 tick 停，不是第 1 個。"""
     rt = make_rt(rt_root)
     key = paths.runtime_lock("fake_f1")
-    rt._sleep = lambda s: rt.depot.delete(key)          # tick 之間有人清掉鎖
+    rt._sleep = lambda s: rt.depot.delete(key)          # tick 之間有人清掉鎖（之後每拍都讀不到）
     rc = rt.run(once=False)
     assert rc == 3 and rt.lock_lost()
     log = rt.depot.read_log(paths.events_jsonl("fake_f1"))
     ev = [e["event"] for e in log]
     assert ev.count("batch_dispatched") >= 1 and ev[-2:] == ["lock_lost", "runtime_stop"]
-    assert log[-1]["reason"] == "lock_lost" and rt.state["tick"] == 1, "只跑了一個 tick"
+    assert log[-1]["reason"] == "lock_lost" and 2 <= rt.state["tick"] <= core.LOCK_UNREADABLE_BEATS, "不是一拍就停（tick 內也有心跳）"
 
 
 def test_heartbeat_detects_foreign_owner_as_lost_and_does_not_touch_it(rt_root, rt):
@@ -274,3 +275,46 @@ def test_status_carries_fleet_summary(rt):
     rt.release_lock()
     fleet = rt.depot.get_json(paths.status_json("fake_f1"))["fleet"]
     assert fleet[0]["tag"] == "218" and fleet[0]["state"] == "idle" and fleet[0]["offline"] is False and fleet[0]["n_done"] == 5
+
+
+# ── 檢查 #5（2026-09-07）：讀不到鎖 ≠ 鎖被拿走 ───────────────────────────────
+def test_heartbeat_treats_unreadable_lock_as_unknown_until_three_beats(rt_root, rt):
+    """`owner()` 回 None＝缺／讀不到（SMB 瞬斷在 CPython 是 FileNotFoundError），不是「被別人拿走」：
+    一拍、兩拍不立 lost；連續三拍仍 None 才立；中間讀到自己的就歸零。"""
+    rt.acquire_lock()
+    real, blip = rt.depot.owner, {"n": 0}
+
+    def flaky(key):
+        if blip["n"] > 0:
+            blip["n"] -= 1
+            return None
+        return real(key)
+
+    rt.depot.owner = flaky
+    try:
+        blip["n"] = 2
+        assert rt.heartbeat() is not False and rt.heartbeat() is not False and not rt.lock_lost()
+        assert rt.heartbeat() is True and not rt.lock_lost(), "讀到自己的：歸零"
+        blip["n"] = 3
+        assert rt.heartbeat() is not False and rt.heartbeat() is not False and not rt.lock_lost()
+        assert rt.heartbeat() is False and rt.lock_lost(), "連續三拍讀不到才算丟"
+    finally:
+        rt.depot.owner = real
+
+
+def test_run_survives_single_lock_read_blip(rt_root):
+    """repro_blip A：一次瞬斷不停整晚的 runtime。"""
+    rt = make_rt(rt_root, heartbeat_s=999)
+    real, calls = rt.depot.owner, {"n": 0}
+
+    def flaky(key):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else real(key)
+
+    rt.depot.owner = flaky
+    try:
+        rc = rt.run(once=True)
+    finally:
+        rt.depot.owner = real
+    ev = [e["event"] for e in rt.depot.read_log(paths.events_jsonl("fake_f1"))]
+    assert rc == 0 and "lock_lost" not in ev and not rt.lock_lost() and calls["n"] >= 1

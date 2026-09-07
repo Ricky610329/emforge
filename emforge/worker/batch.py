@@ -13,12 +13,17 @@ import time
 from dataclasses import dataclass
 
 from ..batches import error_result, make_result, result_base
+from ..device.estop import EstopEngaged
+from ..device.instrument import PreconditionFailed
 from .fuse import Fuse
 from .guard import Aborted, SimulatorOpenFailed, WatchdogTimeout, guarded_call, open_with_retries
 from .workdir import WorkDir
 
 MAX_ATTEMPTS = 3   #? 毒樣本規則：三次都錯就不再重試，留給人判
 DEFAULT_ESTOP_POLL_S = 5.0
+#! 檢查 #6（2026-09-07）：急停／前置檢查不過是「拒絕」不是「機器卡住」——以前被 open_with_retries 當卡住重試 3×15 s、
+#  SimulatorOpenFailed → .fail（急停解除後這台永遠不再撿這批）。原樣拋：急停 → 讓位；前置不過 → 判死但指名原因。
+OPEN_FATAL = (EstopEngaged, PreconditionFailed)
 
 
 def _noop(event, /, **fields):
@@ -58,7 +63,7 @@ def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_
             run.sim = instrument
         else:
             run.sim = sim_factory(wd)
-        open_with_retries(run.sim, sleep=sleep)
+        open_with_retries(run.sim, sleep=sleep, fatal=OPEN_FATAL)
         patterns = batch.patterns()
         for rpass in range(1 + retry_passes):
             todo = _todo(batch, rpass)
@@ -72,6 +77,11 @@ def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_
             if outcome != "continue":
                 return outcome
         return "done"
+    except EstopEngaged:
+        return _yield(run, "estop_engaged")            # pick 之後、open 之前按了急停：讓位，不進 .fail
+    except PreconditionFailed as e:
+        log("job_failed", store=job.store, reason=f"precondition_failed: {e}")
+        return "fail"
     except SimulatorOpenFailed as e:
         log("job_failed", store=job.store, reason=f"simulator_open_failed: {e}")
         return "fail"
@@ -174,7 +184,7 @@ def _restart(run: _Run, reason: str) -> None:
         run.sim.kill()
     except Exception:  # noqa: BLE001
         pass
-    open_with_retries(run.sim, sleep=run.sleep)
+    open_with_retries(run.sim, sleep=run.sleep, fatal=OPEN_FATAL)
 
 
 def _close_quiet(sim) -> None:

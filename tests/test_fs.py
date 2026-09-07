@@ -210,3 +210,21 @@ def test_sweep_dirs_removes_only_children_of_given_root(root):
     assert sorted(p.name for p in removed) == ["s1", "s2"]
     assert (work / "note.txt").exists() and (other / "s3").exists()
     assert fs.sweep_dirs(root / "missing") == []
+
+
+def test_read_claim_retries_on_permission_error(tmp_path, monkeypatch):
+    """檢查 #5：別的行程正開著 claim 檔時 read_text 拋 PermissionError——退避重試（比照 read_json），不是回 None 當「壞 claim」。"""
+    from pathlib import Path
+    p = tmp_path / "c.claim"
+    p.write_text('{"owner": "a"}', encoding="utf-8")
+    calls, real = {"n": 0}, Path.read_text
+
+    def flaky(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError("busy")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", flaky)
+    monkeypatch.setattr(fs.time, "sleep", lambda s: None)
+    assert fs.read_claim(p) == {"owner": "a"} and calls["n"] == 3

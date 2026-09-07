@@ -244,3 +244,18 @@ def _done_record(p, score):
                         measure={"m1": score}, score=score, status="done", strategy="blind", arm="blind", parent=None,
                         tick=0, seed=0, note={}, kind="sample",
                         run={"store": "old", "machine": "x", "worker_ver": "v", "profile_hash": P.profile_hash, "time_s": 1.0})
+
+
+def test_abandon_refuses_when_fail_marker_coexists_with_fresh_claim_of_takeover_machine(rt):
+    """檢查 #2（2026-09-07）：218 的陳 claim 被 216 接管後，218 的舊行程 mark_fail 寫下 .fail——.fail 與 216 的新鮮 claim 並存，
+    `state()` 回 fail；abandon 只看 `state()=="claimed"` 就會放行、把正在量的批標 done、之後的結果沒人收。改用 is_live（與 requeue 同一把尺）。"""
+    store, b, ids = _dispatched(rt, n=3)
+    q = queue.Queue(rt.root)
+    assert q.pick("218").store == store
+    q.depot.set_modified_at(paths.claim_file(store), q.depot.now() - 3 * 3600)
+    assert q.pick("216").store == store, "216 接管"
+    q.mark_fail(store, "218", "simulator_open_failed")      # 218 的舊行程：寫 .fail；release 動不了 216 的 claim
+    assert q.state(store) == "fail" and q.claim_owner(store) == "216" and q.is_live(store)
+    with pytest.raises(ValueError, match="正在跑"):
+        col.abandon(rt, store, by="ricky")
+    assert (rt.root / paths.inflight_file("fake_f1", store)).exists() and q.claim_owner(store) == "216"

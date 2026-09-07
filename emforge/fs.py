@@ -145,11 +145,21 @@ def try_claim(path, payload: dict) -> bool:
     return True
 
 
-def read_claim(path) -> dict | None:
-    """claim 內容；缺檔／空檔／半截（O_EXCL 建檔與寫 JSON 之間的窗，I-2）一律回 None＝壞 claim。"""
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except FileNotFoundError:
+def read_claim(path, *, retries: int = 6) -> dict | None:
+    """claim 內容；缺檔／空檔／半截（O_EXCL 建檔與寫 JSON 之間的窗，I-2）一律回 None＝壞 claim。
+    被佔用（別的行程正開著它）短暫退避重試（檢查 #5：讀不到不能當成「鎖沒了」），用盡仍回 None＝這次不知道。"""
+    path = Path(path)
+    text = None
+    for i in range(max(1, retries)):
+        try:
+            text = path.read_text(encoding="utf-8")
+            break
+        except FileNotFoundError:
+            return None
+        except PermissionError:
+            if i < retries - 1:
+                time.sleep(0.02 * (i + 1))
+    if text is None:
         return None
     if not text.strip():
         return None

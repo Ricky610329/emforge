@@ -279,3 +279,37 @@ def test_run_batch_aborts_running_sample_on_estop_and_counts_attempt(root, claim
     assert "sim_restart" not in [e for e, _ in events], "急停中止不重開模擬器"
     assert ("job_yield", {"store": job.store, "reason": "estop_engaged"}) in events
     inst.stop()
+
+
+# ── 檢查 #6（2026-09-07）：急停在 open 之前是「拒絕」不是「卡住」 ──────────────
+def test_run_batch_via_instrument_yields_when_estop_engaged_before_open(root, claimed):
+    """repro_estop_fail：急停落在 pick 之後、open 之前——Instrument.open() 拋 EstopEngaged 不能被當成機器卡住重試三次、
+    寫進 .fail（這台從此不撿這批）；要讓位：job_yield reason=estop_engaged、放掉自己的 claim、不記 job_failed。"""
+    from emforge.device import estop
+    q, b, job, ids = claimed
+    inst = _inst(root, q)
+    inst.start()
+    estop.engage(q.depot, None, by="ricky", reason="驗收")
+    sleeps = []
+    out, res, events, work = _run(root, claimed, instrument=inst, sleep=lambda s: sleeps.append(s))
+    names = [e for e, _ in events]
+    assert out == "yield" and res == {} and "job_failed" not in names and "sim_restart" not in names
+    assert ("job_yield", {"store": job.store, "reason": "estop_engaged"}) in events
+    assert q.claim_owner(job.store) is None and q.state(job.store) == "queued"
+    assert 15.0 not in sleeps, "不走三試的 retry_wait"
+    assert inst.sim is None and inst._bound is None and not work.path(job.store).exists()
+    inst.stop()
+
+
+def test_run_batch_via_instrument_precondition_failed_is_fail_without_retries(root, claimed):
+    """前置檢查不過（真的不能開）維持判死，但同樣不重試三次、原因指名 precondition_failed。"""
+    from emforge.device.limits import Limits
+    q, b, job, ids = claimed
+    inst = _inst(root, q, limits=Limits(allowed_profiles=("nope",)))
+    inst.start()
+    sleeps = []
+    out, res, events, work = _run(root, claimed, instrument=inst, sleep=lambda s: sleeps.append(s))
+    failed = [f for e, f in events if e == "job_failed"]
+    assert out == "fail" and res == {} and failed and failed[0]["reason"].startswith("precondition_failed")
+    assert 15.0 not in sleeps and "sim_restart" not in [e for e, _ in events]
+    inst.stop()
