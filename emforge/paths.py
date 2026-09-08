@@ -62,6 +62,14 @@ def ledger_file(profile: str, spec: str) -> str:
 # ── 佇列 ────────────────────────────────────────────────────────────────────
 def queue_dir() -> str:
     return QUEUE
+def priority_store(profile, strategy, tick, part):
+    return f"{store_name(profile, strategy, tick)}-p{part}"
+
+
+def queue_scheduling():
+    return "queue/scheduling.json"
+
+
 def jobs_file() -> str:
     return f"{QUEUE}jobs.json"
 def jobs_lock() -> str:

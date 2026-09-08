@@ -156,3 +156,11 @@ client 等到 runtime 入庫才算完成，worker.done 只是前一個階段。
 - state.notarize_deferred：維護期间尚未派出的公證候選 id/store。
 - identity.spec_snapshot、submission.spec_snapshot：固定評估定義，舊格式可缺。
 所有磁碟名透過 paths.py；不使用通用任意檔案寫入 MCP。
+
+
+## 2026-09-08 候選優先級與公平排程
+
+完整規則及用法見 [priority-scheduling.md](priority-scheduling.md)。Proposal 新增可選 priority／purpose；priority 為 urgent／normal／background。
+queue/scheduling.json（paths.queue_scheduling）保存 boosts 與 turns，所有更新經 jobs.lock。
+inflight.intent 保持原始 job；Queue.list(original=True) 用於恢復核對，預設 list／pick 採有效優先級。
+runtime state.inbox_turns 記錄 run 輪替；inbox 每批一筆，背景 propose 每次要求一筆。背景判斷改為同 profile 尚未認領的 job，不再被已執行中的前景擋住。

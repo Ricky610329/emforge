@@ -41,7 +41,7 @@ def cmd_submit(args):
     endpoint = args.endpoint or platform.depot
     client = Client(endpoint, args.profile, args.name, run_id=args.run_id, spec=args.spec)
     with np.load(args.patterns, allow_pickle=False) as data:
-        sid = client.submit(data["patterns"], request_id=args.request_id)
+        sid = client.submit(data["patterns"], request_id=args.request_id, priority=args.priority)
     print(sid)
     return 0
 
@@ -69,6 +69,7 @@ def _add_submit(sub):
     _connection(p)
     for flag in ("profile", "name", "run-id", "patterns"):
         p.add_argument("--" + flag, required=True)
+    p.add_argument("--priority", choices=["urgent", "normal", "background"], help="省略時沿用算法預設")
     p.add_argument("--request-id")
     p.add_argument("--spec")
     p.set_defaults(fn=cmd_submit)

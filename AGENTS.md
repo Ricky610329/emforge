@@ -12,3 +12,9 @@ cd /c/Users/ricky/Documents/GitHub/emforge && export PYTHONIOENCODING=utf-8 EMFO
 ```
 
 不碰 `C:\Users\ricky\Documents\GitHub\Antenna` 與 `T:\`；測試只用 `tmp_path`／`MemoryDepot`。
+
+## 最新變更（2026-09-08）
+
+候選優先級／同級算法與 run 輪替已實作，完整驗證 **615 passed**、pyflakes 通過。
+三種 priority、背景填空、單筆讓位、共享提升與 NAS／HTTP 相容規則見 [docs/priority-scheduling.md](docs/priority-scheduling.md)。
+本次尚未 push，正式 HFSS 未切換。舊六里程碑驗收 595 是歷史基準。

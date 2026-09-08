@@ -169,9 +169,9 @@ def _yield_reason(run: _Run) -> str | None:
     """每筆之後：claim 被別台接走 → 停寫退出（不動別人的 claim）；背景 job 遇前景出現 → 釋放 claim 讓位；急停 → 釋放讓位。"""
     if run.queue.claim_owner(run.job.store) != run.machine_tag:
         return "claim_taken_over"
-    if run.job.prio >= run.background_prio and run.queue.has_unclaimed_foreground(run.background_prio):
+    if _todo(run.batch, 0) and run.queue.should_yield(run.job, run.machine_tag):
         run.queue.release(run.job.store, run.machine_tag)
-        return "foreground_job_appeared"
+        return "foreground_job_appeared" if run.job.prio >= run.background_prio else "priority_or_fair_turn"
     if run.estop():
         run.queue.release(run.job.store, run.machine_tag)
         return "estop_engaged"

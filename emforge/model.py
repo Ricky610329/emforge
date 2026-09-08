@@ -158,7 +158,10 @@ class Proposal:
     tag: str | None = None
     run_id: str | None = None
 
-    KEYS = frozenset({"pattern", "parent", "arm", "note", "tag", "run_id"})
+    priority: str | None = None
+    purpose: str | None = None
+
+    KEYS = frozenset({"pattern", "parent", "arm", "note", "tag", "run_id", "priority", "purpose"})
 
     @staticmethod
     def from_dict(d) -> "Proposal":
@@ -173,7 +176,8 @@ class Proposal:
         if "pattern" not in d:
             raise ProposalError("missing pattern")
         return Proposal(pattern=np.asarray(d["pattern"]), parent=d.get("parent"), arm=d.get("arm"),
-                        note=dict(d.get("note") or {}), tag=d.get("tag"), run_id=d.get("run_id"))
+                        note=dict(d.get("note") or {}), tag=d.get("tag"), run_id=d.get("run_id"),
+                        priority=d.get("priority"), purpose=d.get("purpose"))
 
 
 # ── Context（系統給策略的六＋一樣東西） ──────────────────────────────────────

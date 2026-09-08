@@ -16,7 +16,7 @@ import numpy as np
 import yaml
 
 from . import db as dbm
-from . import paths, profiles
+from . import paths, profiles, priority
 from .depot import open_depot
 from .model import Context, Profile, Proposal, ProposalError
 
@@ -54,14 +54,15 @@ class RuntimeConfig:
 @dataclass
 class StrategyConfig:
     name: str
-    prio: int
-    batch: int
+    prio: int = 3
+    batch: int = 1
     max_inflight: int = 1
     enabled: bool = True
     seed: int | None = None
     propose_timeout_s: int | None = None
     params: dict = field(default_factory=dict)
     kind: str = "propose"
+    priority: str | None = None
 
 
 @dataclass
@@ -111,6 +112,10 @@ def parse_strategies_yaml(text: str, profile: str | None = None) -> StrategiesFi
         seen.add(sc.name)
         if sc.kind not in ("propose", "inbox") or sc.batch < 1 or sc.max_inflight < 1:
             raise ConfigError("kind 必須為 propose/inbox，batch/max_inflight 必須大於零")
+        try:
+            sc.prio = priority.value(sc.priority, sc.prio)
+        except ValueError as e:
+            raise ConfigError(str(e)) from e
         sc.params = dict(sc.params or {})
         out.append(sc)
     return StrategiesFile(profile=raw["profile"], runtime=rt, strategies=out)
@@ -172,6 +177,12 @@ def validate_proposals(raw, profile: Profile, budget: int) -> list:
             value = getattr(p, key)
             if value is not None and (not isinstance(value, str) or not paths.is_valid_name(value)):
                 raise ProposalError(f"{key} 名稱不合法：{value!r}")
+        try:
+            priority.value(p.priority)
+        except ValueError as e:
+            raise ProposalError(str(e)) from e
+        if p.purpose is not None and not isinstance(p.purpose, str):
+            raise ProposalError("purpose 必須為文字")
         pat = np.asarray(p.pattern)
         if pat.shape != profile.shape:
             raise ProposalError(f"#{i}: pattern shape {pat.shape} ≠ profile.shape {profile.shape}")
@@ -181,7 +192,8 @@ def validate_proposals(raw, profile: Profile, budget: int) -> list:
             pat = pat.astype(bool)
         if not pat[profile.fixed_on].all():
             raise ProposalError(f"#{i}: fixed_on 像素（饋墊）必須為 True")
-        out.append(Proposal(pattern=pat, parent=p.parent, arm=p.arm, note=dict(p.note), tag=p.tag, run_id=p.run_id))
+        out.append(Proposal(pattern=pat, parent=p.parent, arm=p.arm, note=dict(p.note), tag=p.tag, run_id=p.run_id,
+                            priority=p.priority, purpose=p.purpose))
     return out
 
 
@@ -212,6 +224,8 @@ def _write_proposals(path: Path, props: list, shape: tuple) -> None:
     pats = np.stack([p.pattern for p in props]) if props else np.zeros((0, *shape), bool)
     notes = [json.dumps(p.note, ensure_ascii=False) for p in props]
     np.savez(path, patterns=pats,
+             priorities=np.array([p.priority or "" for p in props], dtype=str),
+             purposes=np.array([p.purpose or "" for p in props], dtype=str),
              tags=np.array([p.tag or "" for p in props], dtype=str),
              run_ids=np.array([p.run_id or "" for p in props], dtype=str),
              parents=np.array([p.parent or "" for p in props], dtype="<U64"),
@@ -224,7 +238,9 @@ def _read_proposals(path: Path) -> list:
         pats, parents, arms, notes = z["patterns"], z["parents"], z["arms"], z["notes"]
         return [Proposal(pattern=pats[i], parent=str(parents[i]) or None, arm=str(arms[i]) or None,
                          note=json.loads(str(notes[i])), tag=str(z["tags"][i]) or None,
-                         run_id=str(z["run_ids"][i]) or None) for i in range(len(pats))]
+                         run_id=str(z["run_ids"][i]) or None,
+                         priority=(str(z["priorities"][i]) or None) if "priorities" in z else None,
+                         purpose=(str(z["purposes"][i]) or None) if "purposes" in z else None) for i in range(len(pats))]
 
 
 def propose_in_subprocess(root, profile: Profile, name: str, *, budget: int, seed: int, tick: int,

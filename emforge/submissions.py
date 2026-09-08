@@ -49,12 +49,15 @@ def submit(depot, profile, name, run_id, items, request_id=None, spec=None, spec
 def encode(p, profile):
     return {"pattern": np.asarray(p.pattern, bool).astype(int).reshape(-1).tolist(),
             "id": record_id(p.pattern, profile), "parent": p.parent, "tag": p.tag,
-            "arm": p.arm, "note": dict(p.note)}
+            "arm": p.arm, "note": dict(p.note),
+            **({"priority": p.priority} if p.priority is not None else {}),
+            **({"purpose": p.purpose} if p.purpose is not None else {})}
 
 
 def proposals(doc, profile):
     raw = [dict(pattern=np.asarray(x["pattern"]).reshape(profile.shape), parent=x.get("parent"),
-                tag=x.get("tag"), arm=x.get("arm"), note=x.get("note", {}), run_id=doc["run_id"])
+                tag=x.get("tag"), arm=x.get("arm"), note=x.get("note", {}), run_id=doc["run_id"],
+                priority=x.get("priority"), purpose=x.get("purpose"))
            for x in doc["items"]]
     props = validate_proposals(raw, profile, len(raw))
     if any(record_id(p.pattern, profile.name) != x["id"] for p, x in zip(props, doc["items"])):
@@ -79,7 +82,7 @@ def resolve(depot, doc):
         return saved
     db = Database(depot)
     refs = {int(i["index"]): i for i in saved.get("items", [])}
-    out = []
+    out, jobs = [], None
     for index, item in enumerate(doc["items"]):
         ref = dict(refs.get(index, {"index": index, "id": item["id"], "state": "received"}))
         if ref.get("store"):
@@ -94,6 +97,14 @@ def resolve(depot, doc):
                 record_exists = depot.exists(paths.record_by_stem(doc["profile"], stem))
                 if not collecting and not record_exists and Queue(depot).state(ref["store"]) == "done":
                     ref.update(state="error", reason="量測批已結束但沒有可用紀錄")
+        ref.update(priority=item.get("priority"), purpose=item.get("purpose"))
+        if ref.get("store"):
+            from .queue import Queue
+            if jobs is None:
+                jobs = {j.store: j for j in Queue(depot).list()}
+            job = jobs.get(ref["store"])
+            if job:
+                ref["effective_prio"] = job.prio
         out.append(ref)
     states = {r["state"] for r in out}
     if states <= {"done", "error", "rejected"}:

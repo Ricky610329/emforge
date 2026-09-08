@@ -7,7 +7,7 @@
 """
 import numpy as np
 
-from .. import paths
+from .. import paths, priority
 from ..batches import Batch
 from ..model import KIND_REPEAT, KIND_SAMPLE, KINDS, Job, now_iso, record_id
 
@@ -18,27 +18,31 @@ class StoreExists(Exception):
 
 def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, prio: int,
              kind: str = KIND_SAMPLE, store: str | None = None, origin: str = "runtime",
-             machine: str | None = None) -> str | None:
+             machine: str | None = None, part: int | None = None) -> str | None:
     """回 store 名；全部重複 → None（什麼都不寫）。`origin`／`machine` 只有 CLI smoke 會給（釘機重測）。"""
     if kind not in KINDS:
         raise ValueError(f"kind 必須是 {KINDS}，得到 {kind!r}")
     if (kind == KIND_REPEAT) != (store is not None):
         raise ValueError("sample 批的 store 名由 runtime 決定；repeat 批必須指定 store")
     profile = rt.profile
-    store = store or paths.store_name(profile.name, strategy_name, tick)
+    store = store or (paths.priority_store(profile.name, strategy_name, tick, part) if part is not None
+                      else paths.store_name(profile.name, strategy_name, tick))
     if rt.depot.exists(paths.inflight_file(profile.name, store)) or Batch(rt.depot, store).exists():
         raise StoreExists(f"store {store} 已存在（inflight 或批）——tick 號重播？什麼都沒寫")
-    keep, dropped = _dedup(rt, proposals, kind)
+    keep, dropped = _dedup(rt, proposals, kind, prio)
     rt.event("proposals_validated", name=strategy_name, tick=tick, n_in=len(proposals), n_dup=dropped, n_out=len(keep))
     if not keep:
         return None
     ids = [record_id(p.pattern, profile.name) for p in keep]
-    items = {rid: {"parent": p.parent, "arm": p.arm, "note": dict(p.note), "tag": p.tag, "run_id": p.run_id} for rid, p in zip(ids, keep)}
+    items = {rid: {"parent": p.parent, "arm": p.arm, "note": dict(p.note), "tag": p.tag, "run_id": p.run_id,
+                   **({"priority": p.priority} if p.priority is not None else {}),
+                   **({"purpose": p.purpose} if p.purpose is not None else {})} for rid, p in zip(ids, keep)}
     manifest = {"store": store, "sim_profile": profile.name, "profile_hash": profile.profile_hash,
                 "strategy": strategy_name, "tick": tick, "seed": seed, "prio": prio, "kind": kind,
                 "items": [{"id": rid, **items[rid]} for rid in ids]}
     job = Job(store=store, sim_profile=profile.name, profile_hash=profile.profile_hash, prio=prio,
-              n=len(ids), machine=machine, origin=origin, by=origin, at=now_iso())
+              n=len(ids), machine=machine, origin=origin, by=origin, at=now_iso(),
+              extra={"strategy": strategy_name, "run_id": keep[0].run_id})
     intent = {"manifest": manifest, "job": job.to_dict(), "patterns": [p.pattern.astype(int).tolist() for p in keep]}
     rt.depot.put_json(paths.inflight_file(profile.name, store),
                       {"store": store, "strategy": strategy_name, "tick": tick, "seed": seed, "kind": kind,
@@ -52,7 +56,7 @@ def dispatch(rt, strategy_name: str, proposals: list, *, tick: int, seed: int, p
     return store
 
 
-def _dedup(rt, proposals: list, kind: str) -> tuple:
+def _dedup(rt, proposals: list, kind: str, prio: int) -> tuple:
     if kind == KIND_REPEAT:
         return list(proposals), 0          #? 公證重測：同 id 再量是目的，不是重複
     known = rt.db.ids(rt.profile.name) | {rid for inf in rt.inflight() for rid in inf["ids"]}
@@ -60,6 +64,9 @@ def _dedup(rt, proposals: list, kind: str) -> tuple:
     for p in proposals:
         rid = record_id(p.pattern, rt.profile.name)
         if rid in known or rid in seen:
+            for inf in rt.inflight():
+                if inf["kind"] == KIND_SAMPLE and rid in inf["ids"]:
+                    rt.queue.raise_priority(inf["store"], priority.value(p.priority, prio))
             dropped += 1
             continue
         seen.add(rid)

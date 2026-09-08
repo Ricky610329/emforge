@@ -17,10 +17,11 @@ class Client:
         self.run_id = run_id or "run_" + uuid.uuid4().hex
         self.spec = spec
 
-    def submit(self, patterns, *, parents=None, tags=None, preds=None, notes=None, request_id=None):
+    def submit(self, patterns, *, parents=None, tags=None, preds=None, notes=None, request_id=None,
+               priority=None, priorities=None, purposes=None):
         pats = list(patterns)
         n = len(pats)
-        for values in (parents, tags, preds, notes):
+        for values in (parents, tags, preds, notes, priorities, purposes):
             if values is not None and len(values) != n:
                 raise ValueError("每筆候選的附註長度必須一致")
         items = []
@@ -29,7 +30,9 @@ class Client:
             if preds is not None:
                 note["pred"] = preds[i]
             items.append(dict(pattern=np.asarray(pattern).tolist(), parent=parents[i] if parents else None,
-                              tag=tags[i] if tags else None, note=note, run_id=self.run_id))
+                              tag=tags[i] if tags else None, note=note, run_id=self.run_id,
+                              priority=priorities[i] if priorities is not None else priority,
+                              purpose=purposes[i] if purposes is not None else None))
         return self.platform.call("submit", profile=self.profile, name=self.name, run_id=self.run_id,
                                   items=items, request_id=request_id, spec=self.spec)
 

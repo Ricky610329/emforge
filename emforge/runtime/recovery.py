@@ -36,7 +36,7 @@ def _finish(rt, inf):
         old = batch.patterns()
         if list(old) != ids or any(not np.array_equal(old[rid], p) for rid, p in zip(ids, pats)):
             raise ValueError("現有 patterns 不同")
-    jobs = {j.store: j for j in rt.queue.list()}
+    jobs = {j.store: j for j in rt.queue.list(original=True)}
     if store in jobs and jobs[store].to_dict() != job.to_dict():
         raise ValueError("現有 job 不同")
     if batch.exists() and not rt.depot.exists(paths.batch_patterns(store)):

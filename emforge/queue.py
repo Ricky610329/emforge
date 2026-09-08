@@ -11,7 +11,7 @@ import os
 import socket
 import time
 
-from . import paths
+from . import paths, priority
 from .batches import Batch
 from .depot import FsCorrupt, open_depot
 from .model import Job, now_iso
@@ -61,9 +61,41 @@ class Queue:
             jobs.append(job)
             self._write(jobs)
 
-    def list(self) -> list:
-        """prio 升冪（小者先）；同 prio 依加入順序。"""
-        return sorted(self._read(), key=lambda j: j.prio)
+    def list(self, *, original=False) -> list:
+        """預設顯示有效優先級；original 供不可變派工意圖對帳。"""
+        scheduling = priority.state(self.depot)
+        jobs = self._read()
+        if not original:
+            jobs = [priority.effective(j, scheduling) for j in jobs]
+        return sorted(jobs, key=lambda j: j.prio)
+
+    def should_yield(self, current, machine_tag):
+        """單筆保存後，僅為本機能領的更高級或另一個同級算法／run 讓位。"""
+        scheduling = priority.state(self.depot)
+        current = priority.effective(current, scheduling)
+        for job in self.list():
+            if job.store == current.store or job.prio > current.prio:
+                continue
+            if job.machine and job.machine != machine_tag:
+                continue
+            if self.state(job.store) != "queued":
+                continue
+            if job.prio < current.prio or priority.groups(job) != priority.groups(current):
+                return True
+        return False
+
+    def raise_priority(self, store, prio):
+        """持鎖單向提升；不重寫 job／manifest，也不中止已認領量測。"""
+        with self.depot.lock(paths.jobs_lock(), owner=self._lock_owner):
+            job = next((j for j in self._read() if j.store == store), None)
+            if job is None or self.depot.exists(paths.done_file(store)):
+                return False
+            scheduling = priority.state(self.depot)
+            if prio >= priority.effective(job, scheduling).prio:
+                return False
+            scheduling["boosts"][store] = prio
+            self.depot.put_json(paths.queue_scheduling(), scheduling)
+            return True
 
     # ── 狀態 ────────────────────────────────────────────────────────────
     def state(self, store: str) -> str:
@@ -103,15 +135,19 @@ class Queue:
         return newest is not None and (now - newest) < stale_s
 
     def has_unclaimed_foreground(self, background_prio: int) -> bool:
-        return any(j.prio < background_prio and self.state(j.store) == "queued" for j in self._read())
+        return any(j.prio < background_prio and self.state(j.store) == "queued" for j in self.list())
 
     # ── 認領 ────────────────────────────────────────────────────────────
     def pick(self, machine_tag: str, *, stale_s: float = DEFAULT_STALE_S, now: float | None = None):
         """依 prio 找第一個本機可認領的 job 並認領；沒有回 None。"""
         now = self.depot.now() if now is None else now
-        for job in self.list():
-            if self._claim(job, machine_tag, stale_s, now):
-                return job
+        with self.depot.lock(paths.jobs_lock(), owner=self._lock_owner):
+            scheduling = priority.state(self.depot)
+            jobs = [priority.effective(j, scheduling) for j in self._read()]
+            for job in priority.order(jobs, scheduling):
+                if self._claim(job, machine_tag, stale_s, now):
+                    priority.served(self.depot, scheduling, job)
+                    return job
         return None
 
     def _claim(self, job: Job, me: str, stale_s: float, now: float) -> bool:

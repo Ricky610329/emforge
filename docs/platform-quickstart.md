@@ -125,3 +125,8 @@ run 與送件保存完整 spec_snapshot，避免新程式重新登錄同名 spec
 不是包括 HFSS 重試與公證的總呼叫或牆鐘時間上限。
 預測寫 preds 或 note.pred；校準沒有足夠變異就回 null。
 P(勝 blind) 是觀察分佈比較，沒有因果效果保證。
+
+
+## 候選優先級
+
+策略可設 priority: normal 或 background；client.submit 可逐筆帶 priorities，或整份帶 priority。inbox 現在每個 job 一筆，max_inflight 控制同級／更高級 sample 的派工數。詳見 [優先級排程](priority-scheduling.md)。

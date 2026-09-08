@@ -231,7 +231,7 @@ class Runtime:
             strategies[sc.name] = {"enabled": sc.enabled, "paused": st["paused"], "prio": sc.prio, "batch": sc.batch,
                                    "inflight": [i["store"] for i in infl if i["strategy"] == sc.name],
                                    "errors_consecutive": st["errors_consecutive"], "n_dispatched": st["n_dispatched"],
-                                   "last_dispatch_tick": st["last_dispatch_tick"]}
+                                   "last_dispatch_tick": st["last_dispatch_tick"], "priority": sc.priority}
         metas = self.db.metas(self.profile_name)
         status = {
             "profile": self.profile_name, "profile_hash": self.profile.profile_hash, "runtime_ver": _version.describe(),
@@ -241,6 +241,7 @@ class Runtime:
             "paused_profile": self.state.get("paused_profile"), "strategies": strategies,
             "inflight": [{"store": i["store"], "strategy": i["strategy"], "kind": i["kind"], "n": len(i["ids"]),
                           "n_collected": len(i["collected"]), "queue_state": self.queue.state(i["store"]),
+                          "effective_prio": next((j.prio for j in self.queue.list() if j.store == i["store"]), i["prio"]),
                           "age_s": round(now - (self.depot.modified_at(paths.inflight_file(self.profile_name, i["store"])) or now))}
                          for i in infl],
             "notarize_in_progress": sorted(self.state.get("notarize", {})),

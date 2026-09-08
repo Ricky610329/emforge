@@ -50,16 +50,16 @@ def test_two_strategies_fake_worker_db_pending_promote_report(root, capsys):
     assert "blind" in out and "top_k_flip" in out and "notarize" in out
     db = Database(root)
     n_done = len(db.ids("fake_f1"))
-    assert n_done >= 3 + 4, "blind 3 ＋ top_k_flip 4（重測是同 id 不算新設計）"
+    assert n_done >= 1 + 4, "背景 blind 只預備 1 筆，前景 top_k_flip 4 筆（重測不算新設計）"
     assert len(db.measurements("fake_f1", cand)) == 3, "原始 ＋ 兩次重測"
     st = fs.read_json(root / paths.status_json("fake_f1"))
-    assert st["tick"] == 3 and st["pending_count"] == len(pend) and st["db"]["n_done"] >= 7
+    assert st["tick"] == 3 and st["pending_count"] == len(pend) and st["db"]["n_done"] >= 5
 
 
 def test_restart_mid_batch_resumes_without_duplicate_records(root):
     """回歸 I-12／I-14：runtime 中途死掉再起，reconcile 乾淨、續收、不重複入庫。"""
     testing.make_fake_root(root)
-    write_yaml(root, "profile: fake_f1\nstrategies:\n  - {name: blind, prio: 9, batch: 3}\n")
+    write_yaml(root, "profile: fake_f1\nstrategies:\n  - {name: blind, prio: 3, batch: 3}\n")
     rt = make_rt(root)
     rt.acquire_lock()
     rt.tick()
@@ -131,7 +131,7 @@ def test_core_e2e_never_imports_torch(root):
     out = subprocess.run([sys.executable, "-X", "utf8", "-c", code], capture_output=True, text=True,
                          encoding="utf-8", errors="replace", timeout=300)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip().splitlines()[-1] == "False False 2", out.stdout
+    assert out.stdout.strip().splitlines()[-1] == "False False 1", out.stdout
 
 
 def test_second_profile_instance_reads_but_never_writes_first(root):
@@ -142,7 +142,7 @@ def test_second_profile_instance_reads_but_never_writes_first(root):
     paths.registry_py(root).write_text(
         "import dataclasses\nfrom emforge import profiles, testing\ntesting.register_fakes()\n"
         "profiles.register_profile(dataclasses.replace(testing.FAKE_PROFILE, name='fake_f2'))\n", encoding="utf-8")
-    #? fake_f2 的 blind 用前景 prio：佇列是全機共用的，fake_f1 的 job 排隊中時背景策略依 D5 不派（正確行為）
+    #? fake_f2 用前景批 2 筆；fake_f1 的背景批 1 筆，跨 profile 仍只有讀取權。
     write_yaml(root, "profile: fake_f2\nstrategies:\n  - {name: blind, prio: 3, batch: 2}\n", profile="fake_f2")
     rt1, rt2 = make_rt(root), Runtime(root, "fake_f2", sleep=lambda s: None, propose_fn=strategy.propose_in_process)
     rt1.acquire_lock()
@@ -159,8 +159,8 @@ def test_second_profile_instance_reads_but_never_writes_first(root):
     rt2.tick()
     rt2.release_lock()
     db = Database(root)
-    assert len(db.ids("fake_f1")) == 3 and len(db.ids("fake_f2")) == 2
-    assert len(db.view("fake_f2").query(profile="fake_f1")) == 3, "讀別的 profile 可以"
+    assert len(db.ids("fake_f1")) == 1 and len(db.ids("fake_f2")) == 2
+    assert len(db.view("fake_f2").query(profile="fake_f1")) == 1, "讀別的 profile 可以"
     rec = db.view("fake_f1").query()[0]
     with pytest.raises(ProfileWriteRefused):
         rt2.db.add(rec)

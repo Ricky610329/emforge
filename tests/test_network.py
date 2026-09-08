@@ -16,10 +16,13 @@ def test_remote_client_and_worker_use_network_without_shared_disk(root):
         a = Client(url, "fake_f1", "anneal", run_id="run_a", token="test")
         sid = a.submit(patterns(2), request_id="request_one")
         assert a.submit(patterns(2), request_id="request_one") == sid
-        rt.tick()
         remote = HttpDepot(url, token="test")
-        testing.run_all_jobs(root, depot=remote)
-        collect.collect(rt)
+        for i in range(2):
+            rt.tick()
+            testing.run_all_jobs(root, depot=remote)
+            collect.collect(rt)
+            if i == 0:
+                assert a.status(sid)["state"] == "dispatched_partial"
         assert a.status(sid)["state"] == "completed"
         assert len(a.results(sid)) == 2
         assert len(a.db.query()) == 2
@@ -77,3 +80,22 @@ def test_platform_overview_includes_idle_nodes_runtime_and_spec(root):
         assert state["runtimes"]["fake_f1"]["profile"] == "fake_f1"
         assert state["fleet"] == []
         assert remote.call("description", profile="fake_f1")["spec_snapshot"]["aggregate"] == "min"
+
+
+def test_priority_and_fairness_survive_http_depot_clients(root):
+    from emforge.queue import Queue
+    from tests.test_priority import add, finish
+    rt = setup(root)
+    with serving(Platform(rt.depot), secret="test") as url:
+        q = Queue(HttpDepot(url, token="test"))
+        add(q, "a0", strategy="alpha")
+        add(q, "a1", strategy="alpha")
+        add(q, "b0", strategy="beta")
+        first = q.pick("216")
+        assert first.store == "a0"
+        finish(q, first)
+        remote = Queue(HttpDepot(url, token="test"))
+        assert remote.pick("218").store == "b0"
+        add(q, "background", strategy="explore", prio=9)
+        assert remote.raise_priority("background", 1)
+        assert q.pick("37").store == "background"

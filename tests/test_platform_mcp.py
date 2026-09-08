@@ -48,10 +48,12 @@ def test_remote_evaluation_rescores_and_cli(root, capsys):
     from emforge.runtime import collect
     rt = setup(root)
     client = Client(rt.depot, "fake_f1", "anneal", run_id="run_eval")
-    client.submit(patterns(2), preds=[1, 2])
-    rt.tick()
-    testing.run_all_jobs(root)
-    collect.collect(rt)
+    sid = client.submit(patterns(2), preds=[1, 2])
+    for _ in range(2):
+        rt.tick()
+        testing.run_all_jobs(root)
+        collect.collect(rt)
+    assert client.status(sid)["state"] == "completed"
     old = specs.get_spec(rt.profile.spec)
     new = specs.register_spec(replace(old, name="eval_shift", offsets=tuple(v+100 for v in old.offsets)))
     with serving(Platform(rt.depot)) as url:

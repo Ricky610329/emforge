@@ -29,7 +29,7 @@ BANNED_MODULE_STEMS = {"utils", "util", "misc", "helpers", "common", "dedust", "
 #  換後端＝實作一個 `Depot`；只要有一個模組偷偷開檔，那個保證就是假的。
 DEPOT_ONLY_MODULES = (
     "__init__.py", "__main__.py", "specs.py", "netid.py", "events.py", "profiles.py", "heartbeat.py",
-    "client.py", "client_view.py", "submissions.py", "runtime/inbox.py",
+    "client.py", "client_view.py", "submissions.py", "runtime/inbox.py", "priority.py",
     "platform/__init__.py", "platform/service.py", "platform/wire.py",
     "platform/transport.py", "platform/http_server.py", "cli/platform.py",
     "platform/confirmation.py", "platform/mcp_server.py",

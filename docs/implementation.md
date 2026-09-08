@@ -508,3 +508,11 @@ run 與 submission 現存完整 spec_snapshot；新版本不改變舊執行評�
 runtime status 額外提供 release_version；無 supervisor 的舊入口回 null。
 
 platform_state 同時列出所有算法節點（含 idle/offline）、run、runtime 狀態與模擬機 fleet；description 提供 spec_snapshot。
+
+
+## 2026-09-08 候選優先級與公平排程
+
+完整規則及用法見 [priority-scheduling.md](priority-scheduling.md)。Proposal 新增可選 priority／purpose；priority 為 urgent／normal／background。
+queue/scheduling.json（paths.queue_scheduling）保存 boosts 與 turns，所有更新經 jobs.lock。
+inflight.intent 保持原始 job；Queue.list(original=True) 用於恢復核對，預設 list／pick 採有效優先級。
+runtime state.inbox_turns 記錄 run 輪替；inbox 每批一筆，背景 propose 每次要求一筆。背景判斷改為同 profile 尚未認領的 job，不再被已執行中的前景擋住。
