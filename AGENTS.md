@@ -1,5 +1,7 @@
 # AGENTS.md — 給任何 coding agent（Codex／Claude／其他）的入口
 
+> **最新交接（2026-09-08）：先讀 [Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。程式基準 a5c808e，615 passed；簡化部署入口仍待實作，正式 HFSS 未切換。**
+
 1. 先讀 `CLAUDE.md`（工作規範與硬規則：TDD、單檔 ≤400 行、單函式 ≤60 行、磁碟名只經 `paths.py`、協調狀態只經 `Depot`、`mcp` 只在指定模組函式內 import）。
 2. 再讀 `docs/naming.md`、`docs/implementation.md`（§2 模組地圖、§3 key 佈局、§12 已知失效模式）。
 3. **本輪已完成的計畫：[docs/plan-2026-09-08-platform.md](docs/plan-2026-09-08-platform.md)**：六個里程碑涵蓋執行身分、收件、HTTP、指定機器算法端、評估/MCP、版本更新/恢復。驗收 595 passed、pyflakes 全綠；**不 push**。操作見 [docs/platform-quickstart.md](docs/platform-quickstart.md)。後續修改仍遵守 TDD 與完整回歸。

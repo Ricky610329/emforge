@@ -1,5 +1,7 @@
 # CLAUDE.md — emforge 工作規範
 
+> **最新交接（2026-09-08）：先讀 [Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。程式基準 a5c808e，615 passed；簡化部署入口仍待實作，正式 HFSS 未切換。**
+
 > 用**繁體中文**對話與寫文件；識別字用英文。
 > 架構的「為什麼」在 `docs/architecture.md`（自 Antenna repo `docs/platform/architecture.md` 帶入）；本檔只放**怎麼做**。
 
