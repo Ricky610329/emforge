@@ -7,9 +7,12 @@
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
-from .. import fs
+from .. import fs, paths
+from ..depot import FileDepot
+from ..runner.process import process_identity
 
 
 def default_work_root() -> Path:
@@ -22,7 +25,33 @@ def default_work_root() -> Path:
 
 class WorkDir:
     def __init__(self, root):
-        self.root = Path(root)
+        self.root = Path(root).resolve()
+        self.local = FileDepot(paths.worker_state_root(self.root))
+        self._owner = None
+
+    def acquire(self):
+        """清理與發布裝置狀態之前，取得此工作目錄的行程所有權。"""
+        if self._owner is not None:
+            return
+        owner = uuid.uuid4().hex
+        with self.local.lock(paths.worker_lock_guard(), owner=owner):
+            key = paths.worker_lock()
+            old = self.local.owner(key)
+            if self.local.exists(key):
+                if not old or not {"owner", "pid", "birth"} <= old.keys():
+                    raise RuntimeError("工作目錄鎖無法辨識，拒絕清理")
+                if process_identity(old["pid"]) == old["birth"]:
+                    raise RuntimeError("工作目錄已有活躍 worker／儀器行程")
+                self.local.release(key, owner=old["owner"])
+            payload = {"owner": owner, "pid": os.getpid(), "birth": process_identity(os.getpid())}
+            if not self.local.claim(key, payload):
+                raise RuntimeError("工作目錄所有權已被占用")
+            self._owner = owner
+
+    def release(self):
+        if self._owner is not None:
+            self.local.release(paths.worker_lock(), owner=self._owner)
+            self._owner = None
 
     def path(self, store: str) -> Path:
         return self.root / store

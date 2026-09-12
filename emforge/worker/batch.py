@@ -19,6 +19,7 @@ from .fuse import Fuse
 from . import guard
 from .guard import Aborted, SimulatorOpenFailed, WatchdogTimeout, guarded_call, open_with_retries
 from .workdir import WorkDir
+from .outbox import ResultOutbox
 
 MAX_ATTEMPTS = 3   #? 毒樣本規則：三次都錯就不再重試，留給人判
 DEFAULT_ESTOP_POLL_S = 5.0
@@ -47,6 +48,7 @@ class _Run:
     instrument: object = None
     estop_poll_s: float = DEFAULT_ESTOP_POLL_S
     sim: object = None
+    outbox: object = None
 
     def estop(self) -> bool:
         return self.instrument is not None and self.instrument.estop_engaged() is not None
@@ -55,8 +57,12 @@ class _Run:
 def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_ver: str, *, work: WorkDir,
               instrument=None, timeout_s: float | None = None, fuse: Fuse | None = None, retry_passes: int = 2,
               background_prio: int = 9, sleep=time.sleep, log=_noop, estop_poll_s: float = DEFAULT_ESTOP_POLL_S) -> str:
+    outbox = ResultOutbox(work.local, queue.depot, machine_tag)
+    outbox.flush(queue, job.store)
+    if not _todo(batch, 0):
+        return "done"
     run = _Run(queue, batch, job, profile, machine_tag, worker_ver, float(timeout_s or profile.timeout_s),
-               fuse or Fuse(), background_prio, sleep, log, instrument, float(estop_poll_s))
+               fuse or Fuse(), background_prio, sleep, log, instrument, float(estop_poll_s), outbox=outbox)
     wd = work.make(job.store)
     try:
         if instrument is not None:
@@ -111,7 +117,9 @@ def _run_pass(run: _Run, patterns: dict, todo: list, rpass: int) -> str:
         if run.estop():
             return _yield(run, "estop_engaged")            # 每筆前：急停就讓位（不動這筆）
         res = _simulate_one(run, rid, patterns[rid], prev + 1)
-        run.batch.write_result(rid, res)
+        if not run.outbox.publish(run.queue, run.batch, rid, res):
+            run.log("job_yield", store=run.job.store, reason="claim_taken_over")
+            return "yield"
         run.queue.touch_claim(run.job.store)            # claim 心跳：requeue／接管都看得到「還活著」
         if res["status"] == "error":
             run.log("sample_error", store=run.job.store, id=rid, error=res["error"], attempts=res["attempts"])

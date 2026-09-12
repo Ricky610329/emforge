@@ -25,7 +25,7 @@ class RunOperations:
 
     def node_heartbeat(self, node, session, environments, max_runs=1):
         key = paths.algorithm_node(node)
-        with self.depot.lock(paths.platform_lock("node_" + node), owner=uuid.uuid4().hex):
+        with self.depot.lock(paths.platform_lock(node, kind="node"), owner=uuid.uuid4().hex):
             old = self.depot.get_json(key)
             if old and old["session"] != session:
                 if self.depot.now() - old["heartbeat"] < 90:
@@ -38,7 +38,7 @@ class RunOperations:
 
     def _ensure_inbox(self, profile, name):
         key = paths.strategies_yaml(profile)
-        with self.depot.lock(paths.platform_lock("config_" + profile), owner=uuid.uuid4().hex):
+        with self.depot.lock(paths.platform_lock(profile, kind="config"), owner=uuid.uuid4().hex):
             cfg = yaml.safe_load(self.depot.require_bytes(key))
             entries = cfg.setdefault("strategies", [])
             found = next((x for x in entries if x["name"] == name), None)

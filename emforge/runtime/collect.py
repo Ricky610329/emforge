@@ -94,12 +94,23 @@ def _counts(batch: Batch) -> tuple:
     return n_done, len(results) - n_done
 
 
+def _received_counts(rt, inf):
+    """以持久化 record 計數，涵蓋前次增量收件與後處理／profile 拒絕。"""
+    n_done = 0
+    for rid in inf["ids"]:
+        stem = paths.record_stem(rid, inf["store"])
+        if rt.depot.exists(paths.record_by_stem(rt.profile_name, stem)):
+            rec = rt.db.load(rt.profile_name, stem)
+            n_done += rec.status == STATUS_DONE
+    return n_done, len(inf["ids"]) - n_done
+
+
 def _finalize(rt, inf: dict, collected: set) -> None:
     """批 done 且能收的都收了 → 移除 inflight、發事件、算錯誤率。"""
     store = inf["store"]
     if not set(inf["ids"]) <= collected:
         return                                  # worker 標 done 但檔還沒讀齊（下個 tick 再收）
-    n_done, n_error = _counts(Batch(rt.depot, store))
+    n_done, n_error = _received_counts(rt, inf)
     rt.depot.delete(paths.inflight_file(rt.profile_name, store))
     rt.event("batch_done", store=store, n_done=n_done, n_error=n_error)
     total = n_done + n_error

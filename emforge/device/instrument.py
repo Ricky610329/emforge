@@ -107,21 +107,35 @@ class Instrument:
         return reference.write_reference(self)
 
     # ── 生命週期 ────────────────────────────────────────────────────────────
+    @property
+    def started(self):
+        return self._hb is not None
+
     def start(self) -> None:
-        self.history.append((self.state.state, now_iso()))
-        self._set(free_gb=None)
-        self.log("device_start", worker_ver=self.state.worker_ver, pid=os.getpid())
-        if self._hb is None:
+        if self.started:
+            return
+        self.work.acquire()
+        try:
+            self.history.append((self.state.state, now_iso()))
+            self._set(free_gb=None)
+            self.log("device_start", worker_ver=self.state.worker_ver, pid=os.getpid())
             self._hb = Heartbeat(self._beat, self.heartbeat_s, name=f"emforge-device-{self.tag}")
             self._hb.start()
+        except BaseException:
+            self._hb = None
+            self.work.release()
+            raise
 
     def stop(self, reason: str = "stop") -> None:
-        if self._hb is not None:
-            self._hb.stop()
-            self._hb = None
-        if self.sim is not None:
-            self.close()
-        self.log("device_stop", reason=reason)
+        try:
+            if self._hb is not None:
+                self._hb.stop()
+                self._hb = None
+            if self.sim is not None:
+                self.close()
+            self.log("device_stop", reason=reason)
+        finally:
+            self.work.release()
 
     # ── 租約 ────────────────────────────────────────────────────────────────
     def acquire(self, owner: str) -> bool:

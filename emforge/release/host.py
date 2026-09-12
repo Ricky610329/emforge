@@ -18,7 +18,8 @@ def main():
                          port=int(os.environ["EMFORGE_SERVICE_PORT"]), secret=os.environ.get("EMFORGE_PLATFORM_TOKEN"))
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": .1}, daemon=True)
     info = {"launch": os.environ["EMFORGE_SERVICE_LAUNCH"], "pid": os.getpid(),
-            "birth": process_identity(os.getpid()), "runtime_owner": rt._lock_owner, "ready": False,
+            "birth": process_identity(os.getpid()), "runtime_owner": rt._lock_owner,
+            "queue_owner": rt.queue._lock_owner, "ready": False,
             "port": server.server_port, "at": now_iso()}
     local.put_json(paths.service_key("child"), info)
     def ready():

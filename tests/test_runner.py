@@ -24,6 +24,17 @@ def start(service, version, run_id="run_a", node="gpu_a", name="anneal"):
     return service.call("run_start", name=name, version=version, run_id=run_id, node=node,
                         environment="ant", profile="fake_f1", params={}, seed=1, budget=10)
 
+
+def test_run_name_cannot_collide_with_profile_config_lock(root, monkeypatch):
+    """回歸 I-3（2026-09-12）：防止合法 run_id 與內部設定鎖撞名而自我等待。"""
+    service = Platform(setup(root).depot)
+    version = register(service, code="pass")
+    service.call("node_heartbeat", node="gpu_a", session="test", environments=["ant"])
+    original = service.depot.lock
+    monkeypatch.setattr(service.depot, "lock", lambda key, **kw: original(key, timeout_s=.05, **kw))
+    assert start(service, version, run_id="config_fake_f1")["state"] == "queued"
+    assert start(service, version, run_id="node_gpu_a")["state"] == "queued"
+
 def poll(runner, service, run_id, wanted, timeout=15):
     end = time.monotonic() + timeout
     while time.monotonic() < end:

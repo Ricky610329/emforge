@@ -1,5 +1,7 @@
 # 命名規範
 
+> 2026-09-12 新增：控制鎖 `platform_locks/control/{run,node,config}/<name>.lock`；worker 本機 `work.emforge/` 保存 PID 鎖及按 Depot 分區的結果待傳資料。詳細佈局見 [恢復契約](reliability-2026-09-12.md)。
+
 > 程式碼裡的真相源是 `emforge/paths.py`（磁碟名、名字驗證、保留字）；本文是人讀版。
 > 兩邊不一致時以 `paths.py` 與 `tests/test_paths.py` 為準，並修這份文件。
 

@@ -205,12 +205,13 @@ class Queue:
 
     def requeue(self, store: str, *, stale_s: float = DEFAULT_STALE_S) -> None:
         """一次清 claim＋done＋fail；有新鮮 claim（有人正在跑）→ LiveClaim。"""
-        if not any(j.store == store for j in self._read()):
-            raise MissingJob(f"{store} 不在佇列")
-        if self.is_live(store, stale_s=stale_s):           # claim 新鮮或批有進度都算活（review：claim 以前不心跳）
-            raise LiveClaim(f"{store} 有人正在跑（{self.claim_owner(store)}）——先 stop 那台")
-        for key in (paths.claim_file(store), paths.done_file(store), paths.fail_file(store)):
-            self.depot.delete(key)
+        with self.depot.lock(paths.jobs_lock(), owner=self._lock_owner):
+            if not any(j.store == store for j in self._read()):
+                raise MissingJob(f"{store} 不在佇列")
+            if self.is_live(store, stale_s=stale_s):
+                raise LiveClaim(f"{store} 有人正在跑（{self.claim_owner(store)}）——先 stop 那台")
+            for key in (paths.claim_file(store), paths.done_file(store), paths.fail_file(store)):
+                self.depot.delete(key)
 
     # ── watch（blocking，給任何 harness 掛的收檔偵測） ────────────────────
     def watch(self, stores: list, *, poll_s: float = 30.0, fail_grace_s: float = 1200.0, timeout_s: float | None = None,

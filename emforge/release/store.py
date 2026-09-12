@@ -12,7 +12,7 @@ from ..model import canonical_json
 def source_files(source):
     source = Path(source).resolve()
     out = {}
-    for prefix in ("emforge", "tests", "docs", "examples"):
+    for prefix in ("emforge", "tests", "docs", "examples", "scripts"):
         folder = source / prefix
         if folder.is_symlink():
             raise ValueError("release 不接受 symlink")

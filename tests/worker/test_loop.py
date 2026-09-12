@@ -97,9 +97,8 @@ def test_loop_polls_when_queue_empty_until_stop(root):
     assert rc == 0 and polls == [30, 30, 30]
 
 
-def test_loop_survives_filesystem_error_marks_fail_and_continues(root, monkeypatch):
-    """回歸 review-6：結果檔寫不進去（FsBusy／PermissionError／NAS 斷）以前會殺掉整個 worker 行程、claim 留著 45 分沒人接。
-    現在那批判死（.fail 記 worker_exception）、worker 繼續跑下一個 job。"""
+def test_loop_preserves_pending_upload_and_resumes_without_blacklisting(root, monkeypatch):
+    """回歸 I-12（2026-09-12）：防止上傳失敗把機器列入黑名單或重算已完成結果。"""
     testing.make_fake_root(root)
     make_batch(root, "s1")
     make_batch(root, "s2", seed=2)
@@ -115,15 +114,27 @@ def test_loop_survives_filesystem_error_marks_fail_and_continues(root, monkeypat
         return real(self, rec_id, result)
 
     monkeypatch.setattr(bmod.Batch, "write_result", flaky)
+    sims = []
+
+    def factory(wd, profile):
+        sim = testing.FakeSimulator(workdir=str(wd), profile=profile)
+        sims.append(sim)
+        return sim
+
     rc = loop.worker_loop(root, "216", once=False, work_root=root / "work",
-                          sleep=lambda s: q.request_stop("216"))
+                          sim_factory=factory, sleep=lambda s: q.request_stop("216"))
     assert rc == 0
-    assert q.state("s1") == "fail" and "worker_exception" in fs.read_json(root / paths.fail_file("s1"))["last"]
-    assert not (root / paths.claim_file("s1")).exists(), "claim 不留著"
-    assert q.state("s2") == "done", "worker 活著，下一個照跑"
+    assert q.state("s1") == "claimed" and q.state("s2") == "queued"
+    assert not q.depot.exists(paths.fail_file("s1")), "等待补傳，不能列入黑名單"
     ev = _events(root)
-    assert "job_failed" in ev and ev[-1] == "worker_stop"
+    assert "job_yield" in ev and ev[-1] == "worker_stop"
     assert not (root / "work" / "s1").exists(), "工作目錄還是清掉"
+    monkeypatch.setattr(bmod.Batch, "write_result", real)
+    q.clear_stop("216")
+    assert loop.worker_loop(root, "216", once=False, work_root=root / "work", sim_factory=factory,
+                            sleep=lambda s: q.request_stop("216")) == 0
+    assert q.state("s1") == q.state("s2") == "done"
+    assert sum(s.calls["simulate"] for s in sims) == 6
 
 
 def test_loop_run_batch_fail_marks_fail(root):

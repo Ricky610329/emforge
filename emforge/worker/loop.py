@@ -1,6 +1,6 @@
 """emforge/worker/loop.py — worker 主迴圈：STOP → 急停 → pick → gate → 儀器租約 → run_batch → mark_done／mark_fail。
 
-啟動：載入 `<root>/registry.py`（與 runtime 同源）、印 worker_ver（I-10）、清工作目錄（I-1）、寫 worker_start、儀器 start。
+啟動：載入 registry、印版本、取得工作目錄所有權並啟動儀器，再取得儀器租約清理暫存、寫 worker_start。
 守門不過＝那**批**判死（.fail），worker 繼續；保險絲熔斷＝那批判死，worker 也繼續（別台會接管）；
 一圈裡的 depot 例外（SMB 瞬斷）記 worker_error 續跑、連續 WORKER_ERROR_LIMIT 圈才收工（檢查 #7）；
 只有 STOP 檔讓 worker 收工，且在 job **之間**生效（不中斷單筆）。
@@ -19,6 +19,7 @@ from .batch import run_batch
 from .fuse import Fuse
 from .gate import gate
 from .workdir import WorkDir, default_work_root
+from .outbox import ResultOutbox, ResultPending
 
 
 def worker_version() -> str:
@@ -65,20 +66,31 @@ def worker_loop(root, machine_tag: str, *, depot=None, poll_s: float = 30.0, onc
     profiles.load_user_registry(root)
     ver = worker_version()
     print(f"emforge worker {ver} machine={machine_tag} root={root} depot={depot.spec}", flush=True)
-    swept = work.sweep_all()
-    if swept:
-        print(f"啟動清掃：{len(swept)} 個殘留工作目錄已刪（{work.root}）", flush=True)
-    log("worker_start", worker_ver=ver, machine=machine_tag)
-    owned = instrument is None
     inst = instrument or make_instrument(root, machine_tag, depot=depot, work_root=work.root, sim_factory=sim_factory,
                                          sleep=sleep, worker_ver=ver)
-    if owned:
-        inst.start()
+    if work_root is not None and inst.work.root != work.root:
+        raise ValueError("worker 與儀器的工作目錄必須相同")
+    work, owned = inst.work, not inst.started
+    inst.start()
     try:
+        _sweep(inst, work)
+        log("worker_start", worker_ver=ver, machine=machine_tag)
         return _loop(Queue(depot), inst, work, log, ver, machine_tag, sleep, poll_s, once, opts)
     finally:
         if owned:
             inst.stop()
+
+
+def _sweep(inst, work):
+    """已有同一行程 MCP 工作時跳過清掃，等待正常儀器租約。"""
+    if not inst.acquire("startup"):
+        return
+    try:
+        swept = work.sweep_all()
+        if swept:
+            print(f"啟動清掃：{len(swept)} 個殘留工作目錄已刪（{work.root}）", flush=True)
+    finally:
+        inst.release("startup")
 
 
 WORKER_ERROR_LIMIT = 10   #? 連續幾圈例外才收工：一次 SMB 瞬斷（OSError 64／59／1231、FsBusy）不能殺整夜的 worker（檢查 #7）
@@ -110,6 +122,7 @@ def _iteration(q, inst, work, log, ver, machine_tag, sleep, poll_s, once, opts, 
     if q.stop_requested(machine_tag):
         log("worker_stop", reason="stop_file")
         return 0
+    ResultOutbox(work.local, q.depot, machine_tag).flush(q)
     if inst.estop_engaged() is not None:
         if once and st["estop_waited"]:
             log("worker_stop", reason="estop")                # 檢查 #15：--once 給一個 poll 的寬限，仍急停就收工（以前無限空轉）
@@ -158,6 +171,9 @@ def _handle(q, inst, job, work, log, ver, machine_tag, sleep, opts: _Opts):
             log("job_done", store=job.store, n_done=len(res) - len(errs), n_error=len(errs))
         elif outcome == "fail":
             q.mark_fail(job.store, machine_tag, "run_batch failed（見 worker log 的 job_failed）")
+    except ResultPending as e:
+        _log_quiet(log, "job_yield", store=job.store, reason=str(e))
+        return None
     except Exception as e:  # noqa: BLE001
         #! 回歸 review-6：NAS 的 FsBusy／PermissionError／FileNotFoundError 以前直接殺掉整個 worker、claim 留著 45 分沒人接。
         #  這批判死（.fail 記原因）、worker 繼續；判死本身也失敗就只能靠 stale 接管。

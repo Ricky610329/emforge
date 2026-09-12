@@ -1,5 +1,7 @@
 """版本驗證、真行程切換與啟動失敗回退。"""
 import shutil
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -11,6 +13,31 @@ from emforge import paths, testing
 from emforge.client import Client
 from tests.test_client import patterns
 from tests.test_client import setup
+
+
+def test_recovery_preserves_another_workers_queue_lock(tmp_path):
+    """回歸 I-2（2026-09-12）：防止平台恢復誤清其他 worker 的佇列鎖。"""
+    from emforge.depot import FileDepot
+    local, shared = FileDepot(tmp_path / "releases"), FileDepot(tmp_path / "data")
+    local.put_json(paths.service_key("child"), {"pid": os.getpid(), "birth": "old",
+                   "runtime_owner": "dead_runtime", "queue_owner": "dead_queue"})
+    shared.claim(paths.jobs_lock(), {"owner": "active_worker"})
+    with Supervisor(local.root, shared.root, "fake_f1"):
+        assert shared.owner(paths.jobs_lock())["owner"] == "active_worker"
+
+
+def test_real_release_collects_launcher_tests_without_worktree(tmp_path):
+    """回歸 I-10（2026-09-12）：防止工作樹全綠但凍結發布包遺漏 launcher 依賴。"""
+    source = Path(emforge.__file__).resolve().parent.parent
+    store = ReleaseStore(tmp_path / "releases")
+    version = store.stage(source, sys.executable)
+    frozen = paths.release_source(store.root, version)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("EMFORGE_")}
+    env.update(PYTHONPATH=str(frozen), PYTHONIOENCODING="utf-8")
+    result = subprocess.run([sys.executable, "-m", "pytest", "-o", "addopts=", "--collect-only",
+                             "-q", "tests/test_agent_launcher.py"], cwd=frozen, env=env,
+                            capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 def source_tree(tmp_path):
     src = tmp_path / "candidate"
@@ -82,7 +109,11 @@ def test_true_process_upgrade_keeps_inflight_and_bad_start_rolls_back(root, tmp_
         wait_for(supervisor, lambda s: client.status(sid)["state"] == "completed")
         assert len(client.results(sid)) == 1
         supervisor.process.terminate()
+        # 真行程死亡時留下自己的 jobs.lock，重啟不可再等 stale timeout。
+        child = store.depot.require_json(paths.service_key("child"))
+        rt.depot.put_json(paths.jobs_lock(), {"owner": child.get("queue_owner", "old_runtime_queue")})
         wait_for(supervisor, lambda s: s["phase"] == "failed")
+        assert not rt.depot.exists(paths.jobs_lock())
         store.request(second)
         wait_for(supervisor, lambda s: s["phase"] == "running")
         assert client.status(sid)["state"] == "completed"

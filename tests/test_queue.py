@@ -42,6 +42,39 @@ def _age(q, key, seconds):
     q.depot.set_modified_at(key, q.depot.now() - seconds)
 
 
+def test_requeue_serializes_live_check_and_clear_with_pick(monkeypatch):
+    """回歸 I-2（2026-09-12）：防止 requeue 刪除檢查後由另一 worker 新建的 claim。"""
+    from concurrent.futures import ThreadPoolExecutor
+    depot = MemoryDepot()
+    admin = _q(depot, ("race", 3))
+    worker = queue.Queue(depot)
+    checked, attempting, acquired = threading.Event(), threading.Event(), threading.Event()
+    original = admin.is_live
+
+    def check(store, **kw):
+        live = original(store, **kw)
+        checked.set()
+        assert attempting.wait(2)
+        assert not acquired.wait(.1), "pick 不得穿過 requeue 的檢查／清除區間"
+        return live
+
+    def pick():
+        assert checked.wait(2)
+        attempting.set()
+        job = worker.pick("218")
+        acquired.set()
+        return job
+
+    monkeypatch.setattr(admin, "is_live", check)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        task = pool.submit(pick)
+        admin.requeue("race")
+        assert task.result(timeout=3).store == "race"
+    assert admin.claim_owner("race") == "218"
+    with pytest.raises(queue.LiveClaim):
+        queue.Queue(depot).requeue("race")
+
+
 # ── add / list ──────────────────────────────────────────────────────────────
 def test_add_writes_job_rejects_duplicate_store_and_missing_batch(root):
     q = queue.Queue(root)

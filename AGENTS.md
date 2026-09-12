@@ -1,6 +1,8 @@
 # AGENTS.md — 給任何 coding agent（Codex／Claude／其他）的入口
 
-> **最新（2026-09-12）：先讀 [AI harness 接口](docs/agent-harness.md) 與 [日月光交付評估](docs/delivery-readiness-2026-09-12.md)。三台 HFSS 已部署驗收；Pi 原生 extension、Codex／Claude Code stdio 接口已加入。正式交付仍受 HFSS 收斂判斷等缺口阻擋。架構網站與本機配置在 Git 排除的 `local/`。下列 09-08 交接為歷史基準。**
+> **本輪最新（2026-09-12）：先讀 [審查修復與恢復契約](docs/reliability-2026-09-12.md)。六項審查修復及平台死亡鎖恢復已完成本機驗證，640 項測試通過。修正版尚未切換遠端。使用者已決定不以 HFSS 收斂狀態作本輪交付阻擋。Antenna 原檔保持唯讀。**
+
+> **同日先前驗收：[AI harness 接口](docs/agent-harness.md) 與 [日月光交付評估](docs/delivery-readiness-2026-09-12.md)。三台 HFSS 已完成初步部署驗收，Pi 原生 extension、Codex／Claude Code stdio 接口已加入；後續修正與驗收範圍以上方最新文件為準。架構網站與本機配置在 Git 排除的 `local/`。下列 09-08 交接為歷史基準。**
 
 > **最新交接（2026-09-08）：先讀 [Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。程式基準 a5c808e，615 passed；簡化部署入口仍待實作，正式 HFSS 未切換。**
 

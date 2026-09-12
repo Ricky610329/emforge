@@ -151,7 +151,8 @@ def test_yields_when_claim_taken_over(root, claimed):
         out, res, events, work = _run(root, claimed, lambda wd: _HookSim(workdir=str(wd), profile=P))
     finally:
         _HookSim.hook = None
-    assert out == "yield" and len(res) == 1, "第一筆寫完就發現 claim 被搶 → 停寫退出"
+    assert out == "yield" and not res, "claim 被接管後，不覆寫另一個 worker 的結果"
+    assert len(work.local.list(paths.result_outbox_dir(q.depot.spec))) == 1, "已完成結果保留本機待傳"
     assert q.claim_owner(job.store) == "218", "別人的 claim 不動"
     assert ("job_yield", {"store": job.store, "reason": "claim_taken_over"}) in events
     assert not work.path(job.store).exists()

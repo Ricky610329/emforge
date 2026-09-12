@@ -275,8 +275,10 @@ def algorithm_package(version):
     return platform_key("packages", version) + ".json"
 def algorithm_version(name, version):
     return platform_key("algorithms", name, version) + ".json"
-def platform_lock(name):
-    return platform_key("locks", name) + ".lock"
+def platform_lock(name, *, kind="run"):
+    if kind not in {"run", "node", "config"}:
+        raise ValueError("未知平台鎖類型")
+    return platform_key("locks", "control", kind, name) + ".lock"
 def runner_lock():
     return "runner.lock"
 def runner_identity():
@@ -327,3 +329,27 @@ def release_host(root, version):
 
 def algorithm_nodes_dir():
     return platform_key("nodes") + "/"
+
+
+def worker_state_root(work_root):
+    root = Path(work_root).resolve()
+    return root.with_name(root.name + ".emforge")
+
+
+def worker_lock():
+    return "worker.lock"
+
+
+def worker_lock_guard():
+    return "worker_guard.lock"
+
+
+def result_outbox_dir(depot_spec):
+    import hashlib
+    return "results/" + hashlib.sha256(depot_spec.encode("utf-8")).hexdigest()[:24] + "/"
+
+
+def result_outbox_file(depot_spec, store, rid):
+    import hashlib
+    digest = hashlib.sha256((store + "/" + rid).encode("utf-8")).hexdigest()[:24]
+    return result_outbox_dir(depot_spec) + digest + ".json"

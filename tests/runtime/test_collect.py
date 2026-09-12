@@ -19,6 +19,28 @@ def _dispatched(rt, n=3, tick=1, prio=9):
     return store, batches.Batch(rt.root, store), fs.read_json(rt.root / paths.inflight_file("fake_f1", store))["ids"]
 
 
+def test_postprocessing_errors_count_after_incremental_collect_and_restart(rt, monkeypatch):
+    """回歸 I-5（2026-09-12）：防止後處理全部失敗卻不觸發 profile 錯誤率暫停。"""
+    from emforge import specs
+    from tests.runtime.conftest import make_rt
+    store, batch, ids = _dispatched(rt, n=3)
+    for rid in ids:
+        batch.write_result(rid, _fake_result(rid))
+
+    def broken_measure(*args):
+        raise ValueError("broken measurement")
+
+    monkeypatch.setattr(specs, "measure", broken_measure)
+    assert all(r.status == "error" for r in col.collect(rt))
+    assert rt.state["paused_profile"] is None, "批尚未終結"
+    restored = make_rt(rt.root)
+    restored.queue.mark_done(store, "216", n_done=3, n_error=0, error_ids=[])
+    assert col.collect(restored) == [], "先前已入庫，不重算量測"
+    assert restored.state["paused_profile"]["error_rate"] == 1.0
+    event = _events(restored, "batch_done")[-1]
+    assert event["n_done"] == 0 and event["n_error"] == 3
+
+
 def test_collect_measures_scores_adds_records_clears_inflight_on_done(rt):
     store, b, ids = _dispatched(rt)
     testing.run_all_jobs(rt.root)

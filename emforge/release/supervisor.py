@@ -47,7 +47,7 @@ class Supervisor:
         if info and process_identity(info["pid"]) == info["birth"]:
             raise RuntimeError("前一個平台子行程仍活著，拒絕重複啟動")
         if info:
-            self.depot.release(paths.runtime_lock(self.profile), owner=info["runtime_owner"])
+            self._release_child_locks(info)
         for key in (paths.maintenance(self.profile), paths.runtime_stop(self.profile)):
             if not self.depot.exists(key):
                 continue
@@ -118,12 +118,18 @@ class Supervisor:
     def _finished(self):
         info = self.local.get_json(paths.service_key("child"))
         if info and info["launch"] == self.launch and info["pid"] == self.process.pid:
-            self.depot.release(paths.runtime_lock(self.profile), owner=info["runtime_owner"])
+            self._release_child_locks(info)
         self.process.close()
         self.process = None
         self.output.close()
         self.output = None
         self._clear_controls()
+
+    def _release_child_locks(self, info):
+        """只回收已確認死亡子行程的鎖；舊 metadata 沒有 queue_owner 就不猜。"""
+        self.depot.release(paths.runtime_lock(self.profile), owner=info["runtime_owner"])
+        if info.get("queue_owner"):
+            self.depot.release(paths.jobs_lock(), owner=info["queue_owner"])
 
     def _failed(self, reason):
         failed = self.state["current"]

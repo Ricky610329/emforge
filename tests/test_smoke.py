@@ -39,7 +39,7 @@ DEPOT_ONLY_MODULES = (
     "runtime/__init__.py", "runtime/collect.py", "runtime/notarize.py", "runtime/dispatch.py", "runtime/reconcile.py",
     "cli/release.py", "release/__init__.py", "release/host.py",
     "runtime/schedule.py", "runtime/recovery.py",
-    "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py",
+    "worker/__init__.py", "worker/batch.py", "worker/gate.py", "worker/fuse.py", "worker/outbox.py",
     "device/__init__.py", "device/states.py", "device/reference.py", "device/mcp_server.py", "device/mcp_client.py",
     "cli/__init__.py", "cli/__main__.py", "cli/control.py", "cli/show.py", "cli/verdict.py", "cli/loops.py",
     "strategies/__init__.py", "strategies/blind.py", "strategies/top_k_flip.py",
