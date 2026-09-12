@@ -151,3 +151,22 @@ def test_kind_repeat_only_set_in_notarize_module():
     for mod in (core, schedule, col):
         assert "KIND_REPEAT" not in inspect.getsource(mod), mod.__name__
     assert "KIND_REPEAT" in inspect.getsource(nz)
+
+
+def test_smoke_same_timestamp_keeps_each_machine_request(rt, monkeypatch):
+    """回歸 I-17（2026-09-12）：防止同秒逐台 smoke 共用批名，第二台派工失敗。"""
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    rec = _first_batch(rt, n=1)[0]
+    monkeypatch.setattr(nz, "datetime", SimpleNamespace(now=lambda: datetime(2026, 9, 12, 18, 0, 0)))
+    requests = [(tag, nz.smoke_dispatch(rt, rec.id, n=2, machine=tag))
+                for tag in ("216", "218", "216")]
+    stores = [store for _, names in requests for store in names]
+    assert len(stores) == len(set(stores)) == 6
+    jobs = {job.store: job for job in rt.queue.list()}
+    for tag, names in requests:
+        assert len(names) == 2
+        assert all(jobs[name].machine == tag for name in names)
+        assert all(rt.depot.require_json(paths.batch_manifest(name))["kind"] == "repeat" for name in names)
+    assert len(rt.db.measurements(rt.profile_name, rec.id)) == 1, "派工不得覆寫原量測"

@@ -5,6 +5,7 @@
 門檻＝max(榜首分數, 待審中最好的保守值, 公證中的候選)：沒破就不重測（冷啟動會頻繁公證——數值是佔位，待實測）。
 """
 from datetime import datetime
+from uuid import uuid4
 
 from .. import paths
 from ..ledger import Ledger, LedgerTamper
@@ -80,7 +81,8 @@ def smoke_dispatch(rt, rec_id: str, *, n: int = 1, machine: str | None = None, b
     if not ms:
         raise ValueError(f"{rec_id} 不在 db/{rt.profile_name}/")
     rec = ms[0]
-    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    #! I-17（2026-09-12）：同秒逐台／同台再次 smoke 都是獨立重測，不能共用批名。
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S") + uuid4().hex
     stores = []
     for k in range(1, n + 1):
         store = paths.smoke_store_name(rt.profile_name, rec_id, k, stamp)
