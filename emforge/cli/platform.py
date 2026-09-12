@@ -86,14 +86,23 @@ COMMANDS = {"platform-serve": _add_serve, "submit": _add_submit, "inbox": _add_i
 
 
 def cmd_platform_mcp(args):
-    from ..platform.mcp_server import serve
-    serve(platform_of(args), args.host, args.port, os.environ.get("EMFORGE_PLATFORM_TOKEN"))
+    from ..platform.mcp_server import serve, serve_stdio
+    from ..platform.connection import remote_from_file
+    if args.connection and (args.endpoint or args.root or args.depot):
+        raise ValueError("--connection cannot be combined with --endpoint, --root or --depot")
+    service = remote_from_file(args.connection) if args.connection else platform_of(args)
+    if args.transport == "stdio":
+        serve_stdio(service)
+    else:
+        serve(service, args.host, args.port, os.environ.get("EMFORGE_PLATFORM_TOKEN"))
     return 0
 
 
 def _add_mcp(sub):
     p = sub.add_parser("platform-mcp", help="平台 MCP；可代理既有平台 HTTP")
     _connection(p)
+    p.add_argument("--connection", help="Local JSON file with endpoint/token; never sent to the agent")
+    p.add_argument("--transport", choices=["http", "stdio"], default="http")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8767)
     p.set_defaults(fn=cmd_platform_mcp)

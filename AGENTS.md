@@ -1,5 +1,7 @@
 # AGENTS.md — 給任何 coding agent（Codex／Claude／其他）的入口
 
+> **最新（2026-09-12）：先讀 [AI harness 接口](docs/agent-harness.md) 與 [日月光交付評估](docs/delivery-readiness-2026-09-12.md)。三台 HFSS 已部署驗收；Pi 原生 extension、Codex／Claude Code stdio 接口已加入。正式交付仍受 HFSS 收斂判斷等缺口阻擋。架構網站與本機配置在 Git 排除的 `local/`。下列 09-08 交接為歷史基準。**
+
 > **最新交接（2026-09-08）：先讀 [Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。程式基準 a5c808e，615 passed；簡化部署入口仍待實作，正式 HFSS 未切換。**
 
 1. 先讀 `CLAUDE.md`（工作規範與硬規則：TDD、單檔 ≤400 行、單函式 ≤60 行、磁碟名只經 `paths.py`、協調狀態只經 `Depot`、`mcp` 只在指定模組函式內 import）。

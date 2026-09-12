@@ -8,6 +8,12 @@ READ_OPERATIONS = {"description", "submission_status", "submission_results", "db
 INSTRUCTIONS = ("平台協調算法與模擬節點。platform_query 的 operation 使用 resource 所列唯讀操作。"
                 "inbox_submit 第一次拿預覽與 token，再以相同內容及 confirm 送件。"
                 "algorithm_start 只執行已註冊版本、指定節點及現有 Python 環境。"
+                "先呼叫 platform_reference 取得操作簽名，再查 description/db_profiles。"
+                "submission_status/submission_results 的 params 身分為 profile/name/run_id/sid。"
+                "items 各含二維 0/1 pattern，須符合 description 的 shape/fixed_on；"
+                "可帶 parent、tag、priority（urgent/normal/background）。"
+                "算法版本從既有 run identity 或 CLI 註冊結果取得。"
+                "送件確認 token 綁定內容；這不是人工批准或身分授權。"
                 "沒有改碼、promote 或解除急停工具。")
 
 def build_server(platform):
@@ -28,11 +34,16 @@ def _reads(srv, platform):
 
     @srv.resource("platform://reference", mime_type="application/json")
     def reference() -> str:
+        return json.dumps(platform_reference(), ensure_ascii=False)
+
+    @srv.tool(annotations=ToolAnnotations(read_only_hint=True))
+    def platform_reference() -> dict:
+        """Discover query signatures and workflow before using emforge tools."""
         import inspect
         from .service import Platform
-        return json.dumps({"instructions": INSTRUCTIONS,
-                           "operations": {op: str(inspect.signature(getattr(Platform, op)))
-                                          for op in sorted(READ_OPERATIONS)}}, ensure_ascii=False)
+        return {"instructions": INSTRUCTIONS,
+                "operations": {op: str(inspect.signature(getattr(Platform, op)))
+                               for op in sorted(READ_OPERATIONS)}}
 
     @srv.resource("platform://state", mime_type="application/json")
     def state() -> str:
@@ -73,3 +84,8 @@ def serve(platform, host="127.0.0.1", port=8767, secret=None):
     if secret:
         app = BearerGate(app, secret)
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+def serve_stdio(platform):
+    """One agent session owns one MCP server and its confirmation nonces."""
+    build_server(platform).run(transport="stdio")

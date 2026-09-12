@@ -63,6 +63,7 @@ DEPOT_ONLY_PARTIAL = {
 }
 #? LOCAL_LAYER：本機層／後端本體，本來就認得檔案系統。值＝理由；新增模組不准隨手放這裡。
 LOCAL_LAYER = {
+    "platform/connection.py": "User-selected local agent credentials; no shared Depot state",
     "release/store.py": "本機 release 快照及隔離 Python 驗證",
     "release/supervisor.py": "本機平台行程與版本切換",
     "release/probe.py": "建立隔離假資料目錄做端到端探針",

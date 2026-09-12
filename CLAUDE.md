@@ -1,5 +1,7 @@
 # CLAUDE.md — emforge 工作規範
 
+> **最新（2026-09-12）：[AI harness 接口](docs/agent-harness.md)、[日月光交付評估](docs/delivery-readiness-2026-09-12.md)。三台 HFSS 已部署驗收；本輪新增 Pi extension 與共用 stdio MCP。收斂判斷等正式交付缺口仍待補，`local/` 架構網站不進 Git。下列 09-08 交接為歷史基準。**
+
 > **最新交接（2026-09-08）：先讀 [Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。程式基準 a5c808e，615 passed；簡化部署入口仍待實作，正式 HFSS 未切換。**
 
 > 用**繁體中文**對話與寫文件；識別字用英文。

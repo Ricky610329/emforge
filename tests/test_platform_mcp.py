@@ -16,6 +16,13 @@ def test_mcp_submit_query_and_confirm_binding(root):
         async with Client(srv) as client:
             tools = {t.name: t for t in (await client.list_tools()).tools}
             assert tools["platform_query"].annotations.read_only_hint
+            reference = await client.call_tool("platform_reference", {})
+            ref = json.loads(reference.content[0].text)
+            assert "description" in ref["operations"]
+            assert "run_stop" not in ref["operations"]
+            assert tools["platform_reference"].annotations.read_only_hint
+            resource = await client.read_resource("platform://reference")
+            assert json.loads(resource.contents[0].text) == ref
             assert not {"promote", "estop_clear", "edit_code"} & tools.keys()
             args = {"profile": "fake_f1", "name": "anneal", "run_id": "run_mcp",
                     "items": [{"pattern": patterns(1)[0].astype(int).tolist()}], "request_id": "round_one"}

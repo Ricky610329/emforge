@@ -9,6 +9,10 @@ dist/
 .mypy_cache/
 .venv/
 
+# Local agent dependencies, credentials/configuration and architecture website
+integrations/pi/node_modules/
+local/
+
 # 本機暫存（worker 工作目錄預設在 %LOCALAPPDATA%，但若指到 repo 內也不進 git）
 tmp/
 work/
