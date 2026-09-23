@@ -333,6 +333,8 @@ def algorithm_nodes_dir():
 
 def worker_state_root(work_root):
     root = Path(work_root).resolve()
+    if not root.name:
+        raise ValueError(f"worker 工作目錄不可是磁碟根（{root}）——旁邊放不下 .emforge 狀態目錄")
     return root.with_name(root.name + ".emforge")
 
 
@@ -349,7 +351,19 @@ def result_outbox_dir(depot_spec):
     return "results/" + hashlib.sha256(depot_spec.encode("utf-8")).hexdigest()[:24] + "/"
 
 
-def result_outbox_file(depot_spec, store, rid):
+def _result_outbox_digest(store, rid):
     import hashlib
-    digest = hashlib.sha256((store + "/" + rid).encode("utf-8")).hexdigest()[:24]
-    return result_outbox_dir(depot_spec) + digest + ".json"
+    return hashlib.sha256((store + "/" + rid).encode("utf-8")).hexdigest()[:24]
+
+
+def result_outbox_file(depot_spec, store, rid):
+    return result_outbox_dir(depot_spec) + _result_outbox_digest(store, rid) + ".json"
+
+
+def result_outbox_held_dir(depot_spec):
+    """回填不了的待傳結果（身分不相容／批次不存在／已 abandon）：保留證據、不再每圈重試。"""
+    return "results_held/" + result_outbox_dir(depot_spec)[len("results/"):]
+
+
+def result_outbox_held_file(depot_spec, store, rid):
+    return result_outbox_held_dir(depot_spec) + _result_outbox_digest(store, rid) + ".json"

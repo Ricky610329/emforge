@@ -79,3 +79,44 @@ def test_workdir_recovers_dead_owner_and_rejects_live_owner(tmp_path):
         work.release()
     second.acquire()
     second.release()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows 的行程 handle 語意")
+def test_workdir_recovers_lock_of_exited_pid_whose_handle_is_still_open(tmp_path):
+    """回歸 I-2（2026-09-23）：防止行程已結束、但別人仍持有其 handle（EDR／Process Explorer／父行程）時被判成活著，
+    worker 永遠拒絕啟動。"""
+    from emforge.runner.process import process_identity
+    child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE)
+    try:
+        birth = process_identity(child.pid)
+        assert birth is not None
+        child.stdin.close()
+        child.wait(timeout=30)
+        assert process_identity(child.pid) is None, "已結束的行程（handle 仍開著）不算活著"
+        work = WorkDir(tmp_path / "work")
+        work.local.put_json(paths.worker_lock(), {"owner": "dead", "pid": child.pid, "birth": birth})
+        work.acquire()
+        assert work.local.owner(paths.worker_lock())["pid"] == os.getpid()
+        work.release()
+    finally:
+        child.kill()
+
+
+def test_workdir_recycles_empty_lock_after_grace_but_not_fresh(tmp_path):
+    """回歸 I-2（2026-09-23）：防止藍屏／斷電留下的 0 byte worker.lock 永久擋住啟動——空 claim 要有寬限，超過才當殘骸。"""
+    work = WorkDir(tmp_path / "work")
+    lock_path = work.local.path(paths.worker_lock())
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_bytes(b"")
+    with pytest.raises(RuntimeError, match="無法辨識"):
+        work.acquire()                                   # 剛出現的空檔＝有人正在寫，不能搶
+    old = time.time() - 120
+    os.utime(lock_path, (old, old))
+    work.acquire()
+    assert work.local.owner(paths.worker_lock())["pid"] == os.getpid()
+    work.release()
+
+
+def test_worker_state_root_refuses_drive_root():
+    with pytest.raises(ValueError, match="磁碟根"):
+        paths.worker_state_root("C:/" if os.name == "nt" else "/")

@@ -1,7 +1,8 @@
 """emforge/worker/workdir.py — 本機工作目錄生命週期：`<EMFORGE_WORK>/<store>/`。
 
 #! 回歸 I-1（2026-07-15）：78 個工作暫存吃光系統碟 → 求解器連環例外，重開機假好轉。兩道清理：
-#  run_batch 結束（done／fail／yield 皆）刪；worker 啟動時整清（那時本機不可能有活的 run）。
+#  run_batch 結束（done／fail／yield 皆）刪；worker 啟動時整清——前提是先拿到 work-root 的行程所有權（`acquire`），
+#  且同一行程沒有 MCP 模擬工作在跑（loop._sweep 拿不到 "startup" 租約就跳過）。
 預設根在 %LOCALAPPDATA%\\emforge\\work（不在 repo、不在 NAS）。
 """
 import os
@@ -23,6 +24,9 @@ def default_work_root() -> Path:
     return Path(base) / "emforge" / "work"
 
 
+LOCK_GRACE_S = 60.0   #? 空／半截 worker.lock 的寬限：O_EXCL 建檔與寫 JSON 之間的窗（I-2），超過就是斷電殘骸
+
+
 class WorkDir:
     def __init__(self, root):
         self.root = Path(root).resolve()
@@ -39,10 +43,14 @@ class WorkDir:
             old = self.local.owner(key)
             if self.local.exists(key):
                 if not old or not {"owner", "pid", "birth"} <= old.keys():
-                    raise RuntimeError("工作目錄鎖無法辨識，拒絕清理")
-                if process_identity(old["pid"]) == old["birth"]:
+                    #! 回歸 I-2（2026-09-23）：藍屏／斷電留下 0 byte 鎖以前＝永久拒絕啟動、要人手動刪；寬限內才當「有人正在寫」
+                    if not self.local.is_stale(key, LOCK_GRACE_S):
+                        raise RuntimeError("工作目錄鎖無法辨識（可能正在寫入），拒絕清理")
+                    self.local.release(key)
+                elif process_identity(old["pid"]) == old["birth"]:
                     raise RuntimeError("工作目錄已有活躍 worker／儀器行程")
-                self.local.release(key, owner=old["owner"])
+                else:
+                    self.local.release(key, owner=old["owner"])
             payload = {"owner": owner, "pid": os.getpid(), "birth": process_identity(os.getpid())}
             if not self.local.claim(key, payload):
                 raise RuntimeError("工作目錄所有權已被占用")

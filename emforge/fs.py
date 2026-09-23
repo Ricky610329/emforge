@@ -142,6 +142,8 @@ def try_claim(path, payload: dict) -> bool:
         return False
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())        # 斷電後不留 0 byte 鎖（I-2 本機版，2026-09-23）
     return True
 
 

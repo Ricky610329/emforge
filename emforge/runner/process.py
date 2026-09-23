@@ -78,8 +78,13 @@ class OwnedProcess:
     def poll(self):
         return self.proc.poll()
 
+STILL_ACTIVE = 259
+
+
 def process_identity(pid):
-    """辨識 PID 的建立時間，避免殘留鎖誤認重用的 PID。"""
+    """辨識 PID 的建立時間，避免殘留鎖誤認重用的 PID；行程不存在或**已結束**回 None。
+    #! 回歸 I-2（2026-09-23）：Windows 上行程結束後只要還有人持有它的 handle（父行程、EDR、Process Explorer），
+    #  OpenProcess 仍成功、GetProcessTimes 仍回建立時間——沒查 exit code 就會把死行程當活的，worker 永遠拒絕啟動。"""
     if os.name != "nt":
         from pathlib import Path
         try:
@@ -91,13 +96,16 @@ def process_identity(pid):
     k.OpenProcess.argtypes, k.OpenProcess.restype = [w.DWORD, w.BOOL, w.DWORD], w.HANDLE
     k.CloseHandle.argtypes = [w.HANDLE]
     k.GetProcessTimes.argtypes = [w.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    k.GetExitCodeProcess.argtypes = [w.HANDLE, ctypes.POINTER(w.DWORD)]
     handle = k.OpenProcess(0x1000, False, pid)
     if not handle:
         if ctypes.get_last_error() == 87:
             return None
         raise OSError(ctypes.get_last_error(), "無法確認既有算法節點行程")
-    stamps = [w.FILETIME() for _ in range(4)]
+    stamps, code = [w.FILETIME() for _ in range(4)], w.DWORD()
     try:
+        if not k.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value != STILL_ACTIVE:
+            return None
         if not k.GetProcessTimes(handle, *(ctypes.byref(x) for x in stamps)):
             raise OSError(ctypes.get_last_error(), "無法讀取行程建立時間")
         return str((stamps[0].dwHighDateTime << 32) | stamps[0].dwLowDateTime)

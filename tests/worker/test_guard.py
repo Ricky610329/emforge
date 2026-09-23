@@ -104,3 +104,17 @@ def test_guarded_call_aborts_when_predicate_becomes_true():
     assert time.time() - t0 < 3 and kills == [1]
     assert issubclass(guard.Aborted, guard.WatchdogTimeout), "呼叫端的 except WatchdogTimeout 仍接得到"
     assert guard.guarded_call(lambda: 7, 1.0, kill, abort_if=lambda: False, poll_s=0.01) == 7
+
+
+def test_watchdog_still_fires_when_abort_check_raises():
+    """回歸 I-4（2026-09-23）：防止急停輪詢遇 depot 例外（SMB／HTTP 瞬斷）殺死看門狗執行緒，之後逾時再也不 kill。"""
+    kills, calls = [], []
+
+    def flaky_abort():
+        calls.append(1)
+        raise OSError(64, "The specified network name is no longer available")
+
+    with guard.Watchdog(0.3, lambda: kills.append(1), abort_if=flaky_abort, poll_s=0.05) as wd:
+        time.sleep(0.7)
+    assert wd.fired and not wd.aborted and kills == [1]
+    assert len(calls) > 1, "例外後仍要繼續輪詢，不是死掉"

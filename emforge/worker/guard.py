@@ -36,11 +36,21 @@ class Watchdog:
         except Exception:  # noqa: BLE001 — 殺不掉也不能讓看門狗執行緒炸
             pass
 
+    def _should_abort(self) -> bool:
+        """`abort_if` 讀的是 depot（急停旗標）——它炸了只當「這次沒看到」。
+        #! 回歸 I-4（2026-09-23）：以前例外直接穿出 `_watch`、看門狗執行緒死掉，之後 HFSS 卡住再也沒人 kill，worker 永久卡死。"""
+        if self._abort_if is None:
+            return False
+        try:
+            return bool(self._abort_if())
+        except Exception:  # noqa: BLE001
+            return False
+
     def _watch(self) -> None:
         deadline = time.monotonic() + self.timeout_s
         step = self._poll_s if self._abort_if is not None else self.timeout_s
         while not self._halt.wait(min(step, max(0.0, deadline - time.monotonic()))):
-            if self._abort_if is not None and self._abort_if():
+            if self._should_abort():
                 return self._fire(aborted=True)
             if time.monotonic() >= deadline:
                 return self._fire()

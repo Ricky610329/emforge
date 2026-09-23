@@ -83,3 +83,89 @@ def test_outbox_preserves_other_owner_and_does_not_overwrite_newer_result(tmp_pa
     outbox.flush(q)
     assert batch.results()[ids[0]] == newer
     assert not work.local.list(paths.result_outbox_dir(depot.spec))
+
+
+def _saved(work, depot, batch, rid, result):
+    from emforge.worker.outbox import ResultOutbox
+    outbox = ResultOutbox(work.local, depot, "216")
+    outbox.save(batch, rid, result)
+    return outbox
+
+
+def test_outbox_done_beats_remote_error_with_same_or_higher_attempts(tmp_path):
+    """回歸 I-15（2026-09-23）：防止本機的成功結果被接管者的 error 蓋掉後刪除（缺或錯不得覆蓋成功）。"""
+    depot = MemoryDepot()
+    ids = make_batch(depot, "pending", n=1)
+    q = Queue(depot)
+    q.add(make_job("pending"))
+    q.pick("216")
+    batch, work = Batch(depot, "pending"), WorkDir(tmp_path / "work")
+    base = {"id": ids[0], "profile_hash": testing.FAKE_PROFILE.profile_hash, "attempts": 1}
+    batch.write_result(ids[0], {**base, "status": "error", "machine": "218", "attempts": 2, "error": "boom"})
+    outbox = _saved(work, depot, batch, ids[0], {**base, "status": "done", "machine": "216", "response": [[1]]})
+    outbox.flush(q)
+    assert batch.results()[ids[0]]["status"] == "done"
+    assert not work.local.list(paths.result_outbox_dir(depot.spec))
+    # 反向：本機 error 不蓋遠端 done，也不蓋 attempts 更高的 error
+    batch.write_result(ids[0], {**base, "status": "error", "machine": "218", "attempts": 2, "error": "boom"})
+    outbox = _saved(work, depot, batch, ids[0], {**base, "status": "error", "machine": "216", "error": "old"})
+    outbox.flush(q)
+    assert batch.results()[ids[0]]["attempts"] == 2 and batch.results()[ids[0]]["machine"] == "218"
+    assert not work.local.list(paths.result_outbox_dir(depot.spec))
+
+
+def test_incompatible_or_abandoned_outbox_entry_is_held_not_fatal(tmp_path):
+    """回歸 I-4（2026-09-23）：防止一筆不相容／已 abandon 的待傳結果每圈拋例外，讓 worker 連錯十圈自行退出並擋住其他補傳。"""
+    from emforge.worker.outbox import ResultOutbox
+    depot = MemoryDepot()
+    ids = make_batch(depot, "bad", n=1)
+    good_ids = make_batch(depot, "good", n=1, seed=3)
+    gone_ids = make_batch(depot, "gone", n=1, seed=5)
+    q = Queue(depot)
+    for s in ("bad", "good", "gone"):
+        q.add(make_job(s))
+    for _ in range(3):
+        q.pick("216")
+    ph = testing.FAKE_PROFILE.profile_hash
+    work = WorkDir(tmp_path / "work")
+    held = []
+    outbox = ResultOutbox(work.local, depot, "216", log=lambda ev, **f: held.append((ev, f)))
+    outbox.save(Batch(depot, "bad"), ids[0], {"id": ids[0], "status": "done", "attempts": 1, "profile_hash": "0" * 12,
+                                              "response": [[1]]})
+    outbox.save(Batch(depot, "good"), good_ids[0], {"id": good_ids[0], "status": "done", "attempts": 1, "profile_hash": ph,
+                                                     "response": [[1]]})
+    q.mark_done("gone", "abandon:test", n_done=0, n_error=0, error_ids=[])
+    outbox.save(Batch(depot, "gone"), gone_ids[0], {"id": gone_ids[0], "status": "done", "attempts": 1, "profile_hash": ph,
+                                                     "response": [[1]]})
+    outbox.flush(q)                                     # 不拋
+    assert Batch(depot, "good").results()[good_ids[0]]["status"] == "done", "不相容的一筆不能擋住其他補傳"
+    assert not work.local.list(paths.result_outbox_dir(depot.spec)), "待傳區清空：好的送出、壞的移走"
+    kept = work.local.list(paths.result_outbox_held_dir(depot.spec))
+    assert len(kept) == 2, "不相容與 abandon 的證據保留在 held 分區"
+    reasons = sorted(f["reason"] for ev, f in held if ev == "outbox_held")
+    assert len(reasons) == 2 and any("不相容" in r for r in reasons) and any("abandon" in r for r in reasons)
+    docs = [work.local.require_json(k) for k in kept]
+    assert all({"depot", "store", "id", "result", "reason", "held_at"} <= d.keys() for d in docs)
+    outbox.flush(q)                                     # 第二圈：held 的不再處理、不再取 jobs.lock
+    assert len(work.local.list(paths.result_outbox_held_dir(depot.spec))) == 2
+
+
+def test_flush_failure_before_claim_is_result_pending_not_batch_failure(tmp_path, monkeypatch):
+    """回歸 I-12（2026-09-23）：防止認領時補傳遇瞬斷被當成這批的失敗（列入 fail 名單）；契約：上傳失敗不列失敗名單。"""
+    from emforge.worker import batch as batch_mod
+    from emforge.worker.outbox import ResultPending
+    depot = MemoryDepot()
+    make_batch(depot, "s", n=1)
+    q = Queue(depot)
+    q.add(make_job("s"))
+    job = q.pick("216")
+
+    def broken_flush(self, queue, store=None):
+        raise OSError(64, "network name deleted")
+
+    monkeypatch.setattr(batch_mod.ResultOutbox, "flush", broken_flush)
+    with pytest.raises(ResultPending):
+        run_batch(q, Batch(depot, job.store), job, testing.FAKE_PROFILE,
+                  lambda wd: testing.FakeSimulator(workdir=str(wd), profile=testing.FAKE_PROFILE), "216", "test",
+                  work=WorkDir(tmp_path / "work"))
+    assert q.claim_owner("s") == "216" and q.state("s") == "claimed"

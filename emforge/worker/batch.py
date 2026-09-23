@@ -19,7 +19,7 @@ from .fuse import Fuse
 from . import guard
 from .guard import Aborted, SimulatorOpenFailed, WatchdogTimeout, guarded_call, open_with_retries
 from .workdir import WorkDir
-from .outbox import ResultOutbox
+from .outbox import ResultOutbox, ResultPending
 
 MAX_ATTEMPTS = 3   #? 毒樣本規則：三次都錯就不再重試，留給人判
 DEFAULT_ESTOP_POLL_S = 5.0
@@ -57,8 +57,11 @@ class _Run:
 def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_ver: str, *, work: WorkDir,
               instrument=None, timeout_s: float | None = None, fuse: Fuse | None = None, retry_passes: int = 2,
               background_prio: int = 9, sleep=time.sleep, log=_noop, estop_poll_s: float = DEFAULT_ESTOP_POLL_S) -> str:
-    outbox = ResultOutbox(work.local, queue.depot, machine_tag)
-    outbox.flush(queue, job.store)
+    outbox = ResultOutbox(work.local, queue.depot, machine_tag, log=log)
+    try:
+        outbox.flush(queue, job.store)
+    except Exception as e:  # noqa: BLE001 — 補傳的瞬斷是「等下一輪」，不是這批失敗（契約第 2 條）
+        raise ResultPending(f"認領前補傳未完成：{type(e).__name__}: {e}") from e
     if not _todo(batch, 0):
         return "done"
     run = _Run(queue, batch, job, profile, machine_tag, worker_ver, float(timeout_s or profile.timeout_s),

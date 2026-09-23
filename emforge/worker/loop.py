@@ -74,7 +74,7 @@ def worker_loop(root, machine_tag: str, *, depot=None, poll_s: float = 30.0, onc
     inst.start()
     try:
         _sweep(inst, work)
-        log("worker_start", worker_ver=ver, machine=machine_tag)
+        _log_quiet(log, "worker_start", worker_ver=ver, machine=machine_tag)   # 啟動期 NAS 瞬斷不殺行程（與 _loop 同一條邊界）
         return _loop(Queue(depot), inst, work, log, ver, machine_tag, sleep, poll_s, once, opts)
     finally:
         if owned:
@@ -122,7 +122,7 @@ def _iteration(q, inst, work, log, ver, machine_tag, sleep, poll_s, once, opts, 
     if q.stop_requested(machine_tag):
         log("worker_stop", reason="stop_file")
         return 0
-    ResultOutbox(work.local, q.depot, machine_tag).flush(q)
+    ResultOutbox(work.local, q.depot, machine_tag, log=log).flush(q)
     if inst.estop_engaged() is not None:
         if once and st["estop_waited"]:
             log("worker_stop", reason="estop")                # 檢查 #15：--once 給一個 poll 的寬限，仍急停就收工（以前無限空轉）
