@@ -115,7 +115,7 @@ def test_outbox_done_beats_remote_error_with_same_or_higher_attempts(tmp_path):
 
 
 def test_incompatible_or_abandoned_outbox_entry_is_held_not_fatal(tmp_path):
-    """回歸 I-4（2026-09-23）：防止一筆不相容／已 abandon 的待傳結果每圈拋例外，讓 worker 連錯十圈自行退出並擋住其他補傳。"""
+    """回歸 I-35（2026-09-23）：防止一筆不相容／已 abandon 的待傳結果每圈拋例外，讓 worker 連錯十圈自行退出並擋住其他補傳（I-4 的維護路徑版）。"""
     from emforge.worker.outbox import ResultOutbox
     depot = MemoryDepot()
     ids = make_batch(depot, "bad", n=1)
@@ -151,7 +151,7 @@ def test_incompatible_or_abandoned_outbox_entry_is_held_not_fatal(tmp_path):
 
 
 def test_flush_failure_before_claim_is_result_pending_not_batch_failure(tmp_path, monkeypatch):
-    """回歸 I-12（2026-09-23）：防止認領時補傳遇瞬斷被當成這批的失敗（列入 fail 名單）；契約：上傳失敗不列失敗名單。"""
+    """回歸 I-35（2026-09-23）：防止認領時補傳遇瞬斷被當成這批的失敗（列入 fail 名單）；契約：上傳失敗不列失敗名單。"""
     from emforge.worker import batch as batch_mod
     from emforge.worker.outbox import ResultPending
     depot = MemoryDepot()

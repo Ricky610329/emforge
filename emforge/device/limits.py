@@ -56,7 +56,7 @@ def load_limits(root) -> tuple:
     if not p.exists():
         return Limits(), "default"
     try:
-        d = json.loads(p.read_text(encoding="utf-8"))
+        d = json.loads(p.read_text(encoding="utf-8-sig"))     # PowerShell 5 的 Set-Content -Encoding utf8 會寫 BOM（I-33）
     except json.JSONDecodeError as e:
         raise ValueError(f"{p}：limits.json 不是合法 JSON（{e}）") from None
     if not isinstance(d, dict):

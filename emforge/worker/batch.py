@@ -74,6 +74,7 @@ def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_
         else:
             run.sim = sim_factory(wd)
         open_with_retries(run.sim, sleep=sleep, fatal=OPEN_FATAL)
+        run.worker_ver = _versioned(worker_ver, run.sim)
         patterns = batch.patterns()
         for rpass in range(1 + retry_passes):
             todo = _todo(batch, rpass)
@@ -101,6 +102,16 @@ def run_batch(queue, batch, job, profile, sim_factory, machine_tag: str, worker_
         if instrument is not None:
             instrument.unbind()
         work.remove(job.store)
+
+
+def _versioned(worker_ver: str, sim) -> str:
+    """結果檔 worker_ver＝emforge 戳＋模擬器宣告的版本成分（I-10：這批是哪版 Antenna 跑的）；沒宣告／炸了就只有前者。"""
+    fn = getattr(sim, "version_tag", None)
+    try:
+        tag = fn() if callable(fn) else ""
+    except Exception:  # noqa: BLE001
+        tag = ""
+    return f"{worker_ver} {tag}" if tag else worker_ver
 
 
 def _todo(batch, rpass: int) -> list:

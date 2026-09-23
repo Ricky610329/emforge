@@ -31,7 +31,7 @@ DEPOT_ONLY_MODULES = (
     "__init__.py", "__main__.py", "specs.py", "netid.py", "events.py", "profiles.py", "heartbeat.py",
     "client.py", "client_view.py", "submissions.py", "runtime/inbox.py", "priority.py",
     "platform/__init__.py", "platform/service.py", "platform/wire.py",
-    "platform/transport.py", "platform/http_server.py", "cli/platform.py",
+    "platform/transport.py", "platform/http_server.py",
     "platform/confirmation.py", "platform/mcp_server.py",
     "scoring.py", "evaluation.py", "platform/evaluate.py",
     "algorithms.py", "costs.py", "platform/runs.py", "runner/__init__.py",
@@ -57,6 +57,7 @@ DEPOT_ONLY_PARTIAL = {
     "device/instrument.py": "root＝本機程式碼根（前置檢查、急停本機層）；本機工作目錄 WorkDir",
     "cli/base.py": "--root 是本機路徑",
     "cli/device.py": "device-simulate 的 `--bits @file` 讀本機檔（使用者給的 pattern 檔）",
+    "cli/platform.py": "submit 的 `--patterns X.npz` 讀本機檔（使用者給的候選檔；np.load 不是 open( 所以守門以前沒抓到）",
     "cli/setup.py": "init 寫本機 registry.py／strategies/；import-legacy 的舊樹是本機路徑",
     "testing.py": "假根建本機 registry.py",
     "_version.py": "git describe 看本機 repo",
@@ -288,5 +289,5 @@ def test_suite_is_pinned_against_live_machine_state_and_env(root):
     from emforge import doctor
     assert doctor.ansysedt_running() is False and doctor._free_gb(root) == 100.0
     for name in ("EMFORGE_ROOT", "EMFORGE_DEPOT", "EMFORGE_WORK", "EMFORGE_MACHINE", "EMFORGE_DEVICE_TOKEN",
-                 "EMFORGE_MCP_HOST", "EMFORGE_MCP_PORT"):
+                 "EMFORGE_MCP_HOST", "EMFORGE_MCP_PORT", "EMFORGE_PLATFORM_TOKEN"):
         assert name not in os.environ, name

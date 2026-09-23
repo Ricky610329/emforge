@@ -16,7 +16,10 @@ def cmd_algorithm_register(args):
         rel = p.relative_to(root)
         if not p.is_file() or p.is_symlink() or any(x in (".git", ".venv", "__pycache__") for x in rel.parts):
             continue
-        files[rel.as_posix()] = p.read_text(encoding="utf-8")
+        try:
+            files[rel.as_posix()] = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise ValueError(f"{rel.as_posix()} 不是 UTF-8 文字檔——算法程式碼包只收文字；把資料檔移出 --source 目錄") from None
     version = platform_of(args).call("algorithm_register", name=args.name, files=files,
                                     entrypoint=args.entrypoint, requires=args.requires,
                                     checkpoint_schema=args.checkpoint_schema)
@@ -59,15 +62,23 @@ def cmd_algorithm_worker(args):
         environments[name] = python
     with Runner(args.work_root, args.endpoint, args.node, environments, max_runs=args.max_runs,
                 stop_timeout_s=args.stop_timeout_s) as runner:
-        try:
-            while True:
-                try:
-                    runner.tick()
-                except (OSError, RuntimeError) as e:
-                    print(f"算法節點暫時無法更新：{e}", flush=True)
-                time.sleep(args.poll_s)
-        except KeyboardInterrupt:
-            pass
+        return run_node_loop(runner, args.poll_s)
+
+
+def run_node_loop(runner, poll_s: float, *, sleep=time.sleep) -> int:
+    """節點主迴圈：瞬斷重試；認證失敗（PermissionError 也是 OSError）直接退出 2——以前被當暫時錯誤無限重試（I-34）。"""
+    try:
+        while True:
+            try:
+                runner.tick()
+            except PermissionError as e:
+                print(f"算法節點認證失敗，停止：{e}（檢查 EMFORGE_PLATFORM_TOKEN）", flush=True)
+                return 2
+            except (OSError, RuntimeError) as e:
+                print(f"算法節點暫時無法更新：{e}", flush=True)
+            sleep(poll_s)
+    except KeyboardInterrupt:
+        pass
     return 0
 
 

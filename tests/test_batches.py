@@ -118,3 +118,17 @@ def test_make_result_shares_base_for_done_error_and_bad_shape():
     assert bad["status"] == "error" and bad["error"].startswith("bad_response_shape")
     err = batches.error_result(base, "FakeFailure: x")
     assert err["status"] == "error" and err["error"] == "FakeFailure: x" and err["machine"] == "216"
+
+
+def test_make_result_rejects_nonfinite_response_as_error():
+    """回歸 I-29（2026-09-23）：防止 NaN／inf 響應（CSV 空值、對數 0）標成 done 並拿到有限分數。"""
+    from emforge.model import SimResult
+    base = batches.result_base("0" * 16, attempts=1, machine="216", worker_ver="v", profile_hash=P.profile_hash)
+    resp = np.zeros((2, 17), np.float32)
+    resp[0, 3] = np.nan
+    r = batches.make_result(P, base, SimResult(response=resp, time_s=1.0, extra={}), 1.0)
+    assert r["status"] == "error" and r["error"].startswith("nonfinite_response")
+    resp[0, 3] = -np.inf
+    assert batches.make_result(P, base, SimResult(response=resp, time_s=1.0, extra={}), 1.0)["status"] == "error"
+    resp[0, 3] = -80.0
+    assert batches.make_result(P, base, SimResult(response=resp, time_s=1.0, extra={}), 1.0)["status"] == "done"

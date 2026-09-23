@@ -305,3 +305,114 @@ def test_register_all_idempotent_and_measure_dispatch():
     assert m["m1"] == 8.0 and specs.score("dual_v2", m) == pytest.approx(min(10, 5, 2, 15))
     assert specs.measure("antenna_single_base", np.full((2, N), -3.0, np.float32), measure.SINGLE_LABELS)["S11"] == -7.0
     assert model.record_id(np.zeros((25, 25), bool), "dual_p01_db075") != model.record_id(np.zeros((25, 25), bool), "dual_p01")
+
+
+def test_measure_dual_r1_energy_max_is_passivity_self_check_and_specs_enforce_it():
+    """回歸 I-29（2026-09-23）：energy_max 以前只是算出來放著；specs.check_passivity 超過 1+容差就拒。"""
+    from emforge import specs
+    r = _dual_response()
+    m = measure.measure_dual_r1(r, measure.DUAL_LABELS, measure.DUAL_R1_TARGETS)
+    specs.check_passivity(m)                                  # 0.826：合法
+    r[1] = 3.0                                                # S21 全 +3 dB → energy ≈ 2
+    bad = measure.measure_dual_r1(r, measure.DUAL_LABELS, measure.DUAL_R1_TARGETS)
+    with pytest.raises(ValueError, match="energy"):
+        specs.check_passivity(bad)
+    specs.check_passivity({"m1": 1.0})                        # 沒有自證欄位的尺不受影響
+
+
+def test_gate_label_check_sees_adapter_labels(root):
+    """回歸 I-32（2026-09-23）：profiles.check_labels 讀 `labels`、adapter 宣告的是 `LABELS`——gate 第 4 步對 antenna 是空操作。"""
+    import dataclasses
+    from emforge import profiles as core_profiles
+    assert tuple(sim.DualPortSim.labels) == measure.DUAL_LABELS and tuple(sim.SinglePortRadSim.labels) == measure.SINGLE_LABELS
+    bad = dataclasses.replace(_single(), labels=("S11", "Gain"), name="single_bad")
+    with pytest.raises(core_profiles.LabelsMismatch):
+        core_profiles.check_labels(bad, sim.DualPortSim)
+
+
+class _StubDesktop:
+    def __init__(self, messages):
+        self.messages, self.cleared = messages, []
+
+    def GetMessages(self, proj, design, severity):  # noqa: N802 — HFSS COM 命名
+        return list(self.messages)
+
+    def ClearMessages(self, proj, design, severity):  # noqa: N802
+        self.cleared.append((proj, design, severity))
+
+
+class _StubHfss:
+    """有 oDesktop／name_project／name_design／num 的舊模擬器（start 之後才存在）。"""
+    GEOM_VER = "p01"
+    name_project, name_design = "proj_{num}", "design_{num}"
+
+    def __init__(self, messages=None, broken=False, **kw):
+        self.oDesktop = _StubDesktop(messages or []) if messages is not None else None
+        self.broken = broken
+
+    def open(self):
+        pass
+
+    def start(self, num):
+        self.num = num
+        if self.broken:
+            self.oDesktop = object()
+
+    def __call__(self, pattern):
+        return {l: np.full(N, -10.0, np.float32) for l in measure.DUAL_LABELS}
+
+    def end(self, save_project=True):
+        return 1.0
+
+    def kill(self):
+        pass
+
+    def quit(self):
+        pass
+
+
+def _dual_profile():
+    from emforge.adapters.antenna import profiles as aprof
+    return aprof.dual_profile("dual_conv", diag_bridge_w=0.075)
+
+
+def _hfss_cls(**defaults):
+    """回一個帶 GEOM_VER 的 stub 類別（雙邊比對讀的是類別屬性，lambda 不行）。"""
+    class _Stub(_StubHfss):
+        def __init__(self, **kw):
+            super().__init__(**{**defaults, **kw})
+    return _Stub
+
+
+def test_simulate_records_hfss_convergence_from_messages_best_effort(root):
+    """P0 收斂狀態第一階段（2026-09-23）：掃 HFSS 訊息窗——「did not converge」→ converged False；沒有相關訊息→ None；
+    沒有 oDesktop／API 炸掉 → 不影響結果、欄位缺席。判定（拒收與否）是第二階段，這裡只記錄。"""
+    msgs = ["Normal completion of simulation on server", "Adaptive Passes did not converge based on specified criteria."]
+    s = sim.DualPortSim(workdir=str(root), profile=_dual_profile(), old_cls=_hfss_cls(messages=msgs))
+    out = s.simulate(np.ones((25, 25), bool))
+    conv = out.extra["hfss_convergence"]
+    assert conv["converged"] is False and conv["source"] == "messages" and any("did not converge" in m for m in conv["messages"])
+    assert s._sim.oDesktop.cleared == [("proj_1", "design_1", 0)], "開跑前先清訊息窗，不讀到上一筆的"
+    s = sim.DualPortSim(workdir=str(root), profile=_dual_profile(), old_cls=_hfss_cls(messages=["Normal completion"]))
+    assert s.simulate(np.ones((25, 25), bool)).extra["hfss_convergence"]["converged"] is None
+    s = sim.DualPortSim(workdir=str(root), profile=_dual_profile(), old_cls=_hfss_cls(messages=None))
+    assert "hfss_convergence" not in s.simulate(np.ones((25, 25), bool)).extra
+    s = sim.DualPortSim(workdir=str(root), profile=_dual_profile(), old_cls=_hfss_cls(messages=[], broken=True))
+    assert s.simulate(np.ones((25, 25), bool)).response.shape == (3, N), "探測炸掉不影響求解結果"
+
+
+def test_version_tag_carries_antenna_sha(monkeypatch, tmp_path, root):
+    """I-10（2026-09-23）：結果的 worker_ver 要能看出這批是哪版 Antenna 跑的——以前 antenna_sha() 沒人呼叫。"""
+    monkeypatch.setattr(_bind, "antenna_sha", lambda: "6ae39f8")
+    s = sim.DualPortSim(workdir=str(root), profile=_dual_profile(), old_cls=_hfss_cls(messages=None))
+    assert s.version_tag() == "antenna=6ae39f8"
+
+
+def test_conftest_antenna_binding_status_reports_invalid_path(monkeypatch, tmp_path):
+    """回歸 I-30（2026-09-23）：EMFORGE_ANTENNA_REPO 指到不存在的路徑時表頭仍說「啟用」，adapter 測試其實全 skip、「全綠」誤導。"""
+    from tests.conftest import antenna_binding_status
+    monkeypatch.setenv(_bind.ENV, str(tmp_path / "nope"))
+    ok, text = antenna_binding_status()
+    assert ok is False and "找不到" in text
+    monkeypatch.delenv(_bind.ENV)
+    assert antenna_binding_status()[0] is None

@@ -336,3 +336,15 @@ def test_stray_result_and_broken_store_do_not_stop_collecting_other_stores(rt, m
     monkeypatch.setattr(batches.Batch, "patterns", real_patterns)
     assert sorted(r.id for r in col.collect(rt)) == sorted(ids2)
     assert len(_events(rt, "stray_result")) == 1, "雜檔只點名一次、之後不再重讀"
+
+
+def test_collect_rejects_measure_violating_passivity(rt, monkeypatch):
+    """回歸 I-29（2026-09-23）：|S11|²+|S21|² > 1 的響應（被動網路不可能）以前照樣入庫給分；量測回報 energy_max 超過容差
+    → 這筆是 error（measure_failed），不是有效設計。"""
+    from emforge import specs
+    store, b, ids = _dispatched(rt, n=1)
+    b.write_result(ids[0], _fake_result(ids[0]))
+    real = specs.measure
+    monkeypatch.setattr(specs, "measure", lambda name, resp, labels: {**real(name, resp, labels), "energy_max": 1.5})
+    rec = col.collect(rt)[0]
+    assert rec.status == "error" and "energy" in rec.note["error"] and rec.score is None

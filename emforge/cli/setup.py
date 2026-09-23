@@ -28,7 +28,9 @@ YAML_TEMPLATE = """profile: {profile}
 runtime: {{tick_s: 60, background_prio: 9, notarize_prio: 1, repeat_n: 2, noise_floor: 0.3, k_min: 20,
           quiet_s: 3600, max_error_rate: 0.5, propose_timeout_s: 600, strategy_error_limit: 3}}
 strategies:
-  - {{name: blind, prio: 9, batch: 20}}
+  # 背景盲探索（零演算法對照臂）。預設關閉：先確認 profile／limits／機隊都對，再改 enabled: true（I-34：照範本直接 run，
+  # 每 tick 會往真 HFSS 派 20 筆盲探索）。
+  - {{name: blind, prio: 9, batch: 20, enabled: false}}
 """
 
 

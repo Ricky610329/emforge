@@ -4,6 +4,7 @@
 （worker_ver 的第二個成分）；PYTHONPATH 會把整個舊 repo 暴露給核心，讓「核心零 antenna import」只剩守門測試在擋。
 `antenna.patch` 的 import 鏈含 `from script.kill import kill`，所以要放 **repo 根**進 sys.path，不是 `antenna/`。
 """
+import functools
 import importlib
 import os
 import subprocess
@@ -57,8 +58,9 @@ def load_torch():
     return _import("torch")
 
 
+@functools.lru_cache(maxsize=1)
 def antenna_sha() -> str:
-    """舊 repo 的 git 短 sha（＋dirty）；拿不到回 "unknown"。"""
+    """舊 repo 的 git 短 sha（＋dirty）；拿不到回 "unknown"。行程內快取（worker 每批問一次）。"""
     r = repo_root()
     if r is None:
         return "unknown"

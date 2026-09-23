@@ -548,3 +548,47 @@ def test_device_estop_tag_and_local_are_mutually_exclusive_and_clear_nothing_exi
     assert ei.value.code == 2
     assert _main("device-estop", "clear", "--root", fake, "--tag", "216", "--confirm") == 1
     assert "本來就沒有" in capsys.readouterr().err
+
+
+def test_init_template_ships_blind_disabled(root):
+    """回歸 I-34（2026-09-23）：init 的範本預設就開 blind prio 9 batch 20——工程師照錯誤訊息 init 再 run，每 tick 往真 HFSS 派 20 筆盲探索。"""
+    from emforge import strategy
+    assert _main("init", "--root", root, "--profile", "fake_f1") == 0
+    cfg = strategy.parse_strategies_yaml((root / paths.strategies_yaml("fake_f1")).read_text(encoding="utf-8"), profile="fake_f1")
+    assert [(s.name, s.enabled) for s in cfg.strategies] == [("blind", False)]
+
+
+def test_stop_machine_tag_without_worker_is_an_error(fake):
+    """回歸 I-34（2026-09-23）：`stop --profile P --machine-tag T` 以前靜默忽略 --machine-tag、停掉整個 runtime。"""
+    assert _main("stop", "--root", fake, "--profile", "fake_f1", "--machine-tag", "216") == 1
+    assert not (fake / paths.runtime_stop("fake_f1")).exists()
+
+
+def test_algorithm_register_names_non_utf8_file(tmp_path):
+    """回歸 I-34（2026-09-23）：程式碼包目錄裡一個 npz／圖片就讓 register 整包 UnicodeDecodeError，不知道是哪個檔。"""
+    from types import SimpleNamespace
+    from emforge.cli.algorithm import cmd_algorithm_register
+    src = tmp_path / "algo"
+    src.mkdir()
+    (src / "main.py").write_text("print(1)", encoding="utf-8")
+    (src / "data.npz").write_bytes(b"\x93NUMPY\xff\xfe")
+    with pytest.raises(ValueError, match="data.npz"):
+        cmd_algorithm_register(SimpleNamespace(source=str(src), name="a", entrypoint="main.py", requires=[],
+                                               checkpoint_schema=None, endpoint="http://127.0.0.1:1"))
+
+
+def test_algorithm_node_loop_exits_on_auth_failure_but_retries_transient(capsys):
+    """回歸 I-34（2026-09-23）：token 錯時 PermissionError（OSError 子類）被當「暫時無法更新」無限重試。"""
+    from emforge.cli.algorithm import run_node_loop
+    calls = []
+
+    class Node:
+        def tick(self):
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError("瞬斷")
+            if len(calls) == 2:
+                raise PermissionError("平台認證失敗")
+
+    assert run_node_loop(Node(), 0.0, sleep=lambda s: None) == 2
+    assert len(calls) == 2 and "認證" in capsys.readouterr().out

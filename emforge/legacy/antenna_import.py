@@ -34,6 +34,7 @@ class StoreReport:
     n_manifest: int = 0
     n_pt: int = 0
     n_records: int = 0
+    n_upgraded: int = 0
     n_errors: int = 0
     n_join_failed: int = 0
     n_verify_fail: int = 0
@@ -156,12 +157,16 @@ def _cols(prof, y) -> list:
     return [m[l] for l in prof.labels]
 
 
-def _pick_y(prof, ys: list, entry: dict):
-    if len(ys) == 1:
-        return ys[0]
+def _pick_y(prof, ys: list, entry: dict, used: set):
+    """同 pattern 的多筆 y 之中，挑 wm 欄（2 位小數）對得上、且**還沒配給別列**的那一筆。
+    #! 回歸 I-31（2026-09-23）：以前每列都拿 hits[0]——跨機複驗 wm 幾乎都相同，第二台的實際響應就消失。"""
     want = [round(float(v), 2) for v in entry.get("wm", [])[:len(prof.labels)]]
-    hits = [y for y in ys if [round(c, 2) for c in _cols(prof, y)] == want]
-    return hits[0] if hits else None
+    hits = [i for i, y in enumerate(ys) if len(ys) == 1 or [round(c, 2) for c in _cols(prof, y)] == want]
+    if not hits:
+        return None
+    i = next((i for i in hits if i not in used), hits[0])   # 沒有沒配過的：同內容的 y 只有一個 .pt（SampleStore 依內容 hash），合法共用
+    used.add(i)
+    return ys[i]
 
 
 def _record(prof, bits, y, *, legacy_id, store, run_store, manifest: dict, entry: dict, machine, resolver: dict, extra: dict):
@@ -230,8 +235,13 @@ def _import_store(old: Path, db: Database, rep: StoreReport, resolver: dict, opt
     for rec in records:
         if db.add(rec):
             rep.n_records += 1
-    imported[rep.store] = {**sig, "n_records": rep.n_records, "n_errors": rep.n_errors, "n_join_failed": rep.n_join_failed,
-                           "n_verify_fail": rep.n_verify_fail, "imported_at": model.now_iso()}
+        elif db.upgrade_error(rec):                          # 先前匯入的 error 列補測成功 → 升級（I-31）
+            rep.n_upgraded += 1
+    prev = prev or {}
+    imported[rep.store] = {**sig, "n_records": prev.get("n_records", 0) + rep.n_records,
+                           "n_upgraded": prev.get("n_upgraded", 0) + rep.n_upgraded, "n_errors": rep.n_errors,
+                           "n_join_failed": rep.n_join_failed, "n_verify_fail": rep.n_verify_fail,
+                           "imported_at": model.now_iso()}
     db.depot.put_json(imported_key, imported)
 
 
@@ -248,7 +258,7 @@ def _harvest_records(old: Path, rep: StoreReport, prof) -> list:
 def _manifest_records(old: Path, rep: StoreReport, prof, man: list, resolver: dict, opts: _Opts) -> list:
     results, by_key, machine = _results(old, rep.store), _tuples(old, rep.store), _machine(old, rep.store)
     rep.n_manifest = len(man)
-    seen, out = {}, []
+    seen, out, used = {}, [], {}
     for m in man:
         lid = m["id"]
         bits = _input_pattern(old, rep.store, lid)
@@ -265,7 +275,8 @@ def _manifest_records(old: Path, rep: StoreReport, prof, man: list, resolver: di
                 out.append(_record(prof, bits, None, legacy_id=lid, store=rep.store, run_store=run_store, manifest=m,
                                    entry=entry or {}, machine=machine, resolver=resolver, extra={}))
             continue
-        y = _pick_y(prof, by_key.get(model.pack_bits(bits).tobytes(), []), entry)
+        key = model.pack_bits(bits).tobytes()
+        y = _pick_y(prof, by_key.get(key, []), entry, used.setdefault(key, set()))
         if y is None:
             rep.n_join_failed += 1
             continue
@@ -313,5 +324,5 @@ def import_legacy(old_root, out_depot, *, stores: list, profile: str = "auto", o
             rc = 2
         flag = "skip" if rep.skipped else ("dry" if dry_run else "ok")
         out(f"{flag:4} {rep.store} → {rep.profile}: manifest={rep.n_manifest} pt={rep.n_pt} records={rep.n_records} "
-            f"errors={rep.n_errors} join_failed={rep.n_join_failed} verify_fail={rep.n_verify_fail}")
+            f"upgraded={rep.n_upgraded} errors={rep.n_errors} join_failed={rep.n_join_failed} verify_fail={rep.n_verify_fail}")
     return plan, rc

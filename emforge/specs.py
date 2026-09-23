@@ -120,3 +120,14 @@ def frozen(name, definition=None):
     if spec.name != name:
         raise ValueError("spec 快照名稱不一致")
     return spec
+
+
+PASSIVITY_KEY = "energy_max"      #? 量測函式可回報的自證欄位：max over 頻點 of Σ|S|²（被動網路必 ≤ 1）
+PASSIVITY_TOL = 0.05              #? 數值噪音容差；超過＝這筆響應物理上不可能，是模擬壞了不是設計好（I-29）
+
+
+def check_passivity(measure: dict) -> None:
+    """量測帶 `energy_max` 且 > 1+容差 → ValueError（collect 記成 measure_failed）；沒有這欄位的尺不受影響。"""
+    v = measure.get(PASSIVITY_KEY)
+    if v is not None and not (float(v) <= 1.0 + PASSIVITY_TOL):
+        raise ValueError(f"{PASSIVITY_KEY}={float(v):.3f} > {1.0 + PASSIVITY_TOL}：響應違反能量守恆（被動網路 Σ|S|² ≤ 1），拒收")

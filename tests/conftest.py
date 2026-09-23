@@ -16,10 +16,37 @@ ENV_ISOLATED = ("EMFORGE_ROOT", "EMFORGE_DEPOT", "EMFORGE_WORK", "EMFORGE_MACHIN
                 "EMFORGE_MCP_HOST", "EMFORGE_MCP_PORT", "EMFORGE_PLATFORM_TOKEN", "EMFORGE_PLATFORM_PORT")
 
 
+def antenna_binding_status() -> tuple:
+    """(True, 訊息)＝綁到了；(None, 訊息)＝沒設；(False, 訊息)＝設了但不是 Antenna repo。
+    #! 回歸 I-30（2026-09-23）：以前只看環境變數有沒有設——指到不存在的路徑表頭照樣寫「啟用」，adapter 測試其實全 skip。"""
+    raw = os.environ.get("EMFORGE_ANTENNA_REPO")
+    if not raw:
+        return None, "跳過 adapter 綁定／COM 建構測試（未設 EMFORGE_ANTENNA_REPO；要全跑請設成 Antenna clone 路徑）"
+    from emforge.adapters.antenna import _bind
+    root = _bind.repo_root()
+    if root is None:
+        return False, f"EMFORGE_ANTENNA_REPO={raw!r} 找不到 antenna/__init__.py——不是 Antenna repo，adapter 測試會全部 skip"
+    return True, f"adapter 綁定／COM 建構測試：啟用（{root}）"
+
+
 def pytest_report_header(config):
-    on = bool(os.environ.get("EMFORGE_ANTENNA_REPO"))
-    return ("adapter 綁定／COM 建構測試：" + ("啟用（EMFORGE_ANTENNA_REPO 已設）" if on
-            else "跳過 6 條（未設 EMFORGE_ANTENNA_REPO；要全跑請設成 Antenna clone 路徑）"))   # 檢查 #44
+    return antenna_binding_status()[1]                                                       # 檢查 #44
+
+
+def pytest_sessionstart(session):
+    ok, text = antenna_binding_status()
+    if ok is False:
+        raise pytest.UsageError(text)                       # 設錯就整套拒跑，不讓「全綠」誤導
+
+
+def pytest_collection_modifyitems(config, items):
+    """`hfss` 標記＝要真 HFSS：只在 EMFORGE_HFSS_TESTS=1 跑（正式機手動），其餘一律 skip。"""
+    if os.environ.get("EMFORGE_HFSS_TESTS") == "1":
+        return
+    skip = pytest.mark.skip(reason="需要真 HFSS（EMFORGE_HFSS_TESTS=1 才跑）")
+    for item in items:
+        if "hfss" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture(scope="session", autouse=True)

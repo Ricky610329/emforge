@@ -351,3 +351,19 @@ def test_close_quiet_has_a_watchdog_that_kills_a_hung_close(root, monkeypatch):
     t0 = time.time()
     wb._close_quiet(sim)
     assert time.time() - t0 < 3 and sim.calls["kill"] == 1 and sim.calls["close"] == 1
+
+
+def test_result_worker_ver_carries_simulator_version_tag(claimed, tmp_path):
+    """I-10（2026-09-23）：結果檔的 worker_ver 要能看出這批是哪版模擬器（Antenna sha）跑的；模擬器沒宣告就只有 emforge 的。"""
+    from emforge import testing
+    from emforge.worker.batch import run_batch
+    from emforge.worker.workdir import WorkDir
+    q, batch, job, ids = claimed
+
+    class _Tagged(testing.FakeSimulator):
+        def version_tag(self):
+            return "antenna=6ae39f8"
+
+    assert run_batch(q, batch, job, testing.FAKE_PROFILE, lambda wd: _Tagged(workdir=str(wd), profile=testing.FAKE_PROFILE),
+                     "216", "emforge=abc", work=WorkDir(tmp_path / "w")) == "done"
+    assert {r["worker_ver"] for r in batch.results().values()} == {"emforge=abc antenna=6ae39f8"}

@@ -144,6 +144,25 @@ class Database:
         self.reader._lines(rec.sim_profile)[stem] = line
         return True
 
+    def upgrade_error(self, rec: Record) -> bool:
+        """同 (id, store) 已有 **error** 紀錄、新來的是 done → 覆寫檔案並重寫索引行（唯一允許取代既有紀錄的路徑；
+        legacy 補測重匯用，I-31）。既有是 done、或新的不是 done → False。"""
+        self._check_write(rec.sim_profile)
+        if rec.status != STATUS_DONE:
+            return False
+        stem = paths.record_stem(rec.id, rec.run["store"])
+        key = paths.record_by_stem(rec.sim_profile, stem)
+        if not self.depot.exists(key):
+            return False
+        old = self.reader.try_load(rec.sim_profile, stem)
+        if old is None or old.status == STATUS_DONE:
+            return False
+        _save_npz(self.depot, key, rec)
+        lines = self.reader._lines(rec.sim_profile)
+        lines[stem] = _index_line(stem, rec.meta())
+        self.depot.rewrite_log(paths.db_index(rec.sim_profile), list(lines.values()))
+        return True
+
     def refresh(self, profile: str) -> int:
         """把索引與磁碟對齊：別的寫者加的先從索引檔合併；索引沒有的檔才載入（回載入筆數）；
         讀不到的跳過（記 `unreadable`）；索引有而檔**確認**不在（`exists`）的才剔除——不靠「列舉為空」（可最終一致）。"""

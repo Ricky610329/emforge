@@ -104,6 +104,7 @@ class _AntennaSim(Simulator):
         pattern = _to_pattern(bits)
         self._n += 1
         self._sim.start(self._n)
+        self._clear_messages()
         try:
             out = self._sim(pattern)
         except Exception:
@@ -115,8 +116,43 @@ class _AntennaSim(Simulator):
                 except Exception:  # noqa: BLE001
                     pass
             raise
+        convergence = self._convergence()          # end() 之前：design 還在
         elapsed = self._sim.end()
-        return SimResult(response=self._stack(out), time_s=float(elapsed or 0.0), extra=self._extra())
+        extra = self._extra()
+        if convergence is not None:
+            extra["hfss_convergence"] = convergence
+        return SimResult(response=self._stack(out), time_s=float(elapsed or 0.0), extra=extra)
+
+    # ── HFSS 收斂狀態（P0 第一階段：只記錄，不判定；2026-09-23） ──
+    #? 舊模擬器只回 S 參數、從不讀訊息窗；216 驗收畫面出現過「Adaptive Passes did not converge based on specified criteria」。
+    #  這裡 best-effort 掃 oDesktop.GetMessages：有「did not converge」→ False；沒有相關訊息 → None（未驗證，不是收斂）；
+    #  沒有 oDesktop／API 炸掉 → 欄位缺席。任何例外都不能影響求解結果。是否拒收未收斂＝第二階段的決定（需開新 profile）。
+    def _hfss_names(self) -> tuple:
+        s = self._sim
+        return s.name_project.format(num=s.num), s.name_design.format(num=s.num)
+
+    def _clear_messages(self) -> None:
+        try:
+            proj, design = self._hfss_names()
+            self._sim.oDesktop.ClearMessages(proj, design, 0)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _convergence(self):
+        try:
+            proj, design = self._hfss_names()
+            msgs = [str(m) for m in (self._sim.oDesktop.GetMessages(proj, design, 0) or ())]
+        except Exception:  # noqa: BLE001
+            return None
+        hits = [m for m in msgs if "converge" in m.lower()]
+        if not hits:
+            return {"converged": None, "source": "messages", "n_messages": len(msgs)}
+        failed = any("not converge" in m.lower() for m in hits)
+        return {"converged": not failed, "source": "messages", "messages": hits[:5]}
+
+    def version_tag(self) -> str:
+        """結果檔 worker_ver 的第二成分（I-10）：這批是哪版 Antenna 跑的。"""
+        return f"antenna={_bind.antenna_sha()}"
 
     def _stack(self, out) -> np.ndarray:
         missing = [l for l in self.LABELS if l not in out]
@@ -147,7 +183,7 @@ class _AntennaSim(Simulator):
 
 class DualPortSim(_AntennaSim):
     """二埠濾波天線；舊 `dual_port.DualPortSimulator`（GEOM_VER 雙邊比對）。"""
-    LABELS = DUAL_LABELS
+    LABELS = labels = DUAL_LABELS          # `labels`＝core profiles.check_labels 讀的名字（I-32）
     geom_ver = "p01"
     CHECK_OLD_GEOM = True
 
@@ -158,7 +194,7 @@ class DualPortSim(_AntennaSim):
 class SinglePortRadSim(_AntennaSim):
     """單埠天線含方向圖；舊 `single_port_rad.SinglePortRadSimulator`。
     舊模組沒有 GEOM_VER（Ricky 2026-09-01：不動舊 repo）→ 單邊宣告 s00，不比對。方向圖走 extra["radiation"]。"""
-    LABELS = SINGLE_LABELS
+    LABELS = labels = SINGLE_LABELS
     geom_ver = "s00"
     CHECK_OLD_GEOM = False
 

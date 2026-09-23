@@ -27,11 +27,15 @@ def result_base(rec_id: str, *, attempts: int, machine: str, worker_ver: str, pr
 
 
 def make_result(profile, base: dict, out, elapsed_s: float) -> dict:
-    """SimResult → 結果檔 dict：形狀對＝done（原始響應＋time_s＋extra）；形狀錯＝error（bad_response_shape）。"""
+    """SimResult → 結果檔 dict：形狀對且全有限＝done（原始響應＋time_s＋extra）；形狀錯＝error（bad_response_shape）；
+    含 NaN／inf＝error（nonfinite_response；I-29：CSV 空值、對數 0 以前會標 done 並拿到有限分數）。"""
     resp = np.asarray(out.response, np.float32)
     expected = (len(profile.labels), profile.n_points)
     if resp.shape != expected:
         return error_result(base, f"bad_response_shape: {resp.shape} ≠ {expected}")
+    if not np.isfinite(resp).all():
+        bad = int((~np.isfinite(resp)).sum())
+        return error_result(base, f"nonfinite_response: {bad} 個 NaN／inf 點")
     time_s = float(out.time_s) if out.time_s else float(elapsed_s)
     return {**base, "status": "done", "response": resp.tolist(), "time_s": time_s, "extra": dict(out.extra or {})}
 

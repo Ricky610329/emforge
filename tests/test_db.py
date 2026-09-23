@@ -313,3 +313,16 @@ def test_lineage_sample_runs_children_load_only_needed_records(root, monkeypatch
     assert v.runs() == ["run_a", "run_b"] and loads == []
     loads.clear()
     assert [x.id for x in v.children(a.id)] == [b.id] and len(loads) == 1
+
+
+def test_upgrade_error_replaces_error_record_with_done_and_updates_index(root):
+    """回歸 I-31（2026-09-23）：同 (id, store) 的 error 紀錄可被 done 取代（legacy 補測重匯）；done 不被任何東西取代。"""
+    d = dbm.Database(root)
+    err = _rec(7, "s7", status="error")
+    assert d.add(err) is True and d.upgrade_error(err) is False, "已是 error 再給 error：不動"
+    done = _rec(7, "s7")
+    assert d.add(done) is False and d.upgrade_error(done) is True
+    assert d.view(P).query(status="error") == [] and [r.status for r in d.view(P).query()] == ["done"]
+    fresh = dbm.Database(root)                          # 重新讀索引：索引行也要是 done
+    assert [m["status"] for m in fresh.metas(P)] == ["done"]
+    assert fresh.upgrade_error(_rec(7, "s7", status="error")) is False and fresh.upgrade_error(done) is False

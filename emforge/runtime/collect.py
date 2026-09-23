@@ -105,6 +105,7 @@ def _to_record(rt, inf: dict, rid: str, res: dict, patterns: dict):
         try:
             response = np.asarray(res["response"], np.float32)
             measure = specs.measure(profile.measure, response, profile.labels)
+            specs.check_passivity(measure)                    # I-29：物理上不可能的響應不是有效設計
             score = specs.score(profile.spec, measure)
             status = STATUS_DONE
         except Exception as e:  # noqa: BLE001 — 尺炸了是這一筆的 error，不是 runtime 的

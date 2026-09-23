@@ -60,6 +60,8 @@ def _add_resume(sub) -> None:
 
 def cmd_stop(args) -> int:
     depot = depot_of(args, root_of(args))
+    if args.machine_tag and not args.worker:
+        raise ValueError("--machine-tag 只配 --worker（停單台 worker）；停 runtime 用 --profile")   # I-34：以前靜默忽略
     if args.worker:
         q = Queue(depot)
         (q.clear_stop if args.clear else q.request_stop)(args.machine_tag)

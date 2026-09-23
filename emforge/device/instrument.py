@@ -239,6 +239,11 @@ class Instrument:
         self._set("ready")
         self.refresh_reference()
 
+    def version_tag(self) -> str:
+        """綁定中的模擬器版本成分（adapter 宣告才有；I-10）。"""
+        fn = getattr(self.sim, "version_tag", None)
+        return fn() if callable(fn) else ""
+
     def simulate(self, bits):
         """一筆進一筆出（SimResult）；急停硬檢查；錯誤計數後原樣拋（結果檔由呼叫端 make_result／error_result）。"""
         if self.sim is None:

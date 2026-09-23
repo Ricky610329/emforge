@@ -69,7 +69,7 @@ def write_store(old, store, items, *, port, setup=None, geom=None, dbw=None, mac
         if it.get("error"):
             results[lid] = {"error": "COM 例外", "attempts": 3}
             continue
-        y = _resp(it.get("y_seed", it["seed"]), len(labels))
+        y = it["y_override"] if "y_override" in it else _resp(it.get("y_seed", it["seed"]), len(labels))
         torch.save((torch.tensor(p, dtype=torch.float32), torch.tensor(y)), st / (hashlib.sha1(p.tobytes() + y.tobytes()).hexdigest()[:16] + ".pt"))
         entry = _wm_entry(y, labels)
         if geom:
@@ -275,3 +275,34 @@ def test_cli_import_legacy(old, out, capsys):
     assert "dedust_cli" in capsys.readouterr().out
     assert len(Database(out).view("dual_p01_db075").query()) == 1
     assert Path(out / paths.db_dir("dual_p01_db075") / "_imported.json").exists()
+
+
+def test_repeat_rows_get_distinct_y_when_wm_rounds_equal(old, out):
+    """回歸 I-31（2026-09-23）：同 pattern 多次量測、wm 四捨五入到 2 位相同（跨機複驗幾乎都是）→ 每列都拿到 hits[0]，
+    第二台的實際響應消失、repeat／notarize 的變異被低估。"""
+    y1 = _resp(81, 3)
+    y2 = (y1 + 1e-5).astype(np.float32)
+    write_store(old, "dedust_dup", [dict(id="d0", seed=81, kind="repeat", y_override=y1),
+                                    dict(id="d1", seed=81, kind="repeat", y_override=y2)],
+                port="dual", setup={"diag_bridge_w": 0.075}, geom="p01", dbw=0.075)
+    reps, rc = li.import_legacy(old, out, stores=["dedust_dup"])
+    assert rc == 0 and reps[0].n_records == 2 and reps[0].n_join_failed == 0
+    recs = sorted(Database(out).view("dual_p01_db075").query(), key=lambda r: r.note["legacy"]["id"])
+    assert len(recs) == 2 and not np.array_equal(recs[0].response, recs[1].response)
+
+
+def test_reimport_after_error_row_becomes_done_upgrades_record(old, out):
+    """回歸 I-31（2026-09-23）：先以 --include-errors 匯入 error 列，舊 store 補測成功後重匯，(rid, store) 相同 → add 回 False，
+    done 被靜默丟掉；_imported.json 的 n_records 也被這一輪的數字覆寫。"""
+    write_store(old, "dedust_u", [dict(seed=70), dict(seed=71, error=True)], port="dual", geom="p01",
+                setup={"diag_bridge_w": 0.075}, dbw=0.075)
+    reps, _ = li.import_legacy(old, out, stores=["dedust_u"], include_errors=True)
+    assert reps[0].n_records == 2 and len(Database(out).view("dual_p01_db075").query(status="error")) == 1
+    write_store(old, "dedust_u", [dict(seed=70), dict(seed=71)], port="dual", geom="p01",
+                setup={"diag_bridge_w": 0.075}, dbw=0.075)                       # 補測成功
+    reps, _ = li.import_legacy(old, out, stores=["dedust_u"], include_errors=True, force=True)
+    recs = Database(out).view("dual_p01_db075").query()
+    assert sorted(r.status for r in recs) == ["done", "done"] and (reps[0].n_records, reps[0].n_upgraded) == (0, 1)
+    imported = json.loads((out / paths.db_dir("dual_p01_db075") / "_imported.json").read_text(encoding="utf-8"))
+    assert (imported["dedust_u"]["n_records"], imported["dedust_u"]["n_upgraded"]) == (2, 1), "帳面是累計，不是這一輪"
+    assert Database(out).view("dual_p01_db075").query(status="error") == []

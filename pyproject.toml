@@ -30,5 +30,6 @@ version = { attr = "emforge.__version__" }
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["hfss: 需要真 HFSS 的測試，只在 EMFORGE_HFSS_TESTS=1 跑（正式機手動）"]
 # 執行緒裡的未處理例外不准只是 warning——那正是「寫者死掉、最終值不對」的間歇失敗來源。
 filterwarnings = ["error::pytest.PytestUnhandledThreadExceptionWarning"]
