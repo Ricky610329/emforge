@@ -280,3 +280,36 @@ def test_refresh_refuses_other_profile_when_write_bound(root):
     with pytest.raises(dbm.ProfileWriteRefused):
         d.refresh("other_p")
     assert d.refresh(P) == 0
+
+
+def test_lineage_sample_runs_children_load_only_needed_records(root, monkeypatch):
+    """回歸 I-5（2026-09-23）：防止 lineage／sample／runs／children 把全部 npz 載入（每次呼叫掃一遍 NAS）——
+    先在索引行上過濾、走親代鏈、取樣，最後只載入需要的幾筆。"""
+    import dataclasses
+    d = dbm.Database(root)
+    a = dataclasses.replace(_rec(1, "s1"), run_id="run_a")
+    b = dataclasses.replace(_rec(2, "s2"), parent=a.id, run_id="run_b")
+    c = dataclasses.replace(_rec(3, "s3"), parent=b.id, run_id="run_b")
+    for rec in (a, b, c):
+        d.add(rec)
+    for seed in range(10, 40):
+        d.add(dataclasses.replace(_rec(seed, f"s{seed}"), run_id="run_b"))
+    d.add(dataclasses.replace(c, kind="repeat", parent=c.id, run={**c.run, "store": "n1"}))
+    loads = []
+    real = dbm.Reader.try_load
+
+    def counting(self, profile, stem):
+        loads.append(stem)
+        return real(self, profile, stem)
+
+    monkeypatch.setattr(dbm.Reader, "try_load", counting)
+    v = d.view(P)
+    assert [x.id for x in v.lineage(c.id)] == [c.id, b.id, a.id] and len(loads) == 3
+    loads.clear()
+    assert len(v.sample(2, seed=1)) == 2 and len(loads) == 2
+    assert [x.id for x in v.sample(2, seed=1)] == [x.id for x in v.sample(2, seed=1)]
+    assert [x.id for x in v.sample(2, seed=1)] != [x.id for x in v.sample(2, seed=2)]
+    loads.clear()
+    assert v.runs() == ["run_a", "run_b"] and loads == []
+    loads.clear()
+    assert [x.id for x in v.children(a.id)] == [b.id] and len(loads) == 1

@@ -35,17 +35,26 @@ def cmd_release_status(args):
                       "request": store.depot.get_json(paths.service_key("request"))}, ensure_ascii=False))
     return 0
 
+def run_service_loop(supervisor, poll_s: float, *, sleep=time.sleep) -> int:
+    """主迴圈＝故障邊界：tick 裡的任何例外（共享 Depot 瞬斷、狀態讀壞）印出來、下一輪再試；只有 Ctrl-C 收工。
+    #! 回歸 I-27（2026-09-23）：以前只接 KeyboardInterrupt，一次瞬斷穿出 with 區塊 → close() 把整個平台子行程停掉。"""
+    try:
+        while True:
+            try:
+                supervisor.tick()
+            except Exception as e:  # noqa: BLE001
+                print(f"platform-service tick 失敗（下一輪再試）：{type(e).__name__}: {e}", flush=True)
+            sleep(poll_s)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def cmd_platform_service(args):
     root = root_of(args)
     with Supervisor(args.releases_root, root, args.profile, depot=depot_of(args, root),
                     host=args.host, port=args.port) as supervisor:
-        try:
-            while True:
-                supervisor.tick()
-                time.sleep(args.poll_s)
-        except KeyboardInterrupt:
-            pass
-    return 0
+        return run_service_loop(supervisor, args.poll_s)
 
 def _base(sub, name, help):
     p = sub.add_parser(name, help=help)

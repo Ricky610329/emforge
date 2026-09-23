@@ -57,6 +57,9 @@ def db_imported(profile: str) -> str:
 def retired_marker(profile: str) -> str:
     return f"{db_dir(profile)}RETIRED"
 # ── 榜 ──────────────────────────────────────────────────────────────────────
+def ledger_lock(profile: str, spec: str) -> str:
+    """promote／rescore 的讀改寫互斥（兩人同時 promote 會丟一筆 history）。"""
+    return f"{LEDGER}{profile}/{spec}.lock"
 def ledger_file(profile: str, spec: str) -> str:
     return f"{LEDGER}{profile}/{spec}.json"
 # ── 佇列 ────────────────────────────────────────────────────────────────────
@@ -181,6 +184,9 @@ def smoke_store_name(profile: str, rec_id: str, n: int, stamp: str) -> str:
 # ── 本機路徑（不是 depot key：這些東西不抽象） ──────────────────────────────
 #? registry.py／strategies/*.py 是**程式碼**，要 runpy／importlib 從本機檔案系統載入；
 #  strategy_workdir 是策略的私有暫存（runtime 永不讀它，換後端也不必跟著搬）。
+LOCAL_ONLY_ROOT_NAMES = ("registry.py", "strategies", "limits.json")   # 這些根層名不是 Depot key（Depot.check_key 拒絕）
+
+
 def registry_py(root) -> Path:
     return Path(root) / "registry.py"
 def user_strategies_dir(root) -> Path:

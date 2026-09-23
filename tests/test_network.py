@@ -99,3 +99,37 @@ def test_priority_and_fairness_survive_http_depot_clients(root):
         add(q, "background", strategy="explore", prio=9)
         assert remote.raise_priority("background", 1)
         assert q.pick("37").store == "background"
+
+
+def test_http_platform_rejects_browser_style_requests_and_non_ascii_auth(root):
+    """回歸 I-26（2026-09-23）：loopback 無 token 時網頁可用 text/plain simple request 跨站寫 /depot；
+    非 ASCII 的 Authorization 讓 compare_digest TypeError（500 而非 401）。"""
+    from urllib import error, request
+    rt = setup(root)
+    with serving(Platform(rt.depot), secret="abc") as url:
+        def post(headers, body=b'{"op": "exists", "params": {"key": "x.json"}}'):
+            req = request.Request(url + "/depot", data=body, headers=headers)
+            try:
+                with request.urlopen(req, timeout=5) as resp:
+                    return resp.status
+            except error.HTTPError as e:
+                return e.code
+
+        good = {"Authorization": "Bearer abc", "Content-Type": "application/json"}
+        assert post(good) == 200
+        assert post({**good, "Content-Type": "text/plain"}) == 415
+        assert post({**good, "Origin": "http://evil.example"}) == 403
+        assert post({**good, "Authorization": "Bearer \xe9"}) == 401
+        assert post({**good, "Authorization": "Bearer nope"}) == 401
+
+
+def test_http_depot_refuses_drive_letter_key_server_side(root):
+    """回歸 I-26（2026-09-23）：就算客戶端繞過 check_key，伺服器也要拒絕 `C:/…`。"""
+    from emforge.platform.transport import RemotePlatform
+    rt = setup(root)
+    with serving(Platform(rt.depot)) as url:
+        remote = RemotePlatform(url)
+        with pytest.raises(ValueError):
+            remote.request("/depot", "put_bytes", {"key": "C:/emforge_escape.txt", "data": b"x"})
+        with pytest.raises(ValueError):
+            remote.request("/depot", "list", {"prefix": "C:/Windows/"})

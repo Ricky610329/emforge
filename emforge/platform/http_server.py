@@ -18,13 +18,28 @@ class Server(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 30            #? 閒置連線 30 s 收回執行緒（ThreadingHTTPServer 一連線一執行緒、沒有上限）
+
     def log_message(self, *args):
         """不把 token 或候選寫入 HTTP access log。"""
 
     def _authorized(self):
         secret = self.server.secret
         actual = self.headers.get("Authorization", "")
-        return not secret or hmac.compare_digest(actual, "Bearer " + secret)
+        #? 以 bytes 比對：str 版 compare_digest 遇到非 ASCII 會 TypeError（＝500，不是 401）
+        return not secret or hmac.compare_digest(actual.encode("utf-8", "replace"), ("Bearer " + secret).encode("utf-8"))
+
+    def _browser_request(self) -> bool:
+        """平台 API 只服務 emforge 自己的客戶端：帶 Origin（瀏覽器跨站）或非 JSON 的 POST 一律拒——
+        loopback 無 token 的部署，網頁用 text/plain simple request 就能寫 /depot（I-26）。"""
+        ctype = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            self.send_error(415, "Content-Type must be application/json")   # 狀態列只能 latin-1
+            return True
+        if self.headers.get("Origin"):
+            self.send_error(403, "browser origins are not served")
+            return True
+        return False
 
     def do_GET(self):
         if not self._authorized():
@@ -41,6 +56,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path not in ("/rpc", "/depot"):
             self.send_error(404)
+            return
+        if self._browser_request():
             return
         try:
             n = int(self.headers.get("Content-Length", "0"))
@@ -60,7 +77,10 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(payload)
 
     def _reply(self, value):
-        raw = wire.dumps(value)
+        try:
+            raw = wire.dumps(value)
+        except (TypeError, ValueError) as e:                 # 回傳值序列化失敗也要回 ok:false，不能斷線（I-25）
+            raw = wire.dumps({"ok": False, "error": {"type": type(e).__name__, "message": f"回應無法序列化：{e}"}})
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))

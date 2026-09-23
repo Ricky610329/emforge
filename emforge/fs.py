@@ -100,30 +100,52 @@ def read_bytes(path, *, retries: int = 6) -> bytes | None:
 
 
 # ── jsonl（單寫者） ──────────────────────────────────────────────────────────
+def _truncate_partial_tail(path: Path) -> None:
+    """單寫者檔的尾巴若沒有換行＝上次 append 寫到一半死掉（NAS 斷線／斷電）；砍回最後一個換行，讓下一行不會黏上去變成中段壞行。"""
+    with open(path, "r+b") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        if size == 0:
+            return
+        f.seek(size - 1)
+        if f.read(1) == b"\n":
+            return
+        f.seek(0)
+        data = f.read()
+        f.truncate(data.rfind(b"\n") + 1)
+
+
 def append_jsonl(path, obj) -> None:
-    """append 一行。契約：**單寫者**檔（runtime 對自己的 events/pending、worker 對自己的 log/<tag>）。"""
+    """append 一行。契約：**單寫者**檔（runtime 對自己的 events/pending、worker 對自己的 log/<tag>）。
+    #! 回歸 I-23（2026-09-23）：尾行半截時先砍掉再 append，否則新行黏在半截後面＝永久的中段壞行、read_jsonl 永遠 FsCorrupt。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(obj, ensure_ascii=False, sort_keys=True)
+    if path.exists():
+        _truncate_partial_tail(path)
     with open(path, "a", encoding="utf-8") as f:
         f.write(line + "\n")
         f.flush()
 
 
 def read_jsonl(path) -> list:
-    """逐行 JSON → list；空行跳過；缺檔回 []；壞行拋 FsCorrupt。"""
+    """逐行 JSON → list；空行跳過；缺檔回 []；中段壞行拋 FsCorrupt。
+    **最後一行且沒有換行**的半截（append 寫到一半死掉）跳過不拋（I-23）——append_jsonl 下次會把它砍掉。"""
     path = Path(path)
     if not path.exists():
         return []
     out = []
-    with open(path, "r", encoding="utf-8") as f:
-        for lineno, line in enumerate(f, 1):
-            line = line.strip()
-            if line:
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError as e:
-                    raise FsCorrupt(f"{path}:{lineno}: {e}") from e
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        for lineno, raw in enumerate(f, 1):
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                if not raw.endswith("\n"):
+                    break                                   # 尾行半截：單寫者的殘骸，不是損壞
+                raise FsCorrupt(f"{path}:{lineno}: {e}") from e
     return out
 
 

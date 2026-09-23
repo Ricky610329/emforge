@@ -87,8 +87,10 @@ class Ledger:
             spec = None
         if spec is not None:
             vals = [s for s in (spec.score(r.measure) for r in ms) if s is not None]
-            if vals:
-                return min(vals)
+            if not vals:
+                #! 回歸 I-28（2026-09-23）：以前退回抄 pending 裡 profile 規格的分數寫進本榜——換尺算不出分就是不能上榜
+                raise ValueError(f"{self.spec} 對這些量測算不出分數（全被門檻擋），不能 promote 上這個榜")
+            return min(vals)
         return entry["conservative"] if entry else min(r.score for r in ms)
 
     def best(self) -> dict | None:
@@ -108,14 +110,15 @@ class Ledger:
         if entry is None and not force:
             raise NotPending(f"{rec_id} 不在 pending.jsonl——沒過公證；確定要就 force（會記錄）")
         conservative = self._conservative(ms, entry)
-        doc = self.read() if self.exists() else self._new()
-        prev = doc["best"]
-        best = {"id": rec_id, "score": conservative, "at": now_iso(), "by": by, "note": note, "force": entry is None}
-        doc["best"] = best
-        doc["history"].append({"event": "promote", "id": rec_id, "score": conservative,
-                               "prev_id": prev["id"] if prev else None, "prev_score": prev["score"] if prev else None,
-                               "at": best["at"], "by": by, "note": note, "force": entry is None})
-        self._write(doc)
+        with self.depot.lock(paths.ledger_lock(self.profile, self.spec), owner=f"promote:{by}"):
+            doc = self.read() if self.exists() else self._new()
+            prev = doc["best"]
+            best = {"id": rec_id, "score": conservative, "at": now_iso(), "by": by, "note": note, "force": entry is None}
+            doc["best"] = best
+            doc["history"].append({"event": "promote", "id": rec_id, "score": conservative,
+                                   "prev_id": prev["id"] if prev else None, "prev_score": prev["score"] if prev else None,
+                                   "at": best["at"], "by": by, "note": note, "force": entry is None})
+            self._write(doc)
         return best
 
 
@@ -139,13 +142,14 @@ def rescore(depot, profile: Profile, spec: Spec, db, *, by: str, force: bool = F
     best = None
     if conservative:
         bid = max(sorted(conservative), key=lambda i: conservative[i])
-        best = {"id": bid, "score": conservative[bid], "at": now, "by": by, "note": "rescore", "force": False}
-    doc = lg.read() if lg.exists() else lg._new()
-    prev = doc["best"]
-    doc["best"] = best
-    doc["history"].append({"event": "rescore", "n": len(conservative), "id": best["id"] if best else None,
-                           "score": best["score"] if best else None, "prev_id": prev["id"] if prev else None,
-                           "prev_score": prev["score"] if prev else None, "at": now, "by": by, "note": "rescore",
-                           "force": False})
-    lg._write(doc)
+        best = {"id": bid, "score": conservative[bid], "at": now, "by": by, "note": "rescore", "force": bool(force)}
+    with lg.depot.lock(paths.ledger_lock(profile.name, spec.name), owner=f"rescore:{by}"):
+        doc = lg.read() if lg.exists() else lg._new()
+        prev = doc["best"]
+        doc["best"] = best
+        doc["history"].append({"event": "rescore", "n": len(conservative), "id": best["id"] if best else None,
+                               "score": best["score"] if best else None, "prev_id": prev["id"] if prev else None,
+                               "prev_score": prev["score"] if prev else None, "at": now, "by": by, "note": "rescore",
+                               "force": bool(force)})
+        lg._write(doc)
     return {"spec": spec.name, "n": len(conservative), "best": best}

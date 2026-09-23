@@ -9,6 +9,13 @@ from ..platform.transport import RemotePlatform
 from ..runner.process import OwnedProcess, process_identity
 from .store import ReleaseStore
 
+def resume_pending_request(state: dict) -> dict:
+    """draining／stopping 中死掉：要求已記為 seen 但沒套用——清掉 seen 讓重啟後再套用一次（不靜默丟；I-27）。"""
+    if state.get("phase") in ("draining", "stopping") and state.get("target"):
+        state["seen_request"] = None
+    return state
+
+
 class Supervisor:
     def __init__(self, releases_root, data_root, profile, *, depot=None, host="127.0.0.1", port=8766,
                  startup_s=30, drain_s=120, stop_s=90):
@@ -20,7 +27,8 @@ class Supervisor:
         self.startup_s, self.drain_s, self.stop_s = startup_s, drain_s, stop_s
         self.owner = "service_" + uuid.uuid4().hex
         self.process, self.output, self.launch = None, None, None
-        self.state = self.local.get_json(paths.service_key("state")) or {"last_good": None, "seen_request": None}
+        self.state = resume_pending_request(self.local.get_json(paths.service_key("state"))
+                                            or {"last_good": None, "seen_request": None})
         self._acquire()
         try:
             self._recover_previous()

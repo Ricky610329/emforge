@@ -373,3 +373,42 @@ def test_lock_holder_broken_and_reclaimed_does_not_delete_the_new_lock_on_exit(d
         assert depot.break_if_stale("q/l", 60) is True
         assert depot.claim("q/l", {"owner": "B"})
     assert depot.owner("q/l")["owner"] == "B"
+
+
+def test_lock_releases_claim_when_claim_call_raises_after_taking_effect(depot, monkeypatch):
+    """回歸 I-24（2026-09-23）：防止 HTTP claim 已生效但回覆遺失（OSError）時 lock() 直接拋出、鎖殘留 180 秒擋住整個機隊。"""
+    real = depot.claim
+
+    def lost_ack(key, payload):
+        real(key, payload)
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(depot, "claim", lost_ack)
+    with pytest.raises(OSError):
+        with depot.lock("k.lock", owner="me"):
+            pass
+    monkeypatch.setattr(depot, "claim", real)
+    assert depot.owner("k.lock") is None, "拋出前要把自己可能已生效的 claim 放掉"
+    with depot.lock("k.lock", owner="other"):
+        pass
+
+
+def test_append_and_read_log_roundtrip_nonfinite_floats(depot):
+    """回歸 I-25（2026-09-23）：NaN／inf 在 File／Memory 可存可讀，HTTP 卻讓伺服器斷線——三後端要一致。"""
+    import math
+    depot.append("nf.jsonl", {"v": float("nan"), "w": float("-inf"), "x": [1.0, float("inf")]})
+    got = depot.read_log("nf.jsonl")[0]
+    assert math.isnan(got["v"]) and got["w"] == float("-inf") and got["x"][1] == float("inf")
+
+
+@pytest.mark.parametrize("bad", ["C:/Windows/x", "c:x", "a/b:c", "registry.py", "strategies/evil.py", "limits.json",
+                                 "a/b.", "a /b", "a/b ", "/abs", "a\\b", "a/../b"])
+def test_check_key_rejects_drive_letters_colons_and_local_only_names(bad):
+    """回歸 I-26（2026-09-23）：防止 /depot 用 `C:/…` 逃出 Depot 根目錄讀寫任意檔，或改寫平台機會執行的 registry.py／strategies/。"""
+    with pytest.raises(ValueError):
+        Depot.check_key(bad)
+
+
+def test_check_key_accepts_strategy_workdir_under_runtime_state_and_apostrophe():
+    assert Depot.check_key("runtime_state/p/strategies/k/x.json")
+    assert Depot.check_key("db/碩二_x's/a.npz")

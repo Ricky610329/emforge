@@ -145,3 +145,29 @@ def test_release_cli_stage_validate_apply_and_status(tmp_path, capsys):
     capsys.readouterr()
     assert main(["release-status", "--releases-root", root]) == 0
     assert json.loads(capsys.readouterr().out)["request"]["version"] == version
+
+
+def test_platform_service_loop_survives_transient_tick_error(capsys):
+    """回歸 I-27（2026-09-23）：防止 Supervisor.tick 的一次 depot 瞬斷穿出主迴圈、close() 把整個平台停掉。"""
+    from emforge.cli.release import run_service_loop
+    calls = []
+
+    class Sup:
+        def tick(self):
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError("NAS 斷了")
+            if len(calls) == 3:
+                raise KeyboardInterrupt
+
+    assert run_service_loop(Sup(), 0.0, sleep=lambda s: None) == 0
+    assert len(calls) == 3 and "NAS 斷了" in capsys.readouterr().out
+
+
+def test_supervisor_resumes_pending_request_after_crash_mid_switch():
+    """回歸 I-27（2026-09-23）：draining／stopping 中崩潰重啟後，已 seen 的更新要求不再套用、目標版本靜默丟失。"""
+    from emforge.release.supervisor import resume_pending_request
+    st = {"phase": "draining", "target": "v2", "seen_request": "r1", "last_good": "v1"}
+    assert resume_pending_request(st)["seen_request"] is None
+    st = {"phase": "running", "target": "v2", "seen_request": "r1"}
+    assert resume_pending_request(st)["seen_request"] == "r1"

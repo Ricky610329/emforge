@@ -135,3 +135,26 @@ def test_pending_append_list_has_get(root):
     pend.append({"id": "a", "conservative": -1.0})
     pend.append({"id": "a", "conservative": -0.5})
     assert pend.has("a") and pend.get("a")["conservative"] == -0.5 and len(pend.list()) == 2
+
+
+def test_promote_other_spec_refuses_when_no_measurement_passes_its_gate(setup):
+    """回歸 I-28（2026-09-23）：spec 已註冊但所有量測都被門檻擋掉（score 全 None）時，promote 抄了 pending 裡 profile 規格
+    的分數寫進本榜。換尺算不出分＝不能上這個榜。"""
+    from emforge import specs
+    root, d, recs, pend = setup
+    specs.register_spec(model.Spec(name="fake_v9", labels=P.labels, measure=P.measure, axes=("m1",), offsets=(0.0,),
+                                   gates=(("m1", ">=", 100.0),)))
+    with pytest.raises(ValueError, match="算不出分數"):
+        ledger.Ledger(root, P.name, "fake_v9").promote(recs[1].id, by="ricky", db=d, pending=pend)
+    assert not ledger.Ledger(root, P.name, "fake_v9").exists()
+
+
+def test_rescore_history_records_force_flag(setup):
+    from emforge import specs
+    root, d, recs, pend = setup
+    spec = specs.get_spec("fake_v1")
+    prof = testing.FAKE_PROFILE
+    ledger.rescore(root, prof, spec, d, by="ricky")
+    ledger.rescore(root, prof, spec, d, by="ricky", force=True)
+    hist = ledger.Ledger(root, P.name, "fake_v1").history()
+    assert [h["force"] for h in hist] == [False, True]

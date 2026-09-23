@@ -232,7 +232,8 @@ class BearerGate:
                 await send({"type": "http.response.start", "status": 401,
                             "headers": [(b"www-authenticate", b"Bearer"), (b"content-type", b"text/plain; charset=utf-8")]})
                 await send({"type": "http.response.body",
-                            "body": "unauthorized：要帶 Authorization: Bearer <EMFORGE_DEVICE_TOKEN>".encode("utf-8")})
+                            "body": ("unauthorized：要帶 Authorization: Bearer <token>"
+                                     "（儀器 MCP＝EMFORGE_DEVICE_TOKEN；平台 MCP＝EMFORGE_PLATFORM_TOKEN）").encode("utf-8")})
                 return
         await self.app(scope, receive, send)
 

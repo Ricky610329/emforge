@@ -233,37 +233,58 @@ class View:
     def measurements(self, rec_id: str, profile: str | None = None) -> list:
         return self._reader.measurements(profile or self._profile, rec_id)
 
+    def _lines(self, **filters) -> list:
+        """與 `query` 同一套過濾，但只回索引行（不載入 npz）；依 tick 升冪。
+        #! 回歸 I-5（2026-09-23）：sample／lineage／runs／children 以前 `query()` 全載入再篩——每次呼叫掃一遍 NAS 全部 npz。"""
+        profile = filters.pop("profile", None) or self._profile
+        status = filters.pop("status", None)
+        statuses = (status,) if isinstance(status, str) else status
+        since_tick = filters.pop("since_tick", None)
+        lines = [ln for ln in self._reader.metas(profile)
+                 if all(ln.get(k) == v for k, v in filters.items() if v is not None)
+                 and (statuses is None or ln["status"] in statuses)
+                 and (since_tick is None or (ln["tick"] is not None and ln["tick"] >= since_tick))]
+        lines.sort(key=lambda ln: (ln["tick"] if ln["tick"] is not None else -1, ln["stem"]))
+        return lines
+
     def sample(self, n: int, *, seed: int, **filters) -> list:
-        """過濾後按內容去重取樣；重測不增加抽中機率。"""
+        """過濾後按內容去重取樣；重測不增加抽中機率。只載入抽中的那幾筆。"""
         if n < 0:
             raise ValueError("n 必須非負")
-        rows = self._unique(self.query(**filters))
+        profile = filters.get("profile") or self._profile
+        rows = self._unique_lines(self._lines(**filters))
         picks = np.random.default_rng(seed).choice(len(rows), min(n, len(rows)), replace=False)
-        return [rows[i] for i in picks]
+        return self._load_all(profile, [rows[i] for i in picks])
 
     @staticmethod
-    def _unique(records) -> list:
+    def _unique_lines(lines) -> list:
+        """每個 id 取 tick 最早的一筆（排除重測），依 id 排序——與舊 `_unique(records)` 同一順序（seed 決定性不變）。"""
         out = {}
-        for r in records:
-            if r.kind != "repeat":
-                out.setdefault(r.id, r)
+        for ln in lines:
+            if ln["kind"] != "repeat":
+                out.setdefault(ln["id"], ln)
         return [out[k] for k in sorted(out)]
 
     def children(self, rec_id: str) -> list:
-        return self._unique(self.query(parent=rec_id))
+        return self._load_all(self._profile, self._unique_lines(self._lines(parent=rec_id)))
 
     def lineage(self, rec_id: str, depth: int = 10) -> list:
-        """包含自身；原始提出關係優先，忽略重測自親代，遇環即停。"""
+        """包含自身；原始提出關係優先，忽略重測自親代，遇環即停。先在索引上走親代鏈，只載入鏈上的紀錄。"""
         if depth < 0:
             raise ValueError("depth 必須非負")
-        rows = {r.id: r for r in self._unique(self.query())}
-        out, seen = [], set()
-        while rec_id in rows and rec_id not in seen and len(out) < depth:
+        rows = {ln["id"]: ln for ln in self._unique_lines(self._lines())}
+        chain, seen = [], set()
+        while rec_id in rows and rec_id not in seen and len(chain) < depth:
             seen.add(rec_id)
-            r = rows[rec_id]
-            out.append(r)
-            rec_id = r.parent
+            chain.append(rows[rec_id])
+            rec_id = rows[rec_id].get("parent")
+        out = []
+        for ln in chain:
+            rec = self._reader.try_load(self._profile, ln["stem"])
+            if rec is None:
+                break                               # 讀不到就到此為止（與舊行為一致：鏈斷）
+            out.append(rec)
         return out
 
     def runs(self, strategy=None) -> list[str]:
-        return sorted({r.run_id for r in self.query(strategy=strategy) if r.run_id})
+        return sorted({ln["run_id"] for ln in self._lines(strategy=strategy) if ln.get("run_id")})

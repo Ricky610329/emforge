@@ -11,7 +11,7 @@ import json
 import os
 import random
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .. import fs
 from ..model import now_iso
@@ -46,8 +46,11 @@ class FileDepot(Depot):
         return f"FileDepot({str(self.root)!r})"
 
     def path(self, key: str) -> Path:
-        """key → 本機路徑（只給 File 專屬呼叫端：doctor 的磁碟檢查、測試）。"""
-        return self.root / self.check_key(key)
+        """key → 本機路徑（只給 File 專屬呼叫端：doctor 的磁碟檢查、測試）。check_key 之外再擋一次絕對／帶磁碟機的 key（I-26）。"""
+        key = self.check_key(key)
+        if PureWindowsPath(key).drive or PureWindowsPath(key).is_absolute() or PurePosixPath(key).is_absolute():
+            raise ValueError(f"壞 key：{key!r}")
+        return self.root / key
 
     # ── 文件 ─────────────────────────────────────────────────────────────────
     def put_bytes(self, key, data):

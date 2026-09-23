@@ -17,6 +17,7 @@ import random
 import time
 from abc import ABC, abstractmethod
 
+from .. import paths
 from ..fs import FsCorrupt, LockTimeout
 from ..model import now_iso
 
@@ -27,11 +28,17 @@ class Depot(ABC):
     # ── key 規則 ─────────────────────────────────────────────────────────────
     @staticmethod
     def check_key(key: str) -> str:
-        """POSIX 相對路徑：非空、不以 "/" 開頭或結尾、無反斜線、無 ".." 段。"""
-        if not isinstance(key, str) or not key or key.startswith("/") or key.endswith("/") or "\\" in key:
+        """POSIX 相對路徑：非空、不以 "/" 開頭或結尾、無反斜線、無 ".." 段、**無冒號**（Windows 磁碟機代號／ADS）、
+        段尾不是 "." 或空白（Windows 會靜默去掉＝別名）；根層不得是本機專屬名（registry.py／strategies／limits.json）。
+        #! 回歸 I-26（2026-09-23）：`C:/…` 這種 key 以前放行，`Path(root) / "C:/x"` 直接換掉 root——遠端 /depot 可讀寫平台機任意檔；
+        #  根層 registry.py／strategies/ 是平台機會**執行**的程式碼，不准經 Depot 寫。"""
+        if not isinstance(key, str) or not key or key.startswith("/") or key.endswith("/") or "\\" in key or ":" in key:
             raise ValueError(f"壞 key：{key!r}")
-        if any(seg in ("", ".", "..") for seg in key.split("/")):
+        segs = key.split("/")
+        if any(seg in ("", ".", "..") or seg[-1] in ". " for seg in segs):
             raise ValueError(f"壞 key：{key!r}")
+        if segs[0] in paths.LOCAL_ONLY_ROOT_NAMES:
+            raise ValueError(f"壞 key：{key!r}（{segs[0]} 是本機檔，不經 Depot）")
         return key
 
     @staticmethod
@@ -160,7 +167,7 @@ class Depot(ABC):
         離開時 `release(owner=…)`：被破鎖又被別人重認領時不刪對方的。"""
         body = {"owner": owner, "at": now_iso(), **(payload or {})}
         t0 = self.now()
-        while not self.claim(key, body):
+        while not self._claim_or_release(key, body, owner):
             if self.is_stale(key, stale_s):
                 self.break_if_stale(key, stale_s)
             if self.now() - t0 > timeout_s:
@@ -170,6 +177,18 @@ class Depot(ABC):
             yield self
         finally:
             self.release(key, owner=owner)
+
+    def _claim_or_release(self, key: str, body: dict, owner: str) -> bool:
+        """claim 的呼叫炸了（HTTP 回覆遺失、SMB 瞬斷）分不出「寫了沒」→ 先補一次 release(owner=自己)（冪等）再拋。
+        #! 回歸 I-24（2026-09-23）：HttpDepot claim 已生效但回覆遺失時，lock() 直接拋、鎖殘留 180 s，jobs.lock 擋住整個機隊。"""
+        try:
+            return self.claim(key, body)
+        except Exception:
+            try:
+                self.release(key, owner=owner)
+            except Exception:  # noqa: BLE001
+                pass
+            raise
 
     # ── 其他 ─────────────────────────────────────────────────────────────────
     @abstractmethod

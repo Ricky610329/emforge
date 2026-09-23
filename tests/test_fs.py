@@ -228,3 +228,17 @@ def test_read_claim_retries_on_permission_error(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_text", flaky)
     monkeypatch.setattr(fs.time, "sleep", lambda s: None)
     assert fs.read_claim(p) == {"owner": "a"} and calls["n"] == 3
+
+
+def test_read_jsonl_tolerates_truncated_trailing_line_and_append_repairs_it(root):
+    """回歸 I-23（2026-09-23）：防止 NAS 斷線／斷電讓 _index.jsonl 尾行半截後 refresh／View 永遠 FsCorrupt、runtime 起不來；
+    下一次 append 要先砍掉半截，否則新行黏上去變成永久的中段壞行。中段壞行仍要拋。"""
+    p = root / "x.jsonl"
+    p.write_bytes(b'{"a": 1}\n{"a": 2}\n{"a": 3, "b"')
+    assert fs.read_jsonl(p) == [{"a": 1}, {"a": 2}]
+    fs.append_jsonl(p, {"a": 4})
+    assert fs.read_jsonl(p) == [{"a": 1}, {"a": 2}, {"a": 4}]
+    assert p.read_bytes().count(b"\n") == 3
+    p.write_bytes(b'{"a": 1}\n{"a": 2, "b"\n{"a": 3}\n')
+    with pytest.raises(fs.FsCorrupt):
+        fs.read_jsonl(p)
