@@ -1,8 +1,37 @@
-"""只補完可證明的派工意圖；既有不一致不覆蓋。"""
+"""只補完可證明的派工意圖；既有不一致不覆蓋。
+
+#! 回歸 I-20（2026-09-23）：以前只在啟動時 `recover` 一次；執行中派工半途失敗（inflight 有、佇列沒有）會占住 max_inflight、
+#  讓 fleet_quiet 停掉排程，只有重啟才修得好。現在每 tick `recover_missing` 補完佇列狀態為 missing 的意圖。
+"""
 import numpy as np
 from .. import paths
 from ..batches import Batch
 from ..model import Job, record_id
+
+RECOVER_ERROR = "recover_error"
+
+
+def recover_missing(rt) -> list:
+    """執行中：佇列裡沒有 job 的 inflight（派工半途死掉）→ 補完意圖、發 dispatch_recovered；回補完的 store。
+    身分不一致（確定性）只報一次（旗標寫進 inflight）；瞬斷（其他例外）記 dispatch_failed、下 tick 再試。"""
+    done = []
+    for inf in rt.inflight():
+        store = inf["store"]
+        if "intent" not in inf or inf.get(RECOVER_ERROR) or rt.queue.state(store) != "missing":
+            continue
+        try:
+            _finish(rt, inf)
+        except (ValueError, KeyError, TypeError) as e:
+            inf[RECOVER_ERROR] = f"{type(e).__name__}: {e}"
+            rt.depot.put_json(paths.inflight_file(rt.profile_name, store), inf)
+            rt.event("dispatch_failed", name=inf.get("strategy", "?"), tick=rt.state["tick"], error=f"recover: {e}")
+        except Exception as e:  # noqa: BLE001
+            rt.event("dispatch_failed", name=inf.get("strategy", "?"), tick=rt.state["tick"], error=f"recover: {type(e).__name__}: {e}")
+        else:
+            rt.event("dispatch_recovered", store=store)
+            done.append(store)
+    return done
+
 
 def recover(rt):
     problems = []

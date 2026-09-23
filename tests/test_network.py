@@ -25,7 +25,7 @@ def test_remote_client_and_worker_use_network_without_shared_disk(root):
                 assert a.status(sid)["state"] == "dispatched_partial"
         assert a.status(sid)["state"] == "completed"
         assert len(a.results(sid)) == 2
-        assert len(a.db.query()) == 2
+        assert len([r for r in a.db.query() if r.kind == "sample"]) == 2   # 另有公證重測（I-21 後候選不再遺失）
         assert len(a.db.sample(1, seed=2)) == 1
         assert tuple(a.description["shape"]) == (8, 8)
         a.log("round", n=2)

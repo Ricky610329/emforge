@@ -10,6 +10,8 @@ from tests.test_client import setup, patterns
 
 @pytest.mark.parametrize("boundary", ["patterns", "manifest", "job"])
 def test_recover_partial_dispatch_without_duplicate(root, monkeypatch, boundary):
+    """回歸 I-13／I-20（2026-09-23）：防止派工半途失敗留下「inflight 有、佇列沒有」的孤兒——占住 max_inflight、
+    fleet_quiet 停掉排程，只有重啟才恢復。"""
     rt = setup(root)
     c = Client(rt.depot, "fake_f1", "anneal", run_id="run_recover")
     sid = c.submit(patterns(1))
@@ -22,9 +24,15 @@ def test_recover_partial_dispatch_without_duplicate(root, monkeypatch, boundary)
             raise OSError("dispatch crash")
         return put(key, data)
     monkeypatch.setattr(rt.depot, "put_bytes", fail)
-    with pytest.raises(OSError):
-        rt.tick()
+    rt.tick()                                            # 不穿出：dispatch_failed 事件（I-20）
+    events = rt.depot.read_log(paths.events_jsonl("fake_f1"))
+    assert [e["name"] for e in events if e["event"] == "dispatch_failed"] == ["anneal"]
     monkeypatch.setattr(rt.depot, "put_bytes", put)
+    orphan = rt.inflight()[0]["store"]
+    assert rt.queue.state(orphan) == "missing"
+    rt.tick()                                            # 同一個 runtime 下一 tick 就補完意圖，不必重啟
+    assert rt.queue.state(orphan) == "queued" and len(rt.queue.list()) == 1
+    assert [e["store"] for e in rt.depot.read_log(paths.events_jsonl("fake_f1")) if e["event"] == "dispatch_recovered"] == [orphan]
     other = Runtime(root, "fake_f1", propose_fn=strategy.propose_in_process)
     assert reconcile.recover(other) == []
     assert reconcile.reconcile(other) == []

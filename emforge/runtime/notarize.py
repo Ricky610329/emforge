@@ -14,16 +14,25 @@ from .dispatch import dispatch
 
 
 def notarize_step(rt, new_records: list, dispatch_new=True) -> None:
+    """候選清單＝state.notarize_deferred（collect 逐筆落地的，I-21）∪ 本 tick 新收；派出去或判定不必公證的才移除，
+    派不出去的留到下一 tick 再試（以前直接丟掉）。維護模式只累積不派。"""
     cfg = rt.config.runtime
     nz = rt.state.setdefault("notarize", {})
     _complete_ongoing(rt, nz, cfg)
     deferred = rt.state.setdefault("notarize_deferred", [])
+    fresh = {(r.id, r.run["store"]): r for r in new_records if r.kind == KIND_SAMPLE}
+    for key in fresh:
+        if list(key) not in deferred:
+            deferred.append(list(key))
     if not dispatch_new:
-        deferred.extend([r.id, r.run["store"]] for r in new_records if r.kind == KIND_SAMPLE)
         return
-    saved = [rt.db.try_load(rt.profile_name, paths.record_stem(rid, store)) for rid, store in deferred]
-    _open_candidates(rt, nz, cfg, [r for r in saved if r is not None] + new_records)
-    rt.state["notarize_deferred"] = []
+    cands = []
+    for rid, store in deferred:
+        rec = fresh.get((rid, store)) or rt.db.try_load(rt.profile_name, paths.record_stem(rid, store))
+        if rec is not None:
+            cands.append(rec)
+    failed = _open_candidates(rt, nz, cfg, cands)
+    rt.state["notarize_deferred"] = [[r.id, r.run["store"]] for r in failed]
 
 
 def _complete_ongoing(rt, nz: dict, cfg) -> None:
@@ -50,10 +59,12 @@ def _complete_ongoing(rt, nz: dict, cfg) -> None:
             rt.event("notarize_reject", id=rid, scores=scores, spread=spread, noise_floor=cfg.noise_floor)
 
 
-def _open_candidates(rt, nz: dict, cfg, new_records: list) -> None:
+def _open_candidates(rt, nz: dict, cfg, new_records: list) -> list:
+    """回派不出去的候選（留給下一 tick）。"""
     threshold = _threshold(rt, nz)
     pending_ids = {e["id"] for e in rt.depot.read_log(paths.pending_jsonl(rt.profile_name))}
     cands = [r for r in new_records if r.status == STATUS_DONE and r.score is not None and r.kind == KIND_SAMPLE]
+    failed = []
     for rec in sorted(cands, key=lambda r: -r.score):
         if rec.id in nz or rec.id in pending_ids:
             continue
@@ -65,13 +76,15 @@ def _open_candidates(rt, nz: dict, cfg, new_records: list) -> None:
                 store = paths.notarize_store_name(rt.profile_name, rt.state["tick"], rec.id, n)
                 stores.append(dispatch(rt, "notarize", [Proposal(pattern=rec.bits, parent=rec.id, tag=rec.tag, run_id=rec.run_id, arm=rec.arm)],
                                        tick=rt.state["tick"], seed=0, prio=cfg.notarize_prio, kind=KIND_REPEAT, store=store))
-        except Exception as e:  # noqa: BLE001 — 派不出去就不登記候選（review-3）；派出去的那半批照常收、只是不參與判定
+        except Exception as e:  # noqa: BLE001 — 派不出去就不登記進行中（review-3）；派出去的那半批照常收、只是不參與判定
             rt.event("dispatch_failed", name="notarize", tick=rt.state["tick"], error=f"{type(e).__name__}: {e}")
+            failed.append(rec)                  # 候選留著下一 tick 再試（I-21）
             continue
         nz[rec.id] = {"stores": stores, "tick": rt.state["tick"], "score": rec.score}
         rt.event("record_candidate", id=rec.id, score=rec.score, prev_best=threshold)
         rt.event("notarize_dispatched", id=rec.id, stores=stores)
         threshold = rec.score
+    return failed
 
 
 def smoke_dispatch(rt, rec_id: str, *, n: int = 1, machine: str | None = None, by: str = "cli") -> list:

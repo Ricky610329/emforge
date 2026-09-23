@@ -178,3 +178,27 @@ def _user_strategy(root, name, src):
     d = paths.user_strategies_dir(root)
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{name}.py").write_text(textwrap.dedent(src), encoding="utf-8")
+
+
+def test_inbox_take_failure_does_not_skip_other_strategies(root, monkeypatch):
+    """回歸 I-20（2026-09-23）：防止 inbox 派工例外穿出 tick——同 tick 其他策略全被跳過、送件永遠停在 received。"""
+    from emforge.client import Client
+    from tests.test_client import patterns, setup
+    rt = setup(root)
+    a = Client(rt.depot, "fake_f1", "anneal", run_id="run_a")
+    b = Client(rt.depot, "fake_f1", "search", run_id="run_b")
+    a.submit(patterns(1))
+    sb = b.submit(patterns(2)[1:])
+    real = sch.inbox.take
+
+    def flaky(rt_, config, budget=1, plan=None):
+        if config.name == "anneal":
+            raise OSError("NAS 斷了")
+        return real(rt_, config, budget, plan)
+
+    monkeypatch.setattr(sch.inbox, "take", flaky)
+    rt.state["tick"] = 1
+    sch.schedule(rt)
+    assert [e["name"] for e in _events(rt, "dispatch_failed")] == ["anneal"]
+    assert [i["strategy"] for i in rt.inflight()] == ["search"], "anneal 炸了不影響 search 派工"
+    assert b.status(sb)["items"][0].get("store")

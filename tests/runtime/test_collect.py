@@ -225,9 +225,9 @@ def test_collect_persists_collected_per_record_and_recovers_record_added_before_
         return real_add(rec)
 
     monkeypatch.setattr(rt.db, "add", crash_on_second)
-    with pytest.raises(RuntimeError):
-        col.collect(rt)
+    assert col.collect(rt) == [] and _events(rt, "collect_error")[0]["store"] == store   # I-19：不穿出，記事件
     assert fs.read_json(rt.root / paths.inflight_file("fake_f1", store))["collected"] == [first], "第一筆已落地"
+    assert [first, store] in fs.read_json(rt.root / paths.state_json("fake_f1"))["notarize_deferred"], "第一筆候選已落地（I-21）"
     monkeypatch.setattr(rt.db, "add", real_add)
     # 模擬「add 成功但 collected 沒落地」：第二筆先直接進 db，再讓 collect 讀到它
     rec2 = col._to_record(rt, fs.read_json(rt.root / paths.inflight_file("fake_f1", store)), second,
@@ -281,3 +281,58 @@ def test_abandon_refuses_when_fail_marker_coexists_with_fresh_claim_of_takeover_
     with pytest.raises(ValueError, match="正在跑"):
         col.abandon(rt, store, by="ricky")
     assert (rt.root / paths.inflight_file("fake_f1", store)).exists() and q.claim_owner(store) == "216"
+
+
+def test_single_pattern_job_error_does_not_pause_profile(rt):
+    """回歸 I-18（2026-09-23）：防止 n=1 的 inbox／背景 job 只錯一筆就把整個 profile 暫停——錯誤率看最近多筆，不逐批判。"""
+    def _one_failing(tick):
+        store, b, ids = _dispatched(rt, n=1, tick=tick)
+        bad = set(ids)
+        testing.run_all_jobs(rt.root, sim_factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p, fail_ids=bad))
+        col.collect(rt)
+        return store
+
+    _one_failing(1)
+    assert rt.state["paused_profile"] is None and rt.state["error_window"] == [1]
+    _one_failing(2)
+    assert rt.state["paused_profile"] is None, "樣本不足不判"
+    last = _one_failing(3)
+    assert rt.state["paused_profile"]["store"] == last and rt.state["paused_profile"]["error_rate"] == 1.0, "最近 3 筆全錯才暫停"
+
+
+def test_error_window_forgets_old_errors_after_enough_successes(rt):
+    """回歸 I-18（2026-09-23）：視窗滑動——早先的 error 被之後的成功擠出去，不會累積成永久暫停。"""
+    store, b, ids = _dispatched(rt, n=2, tick=1)
+    bad = {sorted(ids)[0]}
+    testing.run_all_jobs(rt.root, sim_factory=lambda wd, p: testing.FakeSimulator(workdir=str(wd), profile=p, fail_ids=bad))
+    col.collect(rt)
+    assert rt.state["paused_profile"] is None and sorted(rt.state["error_window"]) == [0, 1]
+    for tick in range(2, 2 + col.ERROR_WINDOW):
+        _dispatched(rt, n=1, tick=tick)
+    testing.run_all_jobs(rt.root)
+    col.collect(rt)
+    assert rt.state["paused_profile"] is None
+    assert len(rt.state["error_window"]) == col.ERROR_WINDOW and sum(rt.state["error_window"]) == 0
+
+
+def test_stray_result_and_broken_store_do_not_stop_collecting_other_stores(rt, monkeypatch):
+    """回歸 I-19（2026-09-23）：防止一個不在 manifest 的結果檔（KeyError）或一個壞掉的 store 讓整個 collect 例外、
+    runtime 連錯十次退出，期間其他批次全部收不到。"""
+    s1, b1, ids1 = _dispatched(rt, n=2, tick=1)
+    s2, b2, ids2 = _dispatched(rt, n=2, tick=2)
+    testing.run_all_jobs(rt.root)
+    b1.write_result("f" * 16, _fake_result("f" * 16))                 # 雜檔：不在 manifest
+    real_patterns = batches.Batch.patterns
+
+    def broken(self):
+        if self.store == s2:
+            raise OSError("patterns.npz 讀不到")
+        return real_patterns(self)
+
+    monkeypatch.setattr(batches.Batch, "patterns", broken)
+    new = col.collect(rt)
+    assert sorted(r.id for r in new) == sorted(ids1)
+    assert _events(rt, "stray_result")[0]["id"] == "f" * 16 and _events(rt, "collect_error")[0]["store"] == s2
+    monkeypatch.setattr(batches.Batch, "patterns", real_patterns)
+    assert sorted(r.id for r in col.collect(rt)) == sorted(ids2)
+    assert len(_events(rt, "stray_result")) == 1, "雜檔只點名一次、之後不再重讀"

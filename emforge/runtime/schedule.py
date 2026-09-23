@@ -38,7 +38,10 @@ def schedule(rt) -> None:
         if prio >= rt.config.runtime.background_prio and not _background_allowed(rt):
             continue
         if plan:
-            inbox.take(rt, sc, plan=plan)
+            try:
+                inbox.take(rt, sc, plan=plan)
+            except Exception as e:  # noqa: BLE001 — 派工錯不是策略錯；同 tick 其他策略照派（I-20），意圖由 recover_missing 補完
+                rt.event("dispatch_failed", name=sc.name, tick=tick, error=f"{type(e).__name__}: {e}")
             continue
         seed = sc.seed if sc.seed is not None else strategy_seed(rt.state["seed_base"], rt.profile.name, sc.name, tick)
         limited = replace(sc, batch=1) if prio >= rt.config.runtime.background_prio else sc
@@ -52,7 +55,7 @@ def schedule(rt) -> None:
         try:
             if _dispatch_props(rt, sc, props, seed, tick):
                 rt.strategy_state(sc.name)["last_dispatch_tick"] = tick
-        except Exception as e:  # 派工錯不是策略錯，runtime 下輪可恢復已保存的意圖。
+        except Exception as e:  # 派工錯不是策略錯；已保存的意圖由下一 tick 的 recover_missing 補完（I-20）
             rt.event("dispatch_failed", name=sc.name, tick=tick, error=f"{type(e).__name__}: {e}")
 
 

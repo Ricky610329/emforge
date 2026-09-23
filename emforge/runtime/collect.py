@@ -7,6 +7,12 @@
 #  真的沒人接由人 `emforge abandon`（本檔 `abandon`）宣告放棄。
 #! 回歸 review-8：每筆入庫後**立刻**落地 collected；上次死在「add 成功、collected 沒落地」之間的那筆，重讀時 add 回 False
 #  也算新收（交給 notarize），不能靜默漏掉破榜設計。
+#! 回歸 I-21（2026-09-23）：新收的 done 樣本在標 collected **之前**先寫進 state.notarize_deferred 並落地——collected 落地了、
+#  notarize 還沒跑就死掉（或 tick 例外），下個 tick 這筆不再是「新收」，破榜候選會永遠不進公證。
+#! 回歸 I-19（2026-09-23）：一個 store 收結果炸了（雜結果檔 KeyError、patterns 讀不到）只記 collect_error、其他 store 照收；
+#  以前整個 collect 穿出、連錯十個 tick runtime 退出。
+#! 回歸 I-18（2026-09-23）：錯誤率看**最近 ERROR_WINDOW 筆樣本**（跨批、至少 MIN_ERROR_SAMPLES 筆）——inbox／背景派的是 n=1 的批，
+#  逐批判會讓一筆 error 就暫停整個 profile。
 量測與評分只在這裡發生（策略／worker 都不算分，D1）。
 """
 import numpy as np
@@ -15,12 +21,18 @@ from .. import paths, specs
 from ..batches import Batch
 from ..model import KIND_SAMPLE, STATUS_DONE, STATUS_ERROR, Record, now_iso
 
+ERROR_WINDOW = 20        #? 錯誤率的滑動視窗（最近幾筆樣本結果，跨批）
+MIN_ERROR_SAMPLES = 3    #? 視窗至少幾筆才判（worker 側另有連 5 敗熔斷；這裡是 profile 層的第二道）
+
 
 def collect(rt) -> list:
-    """走一遍所有 inflight；回本次新收到的 Record（含已在庫但沒記到 collected 的）。"""
+    """走一遍所有 inflight；回本次新收到的 Record（含已在庫但沒記到 collected 的）。一個 store 炸了不影響其他 store（I-19）。"""
     new = []
     for inf in rt.inflight():
-        new.extend(_collect_one(rt, inf))
+        try:
+            new.extend(_collect_one(rt, inf))
+        except Exception as e:  # noqa: BLE001
+            rt.event("collect_error", store=inf["store"], error=f"{type(e).__name__}: {e}")
     return new
 
 
@@ -32,8 +44,15 @@ def _collect_one(rt, inf: dict) -> list:
     collected = set(inf["collected"])
     results = batch.results(known_ids=collected)
     new, patterns = [], None
+    known_ids = set(inf["ids"])
     for rid in sorted(results):
         res = results[rid]
+        if rid not in known_ids:
+            rt.event("stray_result", store=store, id=rid)       # 不在 manifest：點名、記為已讀、不入庫（I-19）
+            collected.add(rid)
+            inf["collected"] = sorted(collected)
+            _persist_inflight(rt, inf)
+            continue
         if res.get("status") != STATUS_DONE and not terminal:
             continue                            # error 而批還在跑：等補測輪翻案或終態（review-1）
         patterns = batch.patterns() if patterns is None else patterns
@@ -44,6 +63,7 @@ def _collect_one(rt, inf: dict) -> list:
             if rt.db.add(rec):
                 rt.event("record_added", id=rid, store=store, score=rec.score, kind=rec.kind)
             new.append(rec)                     # add 回 False＝上次死在落地前，仍算新收（review-8）
+            _defer_for_notarize(rt, rec)        # 先落地候選、再落地 collected（I-21）
         _persist_inflight(rt, inf)
     if qstate == "fail" and not inf.get("fail_reported"):
         inf["fail_reported"] = True
@@ -53,6 +73,16 @@ def _collect_one(rt, inf: dict) -> list:
     if terminal:
         _finalize(rt, inf, collected)
     return new
+
+
+def _defer_for_notarize(rt, rec: Record) -> None:
+    if rec.status != STATUS_DONE or rec.kind != KIND_SAMPLE or rt.readonly:
+        return
+    deferred = rt.state.setdefault("notarize_deferred", [])
+    entry = [rec.id, rec.run["store"]]
+    if entry not in deferred:
+        deferred.append(entry)
+        rt.save_state()
 
 
 def _persist_inflight(rt, inf: dict) -> None:
@@ -113,12 +143,21 @@ def _finalize(rt, inf: dict, collected: set) -> None:
     n_done, n_error = _received_counts(rt, inf)
     rt.depot.delete(paths.inflight_file(rt.profile_name, store))
     rt.event("batch_done", store=store, n_done=n_done, n_error=n_error)
-    total = n_done + n_error
-    if inf["kind"] == KIND_SAMPLE and total:
-        rate = n_error / total
-        if rate > rt.config.runtime.max_error_rate:
-            rt.state["paused_profile"] = {"store": store, "error_rate": rate, "at": now_iso()}
-            rt.event("profile_paused", error_rate=rate, store=store)
+    if inf["kind"] == KIND_SAMPLE:
+        _update_error_window(rt, store, n_done, n_error)
+
+
+def _update_error_window(rt, store: str, n_done: int, n_error: int) -> None:
+    """最近 ERROR_WINDOW 筆樣本結果（跨批）的錯誤率 > max_error_rate 且至少 MIN_ERROR_SAMPLES 筆 → 暫停 profile（I-18）。"""
+    window = rt.state.setdefault("error_window", [])
+    window.extend([0] * n_done + [1] * n_error)
+    del window[:-ERROR_WINDOW]
+    if len(window) < MIN_ERROR_SAMPLES or rt.state.get("paused_profile"):
+        return
+    rate = sum(window) / len(window)
+    if rate > rt.config.runtime.max_error_rate:
+        rt.state["paused_profile"] = {"store": store, "error_rate": rate, "at": now_iso()}
+        rt.event("profile_paused", error_rate=rate, store=store)
 
 
 def abandon(rt, store: str, *, by: str) -> dict:

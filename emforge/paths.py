@@ -171,6 +171,10 @@ def store_name(profile: str, strategy: str, tick: int) -> str:
 def notarize_store_name(profile: str, tick: int, rec_id: str, n: int) -> str:
     """公證重測：`<profile>-notarize-t<tick:05d>-<id[:8]>-r<n>`。"""
     return f"{profile}-notarize-t{tick:05d}-{rec_id[:8]}-r{n}"
+def store_tick(store: str):
+    """store 名裡的 tick 號（`-t<tick:05d>` 段）；smoke 批沒有 tick → None。"""
+    m = re.search(r"-t(\d{5})(?:-|$)", store)
+    return int(m.group(1)) if m else None
 def smoke_store_name(profile: str, rec_id: str, n: int, stamp: str) -> str:
     """人下的 smoke 重測：`<profile>-smoke-<id[:8]>-<YYYYmmddHHMMSS>-r<n>`（沒有 tick，用時間戳）。"""
     return f"{profile}-smoke-{rec_id[:8]}-{stamp}-r{n}"

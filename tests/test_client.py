@@ -85,8 +85,8 @@ def test_dispatch_saved_but_status_lost_recovers_without_new_measurement(root, m
             raise OSError("模擬狀態寫入前中斷")
         return original(key, data)
     monkeypatch.setattr(rt.depot, "put_json", fail_status)
-    with pytest.raises(OSError):
-        rt.tick()
+    rt.tick()                                            # 不穿出 tick（I-20）：事件 dispatch_failed，派出去的意圖照常對帳
+    assert [e["name"] for e in rt.depot.read_log(paths.events_jsonl("fake_f1")) if e["event"] == "dispatch_failed"] == ["anneal"]
     monkeypatch.setattr(rt.depot, "put_json", original)
     testing.run_all_jobs(root)
     collect.collect(rt)

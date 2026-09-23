@@ -39,6 +39,9 @@ EVENTS = {
     "batch_requeued": ("store", "by"),
     "batch_abandoned": ("store", "by"),
     "profile_tamper": ("store", "expected", "got"),
+    "stray_result": ("store", "id"),                     # I-19：結果目錄裡不在 manifest 的檔——點名一次、不入庫、不再重讀
+    "collect_error": ("store", "error"),                 # I-19：單一 store 收結果炸了——其他 store 照收，下 tick 再試
+    "dispatch_recovered": ("store",),                    # I-20：派工半途失敗的意圖在執行中補完（不必重啟）
     "index_repaired": ("n",),
     "db_unreadable": ("profile", "n", "stems"),          # 檢查 #4：起動時跳過的壞／缺紀錄
     # ── notarize ──

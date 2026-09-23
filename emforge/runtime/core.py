@@ -19,6 +19,7 @@ from ..queue import Queue
 from . import collect as _collect
 from . import notarize as _notarize
 from . import reconcile as _reconcile
+from . import recovery as _recovery
 from . import schedule as _schedule
 
 
@@ -27,7 +28,8 @@ class RuntimeLocked(Exception):
 
 
 def default_state() -> dict:
-    return {"tick": 0, "strategies": {}, "paused_profile": None, "notarize": {}, "seed_base": 0}
+    return {"tick": 0, "strategies": {}, "paused_profile": None, "notarize": {}, "seed_base": 0,
+            "notarize_deferred": [], "error_window": []}
 
 
 def default_strategy_state() -> dict:
@@ -59,8 +61,18 @@ class Runtime:
             raise strategy.ConfigError(f"缺 {self.depot.spec}/{self.yaml_key}——runtime 沒有策略清單不能起（`emforge init` 會給範本）")
         self.config = strategy.parse_strategies_yaml(text.decode("utf-8"), profile=profile_name)
         self._config_sha = sha1_hex(text)
-        self.state = self.depot.get_json(paths.state_json(profile_name)) or default_state()
+        self.state = self.depot.get_json(paths.state_json(profile_name))
+        if self.state is None:
+            self.state = default_state()
+            self.state["tick"] = self._max_existing_tick()      # I-22：state.json 遺失不歸零，否則新 store 名撞既有批
         self._locked, self._lost, self._lock_unreadable = False, False, 0
+
+    def _max_existing_tick(self) -> int:
+        """本 profile 既有 inflight／批的最大 tick（只在 state.json 遺失時掃一次）。"""
+        names = [k[len(paths.inflight_dir(self.profile_name)):] for k in self.depot.list(paths.inflight_dir(self.profile_name))]
+        names += [paths.dir_names([k])[0] for k in self.depot.list(paths.BATCHES) if k.endswith("/")]
+        ticks = [paths.store_tick(n) for n in names if n.startswith(f"{self.profile_name}-")]
+        return max((t for t in ticks if t is not None), default=0)
 
     # ── 鎖（租約；心跳＝touch） ───────────────────────────────────────────
     def acquire_lock(self) -> None:
@@ -209,6 +221,7 @@ class Runtime:
         self.heartbeat()
         self.apply_control()
         self.reload_config()
+        _recovery.recover_missing(self)      # 派工半途死掉的意圖先補完（I-20），再收結果
         new = _collect.collect(self)
         maintenance = self.depot.get_json(paths.maintenance(self.profile_name))
         _notarize.notarize_step(self, new, dispatch_new=not maintenance)

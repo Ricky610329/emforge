@@ -130,10 +130,12 @@ def test_notarize_completes_with_partial_when_repeat_store_fails(rt):
     assert len(fs.read_jsonl(rt.root / paths.pending_jsonl("fake_f1"))) == 1
 
 
-def test_notarize_survives_dispatch_failure_and_does_not_register_candidate(rt, monkeypatch):
-    """回歸 review-3：公證重測派不出去（NAS／StoreExists）→ 事件、不登記候選（下個 tick 不會卡在等一個不存在的批）。"""
+def test_notarize_dispatch_failure_keeps_candidate_for_next_tick(rt, monkeypatch):
+    """回歸 review-3／I-21（2026-09-23）：公證重測派不出去（NAS／StoreExists）→ 事件、不登記進行中（下個 tick 不會卡在等一個
+    不存在的批），但候選留在 notarize_deferred 下個 tick 再試——以前直接丟掉，破榜設計靜默流失。"""
     new = _first_batch(rt)
     rt.state["tick"] = 1
+    real = nz.dispatch
 
     def boom(*a, **k):
         raise RuntimeError("NAS 斷了")
@@ -143,13 +145,57 @@ def test_notarize_survives_dispatch_failure_and_does_not_register_candidate(rt, 
     ev = _events(rt, "dispatch_failed")
     assert ev and ev[0]["name"] == "notarize"
     assert rt.state["notarize"] == {} and _events(rt, "notarize_dispatched") == []
+    best = max(new, key=lambda r: r.score)
+    assert [best.id, best.run["store"]] in rt.state["notarize_deferred"]
+    monkeypatch.setattr(nz, "dispatch", real)
+    rt.state["tick"] = 2
+    nz.notarize_step(rt, [])
+    assert [e["id"] for e in _events(rt, "notarize_dispatched")] == [best.id]
+    assert rt.state["notarize_deferred"] == []
 
 
-def test_kind_repeat_only_set_in_notarize_module():
-    """D7 紅線：grep 原始碼——KIND_REPEAT 只在 notarize.py 被當作 dispatch 參數。"""
-    from emforge.runtime import core, schedule
-    for mod in (core, schedule, col):
-        assert "KIND_REPEAT" not in inspect.getsource(mod), mod.__name__
+def test_tick_error_after_collect_keeps_notarize_candidates_across_restart(rt_root, rt, monkeypatch):
+    """回歸 I-21（2026-09-23）：防止 collect 已逐筆落地 collected、notarize 之前 tick 例外（或行程死掉），
+    這些 record 下個 tick 不再算「新收」、破榜候選永遠不進公證。"""
+    import pytest
+    from emforge.runtime import core
+    from tests.runtime.conftest import make_rt
+    rt.acquire_lock()
+    dp.dispatch(rt, "blind", _props(3, seed=1), tick=1, seed=1, prio=9)
+    rt.state["tick"] = 1
+    testing.run_all_jobs(rt.root)
+    real = core._notarize.notarize_step
+
+    def boom(*a, **k):
+        raise OSError("NAS 斷了")
+
+    monkeypatch.setattr(core._notarize, "notarize_step", boom)
+    with pytest.raises(OSError):
+        rt.tick()
+    assert rt.db.ids("fake_f1") and _events(rt, "notarize_dispatched") == []
+    rt.release_lock()
+    monkeypatch.setattr(core._notarize, "notarize_step", real)
+    rt2 = make_rt(rt_root)                               # 重啟：候選要從磁碟回來
+    rt2.acquire_lock()
+    try:
+        rt2.tick()
+    finally:
+        rt2.release_lock()
+    best = max(rt2.db.view("fake_f1").query(status="done"), key=lambda r: r.score)
+    assert [e["id"] for e in _events(rt2, "record_candidate")] == [best.id]
+
+
+def test_kind_repeat_only_passed_to_dispatch_in_notarize_module():
+    """D7 紅線：整個 emforge/ 只有 runtime/notarize.py 會把 kind=repeat 交給 dispatch（legacy 匯入保留舊紀錄的 kind 除外）。
+    以前只掃 core／schedule／collect 三個模組，inbox／cli／platform 都漏掉。"""
+    import re
+    from pathlib import Path
+    import emforge
+    pkg = Path(emforge.__file__).resolve().parent
+    pat = re.compile(r"\bkind\s*=\s*(?:model\.)?KIND_REPEAT\b|\bkind\s*=\s*[\"']repeat[\"']")
+    offenders = sorted(p.relative_to(pkg).as_posix() for p in pkg.rglob("*.py")
+                       if p.relative_to(pkg).parts[0] != "legacy" and pat.search(p.read_text(encoding="utf-8")))
+    assert offenders == ["runtime/notarize.py"]
     assert "KIND_REPEAT" in inspect.getsource(nz)
 
 

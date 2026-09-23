@@ -377,3 +377,21 @@ def test_run_once_with_default_subprocess_propose(rt_root):
         rt.release_lock()
     ev = [e["event"] for e in rt.depot.read_log(rt.events_key)]
     assert "batch_dispatched" in ev and "strategy_error" not in ev
+
+
+def test_lost_state_json_resumes_after_max_existing_tick(rt_root, rt):
+    """回歸 I-22（2026-09-23）：防止 state.json 遺失後 tick 歸零、新 store 名撞既有批（StoreExists 連錯十次退出）。"""
+    from emforge import testing
+    rt.acquire_lock()
+    for _ in range(3):
+        rt.tick()
+        testing.run_all_jobs(rt_root)
+    rt.release_lock()
+    stores = [p.name for p in (rt_root / "batches").iterdir()]
+    newest = max(paths.store_tick(s) for s in stores)
+    assert rt.state["tick"] == 3 and newest >= 2, stores
+    (rt_root / paths.state_json("fake_f1")).unlink()
+    rt2 = make_rt(rt_root)
+    assert rt2.state["tick"] == newest, "對齊到既有 store／inflight 的最大 tick（不是歸零）"
+    assert rt2.run(once=True) == 0
+    assert not [e for e in fs.read_jsonl(rt_root / paths.events_jsonl("fake_f1")) if e["event"] == "tick_error"]
