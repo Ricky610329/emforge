@@ -1,17 +1,17 @@
 # AGENTS.md — 給任何 coding agent（Codex／Claude／其他）的入口
 
-> **本輪最新（2026-09-23）：先讀 [全面審查修復紀錄](docs/reliability-2026-09-23.md)。六個切面審查（worker／runtime／platform／資料層／Antenna adapter／CLI 文件），確認的 bug 全部修復並有回歸（I-18～I-35），696 項測試通過；設計取捨項只記錄。修正版尚未切換遠端。Antenna 原檔保持唯讀。**
+> **本輪最新（2026-09-23）：先讀 [Claude → Codex 交接](docs/handoff-2026-09-23-claude-to-codex.md)（現況、待辦、切換注意事項），修復細節見 [全面審查修復紀錄](docs/reliability-2026-09-23.md)。六個切面審查（worker／runtime／platform／資料層／Antenna adapter／CLI 文件），確認的 bug 全部修復並有回歸（I-18～I-35），697 項測試通過；設計取捨項只記錄。修正版尚未切換遠端。Antenna 原檔保持唯讀。**
 
 > **前一輪（2026-09-12）：[審查修復與恢復契約](docs/reliability-2026-09-12.md)。六項審查修復及平台死亡鎖恢復已完成本機驗證，640 項測試通過。使用者已決定不以 HFSS 收斂狀態作本輪交付阻擋。**
 
 > **同日先前驗收：[AI harness 接口](docs/agent-harness.md) 與 [日月光交付評估](docs/delivery-readiness-2026-09-12.md)。三台 HFSS 已完成初步部署驗收，Pi 原生 extension、Codex／Claude Code stdio 接口已加入；後續修正與驗收範圍以上方最新文件為準。架構網站與本機配置在 Git 排除的 `local/`。下列 09-08 交接為歷史基準。**
 
-> **最新交接（2026-09-08）：先讀 [Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。程式基準 a5c808e，615 passed；簡化部署入口仍待實作，正式 HFSS 未切換。**
+> **歷史（2026-09-08 交接）：[Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。當時基準 a5c808e，615 passed；其中「尚未完成」六項的現況見 09-23 交接的 B 表。**
 
 1. 先讀 `CLAUDE.md`（工作規範與硬規則：TDD、單檔 ≤400 行、單函式 ≤60 行、磁碟名只經 `paths.py`、協調狀態只經 `Depot`、`mcp` 只在指定模組函式內 import）。
 2. 再讀 `docs/naming.md`、`docs/implementation.md`（§2 模組地圖、§3 key 佈局、§12 已知失效模式）。
-3. **本輪已完成的計畫：[docs/plan-2026-09-08-platform.md](docs/plan-2026-09-08-platform.md)**：六個里程碑涵蓋執行身分、收件、HTTP、指定機器算法端、評估/MCP、版本更新/恢復。驗收 595 passed、pyflakes 全綠；**不 push**。操作見 [docs/platform-quickstart.md](docs/platform-quickstart.md)。後續修改仍遵守 TDD 與完整回歸。
-4. 歷史：`docs/review-2026-09-07.md`（全面檢查與修復進度）、`docs/architecture.md`（設計為什麼）、`docs/deploy.md`（正式機切換，延後）。
+3. 歷史（09-08）已完成的計畫：[docs/plan-2026-09-08-platform.md](docs/plan-2026-09-08-platform.md)：六個里程碑涵蓋執行身分、收件、HTTP、指定機器算法端、評估/MCP、版本更新/恢復。驗收 595 passed、pyflakes 全綠；**不 push**。操作見 [docs/platform-quickstart.md](docs/platform-quickstart.md)。後續修改仍遵守 TDD 與完整回歸。
+4. 歷史：`docs/review-2026-09-07.md`（全面檢查與修復進度）、`docs/architecture.md`（設計為什麼）、`docs/deploy.md`（原始 NAS 方案；09-12 實際部署改用 HTTP Depot，切換注意事項見 09-23 交接）。
 
 測試指令（repo 根、pipefail）：
 
@@ -21,7 +21,7 @@ cd /c/Users/ricky/Documents/GitHub/emforge && export PYTHONIOENCODING=utf-8 EMFO
 
 不碰 `C:\Users\ricky\Documents\GitHub\Antenna` 與 `T:\`；測試只用 `tmp_path`／`MemoryDepot`。
 
-## 最新變更（2026-09-08）
+## 歷史變更（2026-09-08）
 
 候選優先級／同級算法與 run 輪替已實作，完整驗證 **615 passed**、pyflakes 通過。
 三種 priority、背景填空、單筆讓位、共享提升與 NAS／HTTP 相容規則見 [docs/priority-scheduling.md](docs/priority-scheduling.md)。

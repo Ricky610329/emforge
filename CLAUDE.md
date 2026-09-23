@@ -1,12 +1,12 @@
 # CLAUDE.md — emforge 工作規範
 
-> **本輪最新（2026-09-23）：[全面審查修復紀錄](docs/reliability-2026-09-23.md)。六個切面審查、確認的 bug 全部修復（I-18～I-35），696 項測試通過；設計取捨項只記錄不動（文末）。修正版尚未切換遠端。**
+> **本輪最新（2026-09-23）：接手先讀 [Claude → Codex 交接](docs/handoff-2026-09-23-claude-to-codex.md)，修復細節見 [全面審查修復紀錄](docs/reliability-2026-09-23.md)。六個切面審查、確認的 bug 全部修復（I-18～I-35），697 項測試通過；設計取捨項只記錄不動（文末）。修正版尚未切換遠端。**
 
 > **前一輪（2026-09-12）：[審查修復與恢復契約](docs/reliability-2026-09-12.md)。640 項測試通過；新增 worker 行程所有權與結果待傳區。使用者已決定不以 HFSS 收斂狀態作本輪交付阻擋。**
 
 > **同日先前驗收：[AI harness 接口](docs/agent-harness.md)、[日月光交付評估](docs/delivery-readiness-2026-09-12.md)。三台 HFSS 已完成初步部署驗收，Pi extension 與共用 stdio MCP 已接上；後續修正與驗收範圍以上方最新文件為準。`local/` 架構網站不進 Git。下列 09-08 交接為歷史基準。**
 
-> **最新交接（2026-09-08）：先讀 [Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。程式基準 a5c808e，615 passed；簡化部署入口仍待實作，正式 HFSS 未切換。**
+> **歷史（2026-09-08 交接）：[Codex → Claude 工作交接](docs/handoff-2026-09-08-codex-to-claude.md)。當時基準 a5c808e，615 passed；其中「尚未完成」六項的現況見 09-23 交接的 B 表。**
 
 > 用**繁體中文**對話與寫文件；識別字用英文。
 > 架構的「為什麼」在 `docs/architecture.md`（自 Antenna repo `docs/platform/architecture.md` 帶入）；本檔只放**怎麼做**。

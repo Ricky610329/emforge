@@ -20,7 +20,7 @@
 | 資料層 | View.lineage／sample／runs／children 只載入需要的紀錄（I-5） | `tests/test_db.py::test_lineage_sample_runs_children_load_only_needed_records` |
 | 資料層 | promote 到別的 spec 全被門檻擋時拒絕（I-28）；promote／rescore 加 `ledger/<p>/<spec>.lock` | `tests/test_ledger.py` |
 | platform | Depot key 拒絕冒號／磁碟機代號／段尾 `.` 空白／根層 registry.py、strategies、limits.json（I-26） | `tests/depot/test_contract.py`、`tests/test_network.py` |
-| platform | HTTP POST 必須 `application/json`、帶 Origin 一律 403、閒置 30 s 逾時、非 ASCII Authorization 回 401 | `tests/test_network.py` |
+| platform | HTTP POST 必須 `application/json`（否則 415）、POST 帶 Origin 回 403（GET /health 不受影響）、閒置 30 s 逾時、非 ASCII Authorization 回 401 | `tests/test_network.py` |
 | platform | platform-service 主迴圈接住 tick 例外；Supervisor 切換中崩潰重啟後重新套用要求（I-27） | `tests/test_release.py` |
 | adapter | NaN／inf 響應 → `nonfinite_response`；`energy_max > 1.05` → measure_failed（I-29） | `tests/test_batches.py`、`tests/runtime/test_collect.py`、`tests/adapters/test_antenna_pure.py` |
 | adapter | `extra.hfss_convergence`（best-effort 掃 HFSS 訊息窗，只記錄不判定）；worker_ver 拼上 `antenna=<sha>`（I-10） | `tests/adapters/test_antenna_pure.py`、`tests/worker/test_batch.py` |
@@ -49,7 +49,8 @@ work.emforge/
 ## 更新相容性
 
 - `state.json` 新增 `notarize_deferred`、`error_window`；舊 state 缺欄位用預設。事件白名單新增 `stray_result`、`collect_error`、`dispatch_recovered`。
-- 平台 HTTP 現在要求 POST 帶 `Content-Type: application/json`，且拒絕帶 `Origin` 的請求；`RemotePlatform`／`HttpDepot` 本來就符合，自寫客戶端要跟上。
+- 平台 HTTP 現在要求 POST 帶 `Content-Type: application/json`（否則 415），且 POST 帶 `Origin` 回 403；`RemotePlatform`／`HttpDepot` 本來就符合（repo 內也沒有 curl 範例），自寫客戶端要跟上。
+- 事件白名單另新增 `outbox_held`（worker 日誌）。本輪改到 bootstrap（`run_service_loop`、Supervisor）與算法節點程式，platform-service 與 algorithm-worker 都要重啟才生效。
 - Depot key 規則收緊：含 `:` 的 key、段尾 `.` 或空白、根層 `registry.py`／`strategies`／`limits.json` 一律拒絕。`paths.py` 產生的 key 全部合規（`tests/test_paths.py`）。
 - HTTP wire 對 NaN／±inf 用 `{"__emforge_float__": …}` 標記；舊客戶端讀到含非有限值的回應會看到這個字典而不是斷線。
 - `Database.upgrade_error` 是唯一允許取代既有紀錄的路徑（error → done），只給 legacy 匯入用；runtime collect 不變（先到的 done 保留）。
@@ -68,4 +69,4 @@ work.emforge/
 
 ## 驗證
 
-正常工作樹 `python -m pytest`：**696 passed**；`python -m pyflakes emforge tests scripts/launch_agent.py` 無輸出。全部使用隔離資料與假模擬器（`EMFORGE_ANTENNA_REPO` 綁本機 Antenna clone，parity 測試有跑）。
+正常工作樹 `python -m pytest`：**697 passed**；`python -m pyflakes emforge tests scripts/launch_agent.py` 無輸出。全部使用隔離資料與假模擬器（`EMFORGE_ANTENNA_REPO` 綁本機 Antenna clone，parity 測試有跑）。

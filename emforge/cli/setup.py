@@ -29,7 +29,7 @@ runtime: {{tick_s: 60, background_prio: 9, notarize_prio: 1, repeat_n: 2, noise_
           quiet_s: 3600, max_error_rate: 0.5, propose_timeout_s: 600, strategy_error_limit: 3}}
 strategies:
   # 背景盲探索（零演算法對照臂）。預設關閉：先確認 profile／limits／機隊都對，再改 enabled: true（I-34：照範本直接 run，
-  # 每 tick 會往真 HFSS 派 20 筆盲探索）。
+  # 只要同 profile 沒有 queued job 就整夜持續往真 HFSS 派盲探索——背景每次一筆）。
   - {{name: blind, prio: 9, batch: 20, enabled: false}}
 """
 

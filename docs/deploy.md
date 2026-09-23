@@ -1,3 +1,7 @@
+> **2026-09-23 註**：本文是原始的 NAS `file://` 方案。09-12 的實際部署改用 HTTP Depot（平台 8766）＋各台 detached worktree，
+> 逐步指令在 repo 外的 `C:/Users/ricky/Desktop/em-forge/三台HFSS部署操作.html`；本輪修正後的切換順序與相容性見
+> [handoff-2026-09-23-claude-to-codex.md](handoff-2026-09-23-claude-to-codex.md)。下文的驗收判準仍適用。
+
 # 部署與切換（三台正式機：216／218／37）
 
 > 原則：**任一步驗收不過就停在該步**，其餘機器繼續跑舊系統——不損失整日機時。
@@ -47,7 +51,7 @@ emforge smoke <smp073_d_040 的 record id> --root %EMFORGE_ROOT% --profile dual_
 scripts\start_worker.cmd            # 桌面終端啟動（HFSS 視窗可見）；腳本＝pull → doctor → worker
 emforge watch --root %EMFORGE_ROOT% --stores <smoke store>
 ```
-驗收：`queue/log/216.jsonl` 有 `job_claimed` 無 `gate_rejected`；結果檔 `worker_ver` 帶 sha；**同機** `response` 與舊量測 `np.array_equal`
+驗收：`queue/log/216.jsonl` 有 `job_claimed` 無 `gate_rejected`；結果檔 `worker_ver` 兩段都在（`emforge=<sha> antenna=<sha>`）；**同機** `response` 與舊量測 `np.array_equal`
 （舊 records 註記同機噪音地板 0.000）；跨機 `|Δm_k| ≤ 0.75`；`time_s` 100–250 s；C 槽剩餘不變。
 **回滾**：`emforge stop --worker --machine-tag 216` → 刪舊 `jobs_state/STOP` → 桌面重啟 `python -m script.dedust worker`。舊佇列、舊資料全未動。
 
@@ -77,7 +81,7 @@ netsh advfirewall firewall add rule name="emforge-mcp" dir=in action=allow proto
 ```
 emforge run --root %EMFORGE_ROOT% --profile dual_p01_db075     # detach（start /b 或工作排程器），不掛在 harness 下（I-12）
 ```
-`strategies.yaml`：`top_k_flip(prio 3, batch 60, params {k:10, d:3})` ＋ `blind(prio 9, batch 20)`。
+`strategies.yaml`：`top_k_flip(prio 3, batch 60, params {k:10, d:3})` ＋ `blind(prio 9, batch 20)`（init 範本預設 `enabled: false`，整夜跑要自己打開；背景策略實際每次派一筆）。
 早上看：`status` tick ≥ 8、每策略 n_records > 0、`strategy_error` 未達 3、`profile_tamper` 零、有 `record_candidate` 就有 `notarize_*` 鏈、
 `report` 印得出 P(勝 blind)（blind n ≥ k_min）、216 磁碟不變。
 
@@ -98,7 +102,7 @@ emforge run --root %EMFORGE_ROOT% --profile dual_p01_db075     # detach（start 
 3. **同機 bit 級（同一儀器的實證）**：現任王的 bits 存檔 → 經 MCP 跑一筆 → 與 db 那筆逐位元相等：
    ```
    python -c "from emforge.db import Database; r=Database(r'%EMFORGE_DEPOT%').view('dual_p01_db075').top(1)[0]; print(r.id); open('king.txt','w').write(''.join('1' if b else '0' for b in r.bits.reshape(-1)))"
-   （db 在 `EMFORGE_DEPOT`，不是本機根；`top(1)` 是分數最高的一筆，不一定是榜上的現任王——要拿王用 `emforge ledger`／`Ledger(...).best()`）
+   （db 在 `EMFORGE_DEPOT`，不是本機根；`top(1)` 是分數最高的一筆，不一定是榜上的現任王——要拿王用 `Ledger(D, profile, spec).best()`；CLI 沒有列榜的子命令）
    emforge device-simulate --url http://<216 ip>:8765/mcp --profile dual_p01_db075 --bits @king.txt --by ricky      # 印 token 與預覽（record_id 應＝上面印的 id）
    emforge device-simulate --url http://<216 ip>:8765/mcp --profile dual_p01_db075 --bits @king.txt --by ricky --confirm <token>   # 100–250 s
    ```

@@ -1,6 +1,7 @@
 # 實作文檔（依程式碼寫；code 與本文不一致時以 code 與 tests/ 為準）
 
-> 2026-09-12 審查修正版見 [恢復契約](reliability-2026-09-12.md)：本機 worker 所有權、結果補傳、requeue 互斥、最終收件錯誤計數及平台鎖恢復，640 項測試通過。以下歷史描述以該修正版為準。
+> 2026-09-23 全面審查修正見 [修復紀錄](reliability-2026-09-23.md)（697 項測試通過）：本文已把 tick 流程、錯誤率視窗、公證候選、背景規則、worker_ver 對齊到該版；未逐段重寫的歷史敘述以該文件為準。
+> 2026-09-12 審查修正版見 [恢復契約](reliability-2026-09-12.md)：本機 worker 所有權、結果補傳、requeue 互斥、最終收件錯誤計數及平台鎖恢復，640 項測試通過。
 
 > 讀者：要動手改／接手的人。設計的「為什麼」在 `architecture.md`；本文只講「現在是怎麼做的」。
 > 版本：emforge 0.1.0，274 條測試全綠（2026-09-01）；M12（2026-09-06）基礎設施解耦後 ~400 條；M13–M14 儀器層後 ~450 條。事故編號 `I-N` 見 `incidents.md`。
@@ -85,6 +86,8 @@ emforge/
 ├── db/<profile>/RETIRED                   marker CLI retire  {by, at}
 ├── db/<profile>/_imported.json            doc    匯入器  legacy 匯入簽名 {store: {results_mtime, n_pt, n_records, …}}
 ├── ledger/<profile>/<spec>.json           doc    CLI promote／rescore  {profile, spec, best:{id,score,at,by,note,force}|null, history:[…], _checksum}
+├── ledger/<profile>/<spec>.lock           lease  CLI promote／rescore  讀改寫互斥（09-23）
+├── queue/scheduling.json  platform_locks/  inbox/  inbox_status/  algo_logs/  algorithms/  nodes/   09-08 平台里程碑新增；語義見 naming.md 各節與 priority-scheduling.md
 ├── queue/jobs.json                        doc    任何加 job 者，全程持 jobs.lock  [Job…]
 ├── queue/jobs.lock                        lease  Depot.lock（owner=host:pid；stale 180 s 破）
 ├── queue/state/<store>.claim              lease  worker  {owner, at, prior_fail}；心跳＝每筆 touch；壞（無主 >60 s）／陳（老且批無進度）可接管
@@ -102,7 +105,7 @@ emforge/
 └── runtime_state/<profile>/
     ├── lock                               lease  該 profile 的 runtime  {owner=tag:pid:rand, pid, machine, at}；背景 30 s touch（鎖不是自己的 → lost → 下一圈停）；stale = max(600 s, 5×tick_s)；release 只刪自己的
     ├── strategies.yaml                    doc    人／init  見 §5；**內容 sha1** 變才重讀（不看 mtime）；無效沿用上次
-    ├── state.json                         doc    runtime  {tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{id:{stores,tick,score}}, seed_base, notarize_deferred:[[id,store]], error_window:[0|1…]}
+    ├── state.json                         doc    runtime  {tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{id:{stores,tick,score}}, seed_base, inbox_turns:{run_id:tick}, notarize_deferred:[[id,store]], error_window:[0|1…]}
     ├── status.json                        doc    runtime  每 tick 導出（人讀）
     ├── events.jsonl  pending.jsonl        log    runtime（CLI 的 promoted／retired／rescored／batch_requeued 也 append，低頻例外 §12-7）
     ├── control.json                       doc    CLI → runtime（resume）；tick 開頭消費並 delete
@@ -138,8 +141,9 @@ measure fn: fn(response, labels, targets) -> dict[str, number]；targets 由註�
 ```
 state.tick += 1 → save_state     #! tick 號一加就落地：中途死掉重啟不重播同號（review-3）
 → heartbeat（touch lock；鎖被破後 touch 是 no-op、不重建）→ apply_control（control.json：resume）→ reload_config（yaml **內容 sha1**）
-→ new = collect()                # 增量收結果、量測、評分、入庫、收尾 inflight、錯誤率
-→ notarize_step(new) → save_state   # 完成中的公證 → pending；新破榜候選 → 重測 ×repeat_n；登記後立刻落地
+→ recover_missing()              # 佇列狀態 missing 的 inflight（派工半途死掉）補完意圖，事件 dispatch_recovered（I-20）
+→ new = collect()                # 每 store 隔離（collect_error）；雜結果檔點名一次（stray_result）；新收 done 樣本先落地 notarize_deferred 再標 collected（I-21）；錯誤率視窗
+→ notarize_step(new) → save_state   # 完成中的公證 → pending；候選＝notarize_deferred ∪ new，派出去才移除、派不出去留到下一 tick；登記後立刻落地
 → fleet_quiet()? 事件 fleet_quiet：schedule()   # 有 inflight 且 quiet_s 內整個機隊沒產出 → 只等（M14：正拿著我們的批在跑的儀器，其狀態字典心跳也算產出）
 → save_state → write_status
 ```
@@ -158,7 +162,7 @@ paused_profile → return
 for sc in strategies 依 prio 升冪:
     disabled 或 paused → skip
     本策略 kind=sample 的 inflight ≥ max_inflight → skip          # max_inflight＝節奏（預設 1）
-    prio ≥ background_prio 且（有前景 inflight 或 佇列有 queued job）→ skip   # D5，佇列全機共用
+    prio ≥ background_prio 且 同 profile 佇列有 queued job → skip；背景 propose 的 batch 強制為 1   # D5；已 claimed 的前景不擋填空（a5c808e）
     seed = yaml seed 或 strategy_seed(seed_base, profile, name, tick)
     props = propose（子行程；逾時 → strategy_timeout＋strategy_error；任何例外 → strategy_error；連 strategy_error_limit 次 → paused）
     成功 → errors_consecutive=0；空 → strategy_empty；否則 dispatch
@@ -175,7 +179,8 @@ for sc in strategies 依 prio 升冪:
 done：`specs.measure(profile.measure, response, labels)`、`specs.score(profile.spec, m)` → `db.add` → 事件 record_added → **每筆後立刻**落地 inflight.collected（review-8）；
 add 回 False 但這筆沒記到 collected（上次死在 add 與落地之間）→ 仍算新收、交給 notarize。
 **error 結果在批未 done 前不入庫、不記 collected**——worker 補測輪會覆寫同一個結果檔，記了就永遠讀不到翻案（review-1）；批 done 才把殘留 error 收進 db。
-終態只有 `done`：能收的都收了 → 移除 inflight、事件 batch_done；kind=sample 且 error 率 > max_error_rate → `paused_profile`、事件 profile_paused。
+終態只有 `done`：能收的都收了 → 移除 inflight、事件 batch_done；kind=sample 的結果進 `state.error_window`（最近 20 筆、跨批），至少 3 筆且 error 率 > max_error_rate → `paused_profile`、事件 profile_paused（I-18）。
+不在 manifest 的結果檔 → `stray_result`、記為已讀、不入庫；單一 store 收結果炸了 → `collect_error`、其他 store 照收（I-19）。
 **`fail` 不是終態**（名單外的機器會接管重跑，review-2）：只發一次 batch_failed（inflight 記 `fail_reported`）、inflight 留著繼續收；
 沒人接由人 `emforge abandon`：殘留結果（含 error）入庫、inflight 移除、佇列標 done（別台不再接）、事件 batch_abandoned；有新鮮 claim 拒。
 
@@ -184,7 +189,7 @@ add 回 False 但這筆沒記到 collected（上次死在 add 與落地之間）
 （`{id, tick, scores, conservative=min, spread, stores, at, status}`）、事件 notarize_pass；否則 notarize_reject。一個重測 store 死了就以其餘的判。
 新候選：門檻＝max(榜首 score（經 `Ledger.best()` 走 checksum；被手改 → 事件 ledger_tamper、當沒有榜）, pending 最好的 conservative, 公證中的 score)；
 new_records 中 done、kind=sample、score > 門檻的（依分數降冪）→ 派 repeat_n 個 store（`<profile>-notarize-t<tick>-<id8>-r<n>`，prio=notarize_prio），
-派不出去 → dispatch_failed、不登記候選；門檻更新為該分數。**永不寫榜。**
+派不出去 → dispatch_failed、不登記進行中、候選留在 `notarize_deferred` 下個 tick 再試（I-21）；派出去才更新門檻。**永不寫榜。**
 `smoke_dispatch(rt, id, n, machine, by)`：CLI smoke 用，strategy="cli:smoke"、origin="cli:smoke"、可釘機。
 
 ### 5.7 strategies.yaml
@@ -361,9 +366,9 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 6. 背景策略的「佇列空」看**全機共用佇列**：另一個 profile 的實例有 job 排隊時，這個實例的背景策略也不派（設計如此，但可能讓人以為「卡住」）。
 7. CLI 的 promoted／retired／rescored／batch_requeued／batch_abandoned append 到 runtime 的 events.jsonl，違反單寫者契約的低頻例外（SMB 上理論上可能交錯）。
 8. `_index.jsonl` 若兩個寫者同時 add 同一 profile（設計禁止：一實例一 profile；匯入器與 runtime 不同時跑）會有重複行——`refresh` 以 dict 合併可容忍，但檔會變胖；runtime 只在啟動時 refresh，跑著的時候匯入器加的檔要到下次啟動才進去重集合。
-9. legacy 匯入的親代解析只做「legacy id 全域唯一才解」，不重建血統鏈；同 pattern 多 y 靠舊 wm 欄 2 位小數對回，理論上可能對錯。
+9. legacy 匯入的親代解析只做「legacy id 全域唯一才解」，不重建血統鏈；同 pattern 多 y 靠舊 wm 欄 2 位小數對回（09-23 起配過的不再配，I-31），wm 相同且內容不同的多筆仍可能對錯順序。
 10. `propose_in_subprocess` 每 tick 每策略多 1–2 s 子行程啟動；策略多時 tick 變慢（可接受，換 I-4 隔離）。
-11. `worker_ver` 目前只含 emforge sha；adapter（antenna repo）的 sha 由 `_bind.antenna_sha()` 提供但**尚未**拼進 worker_ver。
+11. `worker_ver`＝`emforge=<sha> antenna=<sha>`（09-23 起，模擬器 `version_tag()` 提供第二段）；只比對前半段的工具要改前綴比對。
 12. `Simulator.kill()` 對 HFSS 是殺**全部** ansysedt.exe：同機第二個 HFSS 使用者會被誤殺（doctor 拒起）。
 13. 策略層（N 個策略並行）沒有實測資料：所有「多樣性從策略池湧現」都是推論（architecture.md §12）。
 14. `fail` 非終態的代價：一批被所有機器判死後會**永遠 inflight**（策略被 max_inflight 卡住、notarize 除外），直到人 `abandon`——status.json 的 `queue_state=fail` 是唯一提示，沒有自動逾時。 `abandon` 用 `is_live`（與 requeue 同一把尺）：`.fail` 與別台的新鮮 claim 並存（接管後原主判死）時會拒——先 `stop` 那台（檢查 #2：以前看 `state()=="claimed"` 會放行、把正在量的批標 done）。
@@ -422,7 +427,7 @@ worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample
 - 儀器層／MCP 的正式機驗收（`deploy.md` §6：fleet 看到 216 → `device-simulate` 現任王同機 bit 級 → 忙碌拒絕 → 急停／解除 → 從 MCP 停續 worker）尚未執行；
   MCP 全部測試都是 in-memory（SDK Client＋ASGITransport），**真 socket＋真 HFSS＋非主執行緒 COM** 三件事都要在 216 上第一次見真章（§12-27）。
 - `import-legacy --verify` 對真實 NAS 樹（六萬筆）尚未跑：本機只跑過合成迷你樹。
-- `worker_ver` 拼進 antenna sha；`doctor --hfss` 的 COM 連線探測；`notarize_min_score`；SM 排序策略（舊 smpool）移植成 `strategies/sm_rank.py`；`deliver`。
+- `doctor --hfss` 的 COM 連線探測；`notarize_min_score`；SM 排序策略（舊 smpool）移植成 `strategies/sm_rank.py`；`deliver`。
 - 架構 §12 的三條 `❓`（策略層無實作證據、弱模型化未對照、重訓＝跟上分布）——這份實作沒有改變它們的狀態。
 
 ## 2026-09-08 執行身分與歷程

@@ -169,3 +169,23 @@ def test_flush_failure_before_claim_is_result_pending_not_batch_failure(tmp_path
                   lambda wd: testing.FakeSimulator(workdir=str(wd), profile=testing.FAKE_PROFILE), "216", "test",
                   work=WorkDir(tmp_path / "work"))
     assert q.claim_owner("s") == "216" and q.state("s") == "claimed"
+
+
+def test_outbox_held_event_passes_the_events_whitelist(tmp_path):
+    """回歸 I-35（2026-09-23）：`outbox_held` 要在 events.py 白名單——以前不在，經 events.emit 記錄時拋 UnknownEvent，
+    held 路徑等於還是每圈 worker_error（測試用 lambda 當 log 所以沒抓到）。"""
+    from emforge import events
+    from emforge.worker.outbox import ResultOutbox
+    depot = MemoryDepot()
+    ids = make_batch(depot, "bad", n=1)
+    q = Queue(depot)
+    q.add(make_job("bad"))
+    q.pick("216")
+    work = WorkDir(tmp_path / "work")
+    log_key = paths.worker_log("216")
+    outbox = ResultOutbox(work.local, depot, "216", log=lambda ev, **f: events.emit(depot, log_key, ev, **f))
+    outbox.save(Batch(depot, "bad"), ids[0], {"id": ids[0], "status": "done", "attempts": 1, "profile_hash": "0" * 12,
+                                              "response": [[1]]})
+    outbox.flush(q)                                     # 不拋
+    assert [e["event"] for e in depot.read_log(log_key)] == ["outbox_held"]
+    assert len(work.local.list(paths.result_outbox_held_dir(depot.spec))) == 1

@@ -166,6 +166,7 @@ HTTP 重啟期間的連線錯誤仍可能令 worker 工作失敗或需要重試�
 兩個連線 token 環境變數分別是 EMFORGE_PLATFORM_TOKEN 與 EMFORGE_DEVICE_TOKEN；文件使用同一秘密值示範，但讀取變數不同。MCP 操作確認 nonce 又是另一件事，正常佇列 worker 不需逐筆確認。
 
 Windows PowerShell 5 的 Set-Content -Encoding utf8 會寫 BOM；limits.json 讀取不接受該 BOM，所以文件用無 BOM WriteAllText。init 仍會產生 blind 範本，首次操作不要不看設定就啟動 runtime。
+（2026-09-23 註：這兩點已過期——limits.json 現在接受 BOM（I-33）、init 範本的 blind 預設 `enabled: false`（I-34）。）
 
 ## 使用者 HTML 文件
 

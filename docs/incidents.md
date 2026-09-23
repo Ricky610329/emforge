@@ -255,7 +255,7 @@ PowerShell 5 的 `Set-Content -Encoding utf8` 一定寫 BOM；`connection.json` 
 
 ### I-34　CLI 陷阱四則
 
-`init` 範本預設開 blind prio 9 batch 20（照錯誤訊息 init 再 run 就往真 HFSS 派 20 筆盲探索）→ 範本 `enabled: false` 加說明；
+`init` 範本預設開 blind prio 9 batch 20（照錯誤訊息 init 再 run，只要同 profile 沒有 queued job 就整夜持續往真 HFSS 派盲探索——背景每次一筆）→ 範本 `enabled: false` 加說明；
 `stop --profile P --machine-tag T` 靜默忽略 `--machine-tag` 停掉整個 runtime → 拒絕；
 `algorithm-register` 目錄裡一個二進位檔就整包 UnicodeDecodeError → 指名檔案；
 `algorithm-worker` token 錯時 PermissionError（OSError 子類）被當暫時錯誤無限重試 → 退出 2。

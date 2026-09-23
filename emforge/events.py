@@ -65,6 +65,7 @@ EVENTS = {
     "gate_rejected": ("store", "reason"),
     "sim_restart": ("store", "reason"),
     "worker_error": ("error", "consecutive"),          # 檢查 #7：主迴圈一圈裡的例外（pick／log／release）
+    "outbox_held": ("store", "id", "reason"),          # I-35：待傳結果回填不了（不相容／批次不存在／已 abandon）→ 搬到 results_held/
     "worker_stop": ("reason",),
     # ── 儀器（devices/<tag>/log.jsonl；單寫者＝該台 Instrument） ──
     "device_start": ("tag", "worker_ver", "pid"),

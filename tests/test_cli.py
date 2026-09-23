@@ -551,7 +551,7 @@ def test_device_estop_tag_and_local_are_mutually_exclusive_and_clear_nothing_exi
 
 
 def test_init_template_ships_blind_disabled(root):
-    """回歸 I-34（2026-09-23）：init 的範本預設就開 blind prio 9 batch 20——工程師照錯誤訊息 init 再 run，每 tick 往真 HFSS 派 20 筆盲探索。"""
+    """回歸 I-34（2026-09-23）：init 的範本預設就開 blind prio 9——工程師照錯誤訊息 init 再 run，就整夜持續往真 HFSS 派盲探索（背景每次一筆）。"""
     from emforge import strategy
     assert _main("init", "--root", root, "--profile", "fake_f1") == 0
     cfg = strategy.parse_strategies_yaml((root / paths.strategies_yaml("fake_f1")).read_text(encoding="utf-8"), profile="fake_f1")
