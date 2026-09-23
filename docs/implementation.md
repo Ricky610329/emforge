@@ -77,7 +77,7 @@ emforge/
 每個 key 的**語義**（doc＝整份原子替換／log＝單寫者 append／lease＝互斥認領＋心跳＋過期破除／marker＝存在即真／local＝本機路徑、不經 Depot）與**寫者**標在右欄。
 
 ```
-<root>/                                    EMFORGE_ROOT（NAS）；測試永不碰，用 tmp_path
+<root>/                                    Depot 根（EMFORGE_DEPOT：NAS／共享資料夾或 HTTP；單機時＝EMFORGE_ROOT）；測試永不碰，用 tmp_path
 ├── registry.py                            local  使用者註冊表；runtime 與 worker 啟動都 runpy 它（雙邊同源）
 ├── strategies/<name>.py                   local  使用者策略（優先於內建）
 ├── db/<profile>/<id>-<store>.npz          doc    runtime／匯入器  Record：bits(packbits u8) shape response(f32 或空) has_response meta(json 字串)；永不覆寫
@@ -102,7 +102,7 @@ emforge/
 └── runtime_state/<profile>/
     ├── lock                               lease  該 profile 的 runtime  {owner=tag:pid:rand, pid, machine, at}；背景 30 s touch（鎖不是自己的 → lost → 下一圈停）；stale = max(600 s, 5×tick_s)；release 只刪自己的
     ├── strategies.yaml                    doc    人／init  見 §5；**內容 sha1** 變才重讀（不看 mtime）；無效沿用上次
-    ├── state.json                         doc    runtime  {tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{id:{stores,tick,score}}, seed_base}
+    ├── state.json                         doc    runtime  {tick, strategies:{name:{errors_consecutive, paused, n_dispatched, last_dispatch_tick}}, paused_profile, notarize:{id:{stores,tick,score}}, seed_base, notarize_deferred:[[id,store]], error_window:[0|1…]}
     ├── status.json                        doc    runtime  每 tick 導出（人讀）
     ├── events.jsonl  pending.jsonl        log    runtime（CLI 的 promoted／retired／rescored／batch_requeued 也 append，低頻例外 §12-7）
     ├── control.json                       doc    CLI → runtime（resume）；tick 開頭消費並 delete
@@ -267,7 +267,7 @@ def propose(ctx):
 
 runtime：`runtime_start runtime_stop lock_lost tick_error reconcile_mismatch config_reloaded config_invalid fleet_quiet profile_paused profile_resumed index_repaired db_unreadable`
 策略：`strategy_loaded strategy_rejected strategy_error strategy_timeout strategy_paused strategy_resumed strategy_empty proposals_validated(n_in,n_dup,n_out)`
-派收：`batch_dispatched dispatch_failed record_added batch_done batch_failed batch_abandoned batch_requeued profile_tamper`
+派收：`batch_dispatched dispatch_failed dispatch_recovered record_added batch_done batch_failed batch_abandoned batch_requeued profile_tamper stray_result collect_error`
 公證：`record_candidate notarize_dispatched notarize_pass notarize_reject`
 榜：`promoted retired rescored ledger_tamper`
 worker（queue/log/<tag>.jsonl）：`worker_start job_claimed sample_done sample_error job_done job_failed job_yield(reason: claim_taken_over|foreground_job_appeared|estop_engaged|device_busy) gate_rejected sim_restart worker_error worker_stop`

@@ -97,7 +97,8 @@ emforge run --root %EMFORGE_ROOT% --profile dual_p01_db075     # detach（start 
 2. **說明檔**：`emforge device-describe 216 --root %EMFORGE_ROOT%` → profile 表含 `dual_p01_db075`、限制來源 `…\limits.json`、體檢「阻擋：無」。
 3. **同機 bit 級（同一儀器的實證）**：現任王的 bits 存檔 → 經 MCP 跑一筆 → 與 db 那筆逐位元相等：
    ```
-   python -c "from emforge.db import Database; r=Database(r'%EMFORGE_ROOT%').view('dual_p01_db075').top(1)[0]; print(r.id); open('king.txt','w').write(''.join('1' if b else '0' for b in r.bits.reshape(-1)))"
+   python -c "from emforge.db import Database; r=Database(r'%EMFORGE_DEPOT%').view('dual_p01_db075').top(1)[0]; print(r.id); open('king.txt','w').write(''.join('1' if b else '0' for b in r.bits.reshape(-1)))"
+   （db 在 `EMFORGE_DEPOT`，不是本機根；`top(1)` 是分數最高的一筆，不一定是榜上的現任王——要拿王用 `emforge ledger`／`Ledger(...).best()`）
    emforge device-simulate --url http://<216 ip>:8765/mcp --profile dual_p01_db075 --bits @king.txt --by ricky      # 印 token 與預覽（record_id 應＝上面印的 id）
    emforge device-simulate --url http://<216 ip>:8765/mcp --profile dual_p01_db075 --bits @king.txt --by ricky --confirm <token>   # 100–250 s
    ```

@@ -156,3 +156,125 @@
 **修法**：每次 smoke 呼叫產生獨立 UUID，和時間一起交給 `paths.smoke_store_name`。
 每次呼叫內的重測仍共用同一請求識別、以序號區分；保留機器釘選與原量測。
 回歸測試固定相同時間，依序對 216／218／216 各派兩筆，確認六個批名唯一且各自釘選正確。
+
+## 七、2026-09-23 全面審查（六個切面、Antenna 對照）
+
+> 六個獨立審查代理（worker／runtime／platform／資料層／Antenna adapter／CLI 與文件）各自重現後回報；
+> 每項都有回歸測試，docstring 引用下列編號。修正紀錄與恢復契約見 [reliability-2026-09-23.md](reliability-2026-09-23.md)。
+
+### I-18　單筆 job 錯一筆就暫停整個 profile
+
+inbox 與背景派的是 n=1 的批；逐批算錯誤率＝1.0 > 0.5 → `paused_profile`，其餘送件永遠停在 received。
+**修法**：錯誤率看最近 20 筆樣本（跨批、至少 3 筆），視窗存 `state.error_window`。
+
+### I-19　一個雜結果檔讓整個 runtime 退出
+
+結果目錄裡一個不在 manifest 的檔 → `patterns[rid]` KeyError → 每個 tick 都炸，連錯十次 runtime 退出，期間其他批次全收不到。
+**修法**：collect 每個 store 各自隔離（事件 `collect_error`）；雜檔點名一次（`stray_result`）、記為已讀、不入庫。
+
+### I-20　派工半途失敗的孤兒 inflight 只有重啟才修
+
+inflight 已寫、`queue.add` 瞬斷 → 佇列狀態 missing：collect 收不到、占住 `max_inflight`、只剩它時 `fleet_quiet` 停掉整個排程；
+`recover` 只在啟動時跑一次。`inbox.take` 的例外還會穿出 tick，同 tick 其他策略全被跳過。
+**修法**：每 tick `recovery.recover_missing` 補完意圖（事件 `dispatch_recovered`）；inbox 派工例外只記 `dispatch_failed`。
+**留給新系統**：I-13 的「派工與偵測同一動作」要在**執行中**也成立，不是只有啟動對帳。
+
+### I-21　collect 之後、notarize 之前例外，破榜候選永遠不進公證
+
+collected 已逐筆落地，notarize 還沒跑就 tick 例外（或行程死掉）→ 下個 tick 這些 record 不再是「新收」。
+公證重測派不出去時也直接丟掉候選。
+**修法**：新收的 done 樣本在標 collected 之前先寫進 `state.notarize_deferred` 並落地；派不出去的候選留到下一 tick。
+
+### I-22　state.json 遺失，tick 歸零撞既有批
+
+重啟後 tick 從 0 開始 → 新 store 名撞既有批（StoreExists）連錯十次退出。
+**修法**：state.json 缺席時對齊到既有 inflight／批的最大 tick。
+
+### I-23　jsonl 尾行半截後永遠 FsCorrupt
+
+NAS 斷線／斷電讓 `_index.jsonl` 只寫半行 → refresh／View 永遠 FsCorrupt、runtime 起不來；下一次 append 黏在半截後面＝永久的中段壞行。
+**修法**：`read_jsonl` 跳過**沒有換行的最後一行**；`append_jsonl` 先砍掉半截再寫。中段壞行仍拋。
+
+### I-24　HTTP claim 回覆遺失，鎖殘留 180 秒
+
+伺服器已建好 claim、回覆遺失 → `lock()` 直接拋、不 release → jobs.lock 擋住整個機隊到過期。
+**修法**：claim 的呼叫炸了先補一次 `release(owner=自己)`（冪等）再拋。
+
+### I-25　NaN／inf 讓 HTTP 平台斷線
+
+File／Memory 後端存得下 NaN，HTTP 的 `wire.dumps(allow_nan=False)` 在 `_reply` 的 try 外炸 → RemoteDisconnected；
+response 含 −inf（dB 取 log 0）時 query／sample／top 的 RPC 整批失敗。
+**修法**：wire 以 `{"__emforge_float__": "nan"|"inf"|"-inf"}` 編碼；`_reply` 序列化失敗回 `ok:false`。
+
+### I-26　/depot 用磁碟機代號逃出 Depot 根；瀏覽器可跨站寫
+
+`check_key` 只擋 `/` 開頭、反斜線與 `..`，`C:/…` 放行 → `Path(root) / "C:/x"` 直接換掉 root：遠端可讀寫刪列平台機任意檔；
+根層 `registry.py`／`strategies/` 是平台機會執行的程式碼。loopback 無 token 的部署，網頁用 text/plain simple request 就能寫 /depot。
+**修法**：key 拒絕冒號、段尾 `.`／空白、根層本機專屬名；FileDepot.path 再擋絕對路徑；POST 必須 application/json、帶 Origin 一律 403。
+**仍待處理**（設計層，交付客戶前）：/depot 等於整棵共享儲存的控制權（可強制 release 任何鎖、刪 `queue/ESTOP`）；
+算法子行程與 agent 都拿得到完整平台 token。要縮小只能在伺服器端限制 key 前綴＋把程式根與 Depot 根分開。
+
+### I-27　平台服務一次瞬斷就停；切換中崩潰丟更新要求
+
+`platform-service` 主迴圈只接 KeyboardInterrupt，`Supervisor.tick` 的一次共享 Depot 例外穿出 with 區塊 → `close()` 停掉平台子行程。
+draining／stopping 中崩潰：要求已記 `seen_request`、重啟後 phase 回 idle、target 不再套用。
+**修法**：`run_service_loop` 接住 tick 例外續跑；重啟時 draining／stopping 的 `seen_request` 清掉重新套用。
+
+### I-28　promote 到別的 spec 時抄了別人的分數
+
+spec 已註冊但全部量測被門檻擋（score 全 None）→ 退回抄 pending 裡 profile 規格的分數寫進另一個 spec 的榜。
+**修法**：算不出分數就拒絕 promote。promote／rescore 加榜鎖；rescore 的 history 記正確的 force。
+
+### I-29　NaN／inf 響應與違反能量守恆的響應照樣給分
+
+S11 帶外一點 NaN、帶內 −inf、S21 全 +3 dB（Σ|S|²≈2，被動網路不可能）都標 done 並拿到有限分數。
+來源：舊 `align_curve` 用 `np.interp` 補點、CSV 空值一路傳下去。
+**修法**：`make_result` 對非有限值回 `nonfinite_response`；`specs.check_passivity` 對 `energy_max > 1.05` 拒收（collect 記 measure_failed）。
+
+### I-30　「全綠」可能是假的
+
+`EMFORGE_ANTENNA_REPO` 指到不存在的路徑，pytest 表頭照樣寫「啟用」，adapter 綁定／parity 測試其實全 skip。
+**修法**：表頭回報實際綁到的路徑；設了但不是 Antenna repo 就整套拒跑（UsageError）。`hfss` 標記正式註冊、非 `EMFORGE_HFSS_TESTS=1` 一律 skip。
+
+### I-31　legacy 匯入：重複量測選同一條 y、error 列擋住補測
+
+同 pattern 多次量測、wm 四捨五入到 2 位相同（跨機複驗幾乎都是）→ 每列都拿 `hits[0]`，第二台的實際響應消失。
+先以 `--include-errors` 匯入 error 列、舊 store 補測成功再重匯 → `(rid, store)` 相同、`add` 回 False，done 被靜默丟掉。
+**修法**：每個 pattern 的 y 配過就不再配；`Database.upgrade_error` 讓 done 取代同 (id, store) 的 error（唯一允許取代的路徑）；
+`_imported.json` 的 n_records 改累計。
+
+### I-32　gate 第 4 步對 antenna 是空操作
+
+`profiles.check_labels` 讀 `labels`，adapter 宣告的是 `LABELS` → 永遠比對空 tuple。靠建構子的 `_validate` 沒漏網，但 gate 的說法不實。
+**修法**：adapter 同時宣告 `labels`。
+
+### I-33　limits.json 遇 BOM 讀不起來
+
+PowerShell 5 的 `Set-Content -Encoding utf8` 一定寫 BOM；`connection.json` 用 `utf-8-sig`、`limits.json` 用 `utf-8` → 「Unexpected UTF-8 BOM」。
+**修法**：本機設定檔一律 `utf-8-sig`。
+
+### I-34　CLI 陷阱四則
+
+`init` 範本預設開 blind prio 9 batch 20（照錯誤訊息 init 再 run 就往真 HFSS 派 20 筆盲探索）→ 範本 `enabled: false` 加說明；
+`stop --profile P --machine-tag T` 靜默忽略 `--machine-tag` 停掉整個 runtime → 拒絕；
+`algorithm-register` 目錄裡一個二進位檔就整包 UnicodeDecodeError → 指名檔案；
+`algorithm-worker` token 錯時 PermissionError（OSError 子類）被當暫時錯誤無限重試 → 退出 2。
+
+### I-35　worker 可靠性四則（看門狗、待傳區、啟動鎖）
+
+看門狗輪詢急停時遇 depot 例外（SMB／HTTP 瞬斷）→ 執行緒死掉，之後 HFSS 卡住再也沒人 kill（I-4 的變體）。
+一筆不相容／已 abandon 的待傳結果每圈拋 ValueError → worker 連錯十圈自行退出、重啟照樣再死，還擋住其他 store 的補傳；
+本機 done 被遠端同 attempts 的 error 蓋掉後刪除（違反 I-15）；認領前補傳的瞬斷被當成這批的失敗列入 fail 名單。
+Windows 行程結束後只要還有人持有 handle 就被判活著 → 永遠拒絕啟動；藍屏留下 0 byte worker.lock → 永遠拒絕啟動（I-2 本機版）。
+**修法**：abort_if 例外一律當 False；回填不了的搬到 `work.emforge/results_held/`、記一次 `outbox_held`；done 一律勝過遠端非 done；
+補傳瞬斷包成 ResultPending；`process_identity` 先看 exit code；空鎖 60 秒寬限後回收、claim 寫入 fsync。
+
+### 本輪未做（屬設計選擇，記錄待決）
+
+- **HFSS 收斂判定**：新舊系統都沒擷取收斂狀態；現役設定（max_passes 6、min_converged 5）幾乎必然撞上限。
+  本輪只做第一階段：`sim.simulate` best-effort 掃訊息窗，把 `{converged, source, messages}` 放進 `extra.hfss_convergence`（需正式機驗證 COM 呼叫）。
+  是否拒收未收斂、要不要開新 profile（kwargs 在 profile_hash 裡）是第二階段的決定。
+- **worker 側 kill 範圍**（舊 `script/kill.py` 殺整台所有 ansysedt）、`keep_project`（送板用 .aedt）、COM 例外分類（磁碟滿 0x80070223 應視為機器問題）
+  都在 Antenna repo 或需要產品決定。
+- MCP `inbox_submit` 用沒 start 過的 run_id 可繞過預算；`algorithm_start` 沒有確認步驟——授權模型的選擇。
+- `profile_hash` 不含 measure 的 targets：使用者自寫的 measure 改了 targets、名字不變會靜默混用（antenna 的尺已凍結不受影響）。改 hash 會讓已部署的三台與既有紀錄全部 profile_tamper，需要遷移方案。

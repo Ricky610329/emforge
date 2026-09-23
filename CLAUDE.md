@@ -1,6 +1,8 @@
 # CLAUDE.md — emforge 工作規範
 
-> **本輪最新（2026-09-12）：[審查修復與恢復契約](docs/reliability-2026-09-12.md)。640 項測試通過；新增 worker 行程所有權與結果待傳區。修正版尚未切換遠端。使用者已決定不以 HFSS 收斂狀態作本輪交付阻擋。**
+> **本輪最新（2026-09-23）：[全面審查修復紀錄](docs/reliability-2026-09-23.md)。六個切面審查、確認的 bug 全部修復（I-18～I-35），696 項測試通過；設計取捨項只記錄不動（文末）。修正版尚未切換遠端。**
+
+> **前一輪（2026-09-12）：[審查修復與恢復契約](docs/reliability-2026-09-12.md)。640 項測試通過；新增 worker 行程所有權與結果待傳區。使用者已決定不以 HFSS 收斂狀態作本輪交付阻擋。**
 
 > **同日先前驗收：[AI harness 接口](docs/agent-harness.md)、[日月光交付評估](docs/delivery-readiness-2026-09-12.md)。三台 HFSS 已完成初步部署驗收，Pi extension 與共用 stdio MCP 已接上；後續修正與驗收範圍以上方最新文件為準。`local/` 架構網站不進 Git。下列 09-08 交接為歷史基準。**
 
@@ -19,7 +21,7 @@
 1. **TDD**：先寫紅測試 → 實作 → 綠。回歸測試 docstring 首行寫 `回歸 I-N（日期）：防止…`（I-N 見 `docs/incidents.md`）。
 2. **命名照 `docs/naming.md`**；每個 Depot key（＝磁碟上的檔名／目錄名）只能來自 `emforge/paths.py`，不准在別處拼字串；
    **協調狀態只經 `Depot`**（`emforge/depot/`）——核心模組不 import `pathlib`／`emforge.fs`、不 `open(`（`tests/test_smoke.py` 三張清單釘死；
-   本機路徑只有 registry.py／strategies/／策略 workdir／worker 工作目錄）。換後端＝實作 `Depot`＋過 `tests/depot/test_contract.py`。
+   DEPOT_ONLY／PARTIAL（附理由，只准程式碼根與使用者給的本機檔）／LOCAL_LAYER（後端本體、release、runner、本機工作目錄）；本機路徑的唯一來源仍是 `paths.py`）。換後端＝實作 `Depot`＋過 `tests/depot/test_contract.py`。
 3. **一里程碑一 commit**：`python -m pytest` 全綠 + `python -m pyflakes emforge tests` 無 undefined name 才 commit。
    訊息 `type: 摘要`（繁中；type ∈ feat/fix/test/docs/chore/refactor）。**不 push**，除非 Ricky 要求。
 4. **可維護性**（`tests/test_smoke.py` 釘死）：單檔 ≤ 400 行、單函式 ≤ 60 行——超過就拆，不調上限；
@@ -37,11 +39,11 @@
 
 ## 測試
 
-- 從 repo 根跑 `python -m pytest`（`pyproject` 已設 `pythonpath=["."]`，裸 `pytest` 也行）。「全綠」要設 `EMFORGE_ANTENNA_REPO`，否則 adapter 綁定／COM 建構 6 條靜默 skip（pytest 表頭會說；檢查 #44）。
+- 從 repo 根跑 `python -m pytest`（`pyproject` 已設 `pythonpath=["."]`，裸 `pytest` 也行）。「全綠」要設 `EMFORGE_ANTENNA_REPO`，否則 adapter 綁定／parity 測試 skip（pytest 表頭會印實際綁到的路徑；設了但不是 Antenna repo 整套拒跑，I-30）。
 - **測試永不碰 NAS**：用 `root` fixture（tmp_path 下、含中文與撇號）；conftest 清掉 `EMFORGE_ROOT`。
 - **沒有 golden、沒有自動寫回基準**（舊 repo 的 `CI=1` 靜默重錨教訓）。決定性只在同 seed 同行程內斷言，且雙向（同 seed 相等／異 seed 不同）。
 - 假件叫 `Fake*`，住 `emforge/testing.py`，使用者寫策略測試也能 import。
-- 需要真 HFSS 的測試標 `hfss`，只在 `EMFORGE_HFSS_TESTS=1` 跑（正式機手動）。
+- 需要真 HFSS 的測試標 `hfss`（pyproject 已註冊；conftest 在 `EMFORGE_HFSS_TESTS` ≠ 1 時一律 skip；正式機手動）。目前還沒有這類測試。
 
 ## 註解慣例
 

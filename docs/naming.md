@@ -1,5 +1,10 @@
 # 命名規範
 
+> 2026-09-23 新增：worker 本機 `work.emforge/results_held/<depot-hash>/` 保存回填不了的待傳結果（多 reason／held_at）；榜鎖 `ledger/<profile>/<spec>.lock`
+> （promote／rescore 互斥）；Depot key 規則收緊——含 `:`、段尾 `.`／空白、根層 `registry.py`／`strategies`／`limits.json`（`paths.LOCAL_ONLY_ROOT_NAMES`）一律拒絕；
+> 結果檔 `worker_ver`＝`emforge=<sha> antenna=<sha>`；`extra.hfss_convergence` 為 best-effort 收斂訊息；事件新增 `stray_result`／`collect_error`／`dispatch_recovered`／`outbox_held`。
+> `state.json` 新增 `notarize_deferred`、`error_window`。見 [2026-09-23 修復紀錄](reliability-2026-09-23.md)。
+
 > 2026-09-12 新增：控制鎖 `platform_locks/control/{run,node,config}/<name>.lock`；worker 本機 `work.emforge/` 保存 PID 鎖及按 Depot 分區的結果待傳資料。詳細佈局見 [恢復契約](reliability-2026-09-12.md)。
 
 > 程式碼裡的真相源是 `emforge/paths.py`（磁碟名、名字驗證、保留字）；本文是人讀版。
